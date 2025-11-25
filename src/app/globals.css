@@ -24,3 +24,74 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Custom Scrollbar for Sidebar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #1e293b;
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Ensure select dropdowns fit within viewport */
+select {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Style dropdown options for better display - matching screenshot style */
+select option {
+  padding: 0.625rem 0.75rem;
+  background-color: #ffffff;
+  color: #1e293b;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 500;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+/* Hover state for options */
+select option:hover {
+  background-color: #f1f5f9;
+}
+
+/* Checked/Selected option style */
+select option:checked {
+  background-color: #dbeafe;
+  color: #1e40af;
+  font-weight: 600;
+}
+
+/* Focus state */
+select:focus option:checked {
+  background: linear-gradient(0deg, rgba(59, 130, 246, 0.1) 0%, rgba(219, 234, 254, 1) 100%);
+}
+
+/* Responsive breakpoint for extra small devices */
+@media (max-width: 475px) {
+  select {
+    font-size: 0.75rem;
+  }
+  
+  select option {
+    font-size: 0.75rem;
+    padding: 0.5rem;
+  }
+}
