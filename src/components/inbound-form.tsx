@@ -178,12 +178,12 @@ Lokasi: ${form.cluster} - ${form.lorongBaris} - Pallet ${form.pallet}`
 
         <div className="space-y-2">
           <label className="text-xs sm:text-sm font-semibold text-slate-800 flex items-center gap-2">
-            🏷️ Batch (BB)
+            🏷️ Batch
           </label>
           <input
             type="text"
             className="w-full rounded-lg border-2 border-slate-300 bg-white px-3 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-medium focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
-            placeholder="Contoh: BB001"
+            placeholder="Contoh: BATCH001"
             value={form.batch}
             onChange={(e) => handleChange("batch", e.target.value)}
             required

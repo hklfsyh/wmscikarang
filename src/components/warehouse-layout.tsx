@@ -1,17 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { STOCK_LIST_MOCK, StockRow } from "@/lib/mock/stocklistmock";
+import { STOCK_LIST_MOCK } from "@/lib/mock/stocklistmock";
 
 type StatusColor =
   | "green" // RELEASE
   | "red" // HOLD
   | "gray" // qty carton only / info lain
-  | "blue-dark" // Wrong Cluster
-  | "blue-light" // Old BB
   | "empty";
 
-type WarehouseCellStatus = "RELEASE" | "HOLD" | "WRONG_CLUSTER" | "OLD_BB";
+type WarehouseCellStatus = "RELEASE" | "HOLD";
 
 export type WarehouseCell = {
   id: string;
@@ -30,8 +28,6 @@ const colorMap: Record<StatusColor, string> = {
   green: "bg-emerald-500",
   red: "bg-rose-500",
   gray: "bg-slate-400",
-  "blue-dark": "bg-blue-700",
-  "blue-light": "bg-sky-300",
   empty: "bg-white border-2 border-dashed border-slate-200",
 };
 
@@ -95,7 +91,7 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
               <p className="text-xs font-medium text-slate-500 mb-1">Produk</p>
-              <p className="font-semibold text-slate-900 text-xs sm:text-sm break-words">
+              <p className="font-semibold text-slate-900 text-xs sm:text-sm wrap-break-word">
                 {cell.product ?? "-"}
               </p>
             </div>
@@ -162,18 +158,40 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
 
 export function WarehouseLayout() {
   const [selectedCell, setSelectedCell] = useState<WarehouseCell | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "RELEASE" | "HOLD">("ALL");
 
   // Generate cells from mock data
   const warehouseCells = useMemo(() => generateWarehouseCells(), []);
 
+  // Filter cells based on search query and status filter
+  const filteredCells = useMemo(() => {
+    return warehouseCells.filter((cell) => {
+      // Filter by status
+      if (statusFilter !== "ALL" && cell.status !== statusFilter) {
+        return false;
+      }
+      
+      // Filter by search query (product name)
+      if (searchQuery.trim() !== "") {
+        const query = searchQuery.toLowerCase();
+        const productMatch = cell.product?.toLowerCase().includes(query);
+        const batchMatch = cell.batch?.toLowerCase().includes(query);
+        return productMatch || batchMatch;
+      }
+      
+      return true;
+    });
+  }, [warehouseCells, searchQuery, statusFilter]);
+
   // Group cells by cluster
   const cellsByCluster = useMemo(() => {
-    return warehouseCells.reduce((acc, cell) => {
+    return filteredCells.reduce((acc, cell) => {
       if (!acc[cell.cluster]) acc[cell.cluster] = [];
       acc[cell.cluster].push(cell);
       return acc;
     }, {} as Record<string, WarehouseCell[]>);
-  }, [warehouseCells]);
+  }, [filteredCells]);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -188,6 +206,61 @@ export function WarehouseLayout() {
           <code className="bg-slate-100 px-2 py-0.5 rounded text-xs">stocks</code> di
           database.
         </p>
+      </div>
+
+      {/* Quick Filter & Search */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+          <div className="flex-1">
+            <label className="block text-xs font-semibold text-slate-700 mb-2">
+              🔍 Search Produk / Batch
+            </label>
+            <input
+              type="text"
+              placeholder="Cari nama produk atau batch..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-lg border-2 border-slate-300 px-3 sm:px-4 py-2 sm:py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+            />
+          </div>
+          <div className="sm:w-48">
+            <label className="block text-xs font-semibold text-slate-700 mb-2">
+              📊 Filter Status
+            </label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as "ALL" | "RELEASE" | "HOLD")}
+              className="w-full rounded-lg border-2 border-slate-300 px-3 sm:px-4 py-2 sm:py-2.5 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+            >
+              <option value="ALL">Semua Status</option>
+              <option value="RELEASE">Release</option>
+              <option value="HOLD">Hold</option>
+            </select>
+          </div>
+          {(searchQuery || statusFilter !== "ALL") && (
+            <div className="flex items-end">
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setStatusFilter("ALL");
+                }}
+                className="rounded-lg border-2 border-slate-300 bg-white px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 transition-all"
+              >
+                🔄 Reset
+              </button>
+            </div>
+          )}
+        </div>
+        {filteredCells.length === 0 && (
+          <div className="mt-4 text-center py-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <p className="text-sm text-amber-900 font-medium">
+              ⚠️ Tidak ada pallet yang sesuai dengan filter
+            </p>
+            <p className="text-xs text-amber-700 mt-1">
+              Coba ubah kata kunci atau filter status
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 sm:gap-6">
@@ -256,35 +329,21 @@ export function WarehouseLayout() {
                 <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg bg-emerald-500 shadow-sm shrink-0" />
                 <div>
                   <p className="font-semibold text-slate-900 text-xs sm:text-sm">Release</p>
-                  <p className="text-[10px] sm:text-xs text-slate-500">Produk normal</p>
+                  <p className="text-[10px] sm:text-xs text-slate-500">Produk normal (siap keluar)</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg bg-rose-500 shadow-sm shrink-0" />
                 <div>
                   <p className="font-semibold text-slate-900 text-xs sm:text-sm">Hold</p>
-                  <p className="text-[10px] sm:text-xs text-slate-500">Produk ditahan</p>
+                  <p className="text-[10px] sm:text-xs text-slate-500">Produk ditahan (tidak bisa keluar)</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg bg-slate-400 shadow-sm shrink-0" />
                 <div>
                   <p className="font-semibold text-slate-900 text-xs sm:text-sm">Qty Carton</p>
-                  <p className="text-[10px] sm:text-xs text-slate-500">Jumlah carton</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg bg-blue-700 shadow-sm shrink-0" />
-                <div>
-                  <p className="font-semibold text-slate-900 text-xs sm:text-sm">Wrong Cluster</p>
-                  <p className="text-[10px] sm:text-xs text-slate-500">Salah cluster</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg bg-sky-300 shadow-sm shrink-0" />
-                <div>
-                  <p className="font-semibold text-slate-900 text-xs sm:text-sm">Old BB</p>
-                  <p className="text-[10px] sm:text-xs text-slate-500">BB lebih tua</p>
+                  <p className="text-[10px] sm:text-xs text-slate-500">Hanya ada carton (tanpa pallet)</p>
                 </div>
               </div>
             </div>
@@ -293,7 +352,7 @@ export function WarehouseLayout() {
               <p className="font-semibold text-blue-900 mb-1">💡 Tip:</p>
               <p>
                 Klik pada kotak yang berwarna untuk melihat detail produk di pallet
-                tersebut.
+                tersebut. Sistem menggunakan FIFO (First In First Out).
               </p>
             </div>
           </div>

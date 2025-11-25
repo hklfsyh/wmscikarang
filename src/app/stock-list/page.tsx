@@ -11,12 +11,14 @@ import {
 type ProductFilter = "ALL" | string;
 type ClusterFilter = "ALL" | "A" | "B" | "C" | "D" | "E";
 type StatusFilter = "ALL" | StockStatus;
+type SortDirection = "asc" | "desc" | null;
 
 export default function StockListPage() {
   const [search, setSearch] = useState("");
   const [productFilter, setProductFilter] = useState<ProductFilter>("ALL");
   const [clusterFilter, setClusterFilter] = useState<ClusterFilter>("ALL");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
   const products = useMemo(
     () => Array.from(new Set(STOCK_LIST_MOCK.map((row) => row.product))),
@@ -24,7 +26,7 @@ export default function StockListPage() {
   );
 
   const filteredData = useMemo(() => {
-    return STOCK_LIST_MOCK.filter((row) => {
+    let result = STOCK_LIST_MOCK.filter((row) => {
       const matchSearch =
         search.trim().length === 0 ||
         row.product.toLowerCase().includes(search.toLowerCase()) ||
@@ -40,7 +42,28 @@ export default function StockListPage() {
 
       return matchSearch && matchProduct && matchCluster && matchStatus;
     });
-  }, [search, productFilter, clusterFilter, statusFilter]);
+
+    // Apply sorting if active
+    if (sortDirection) {
+      result = [...result].sort((a, b) => {
+        const dateA = new Date(a.firstInAt).getTime();
+        const dateB = new Date(b.firstInAt).getTime();
+        return sortDirection === "asc" ? dateA - dateB : dateB - dateA;
+      });
+    }
+
+    return result;
+  }, [search, productFilter, clusterFilter, statusFilter, sortDirection]);
+
+  const handleSortToggle = () => {
+    if (sortDirection === null) {
+      setSortDirection("asc");
+    } else if (sortDirection === "asc") {
+      setSortDirection("desc");
+    } else {
+      setSortDirection(null);
+    }
+  };
 
   const total = STOCK_LIST_MOCK.length;
   const shown = filteredData.length;
@@ -155,6 +178,18 @@ export default function StockListPage() {
                 <tr>
                   <th className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap">Produk</th>
                   <th className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap">Batch</th>
+                  <th 
+                    className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors"
+                    onClick={handleSortToggle}
+                    title="Klik untuk sorting berdasarkan tanggal masuk (FIFO)"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>Tanggal Masuk</span>
+                      {sortDirection === "asc" && <span className="text-blue-500">↑</span>}
+                      {sortDirection === "desc" && <span className="text-blue-500">↓</span>}
+                      {sortDirection === null && <span className="text-slate-400">⇅</span>}
+                    </div>
+                  </th>
                   <th className="px-3 sm:px-4 py-2 sm:py-3 text-right whitespace-nowrap">Qty Pallet</th>
                   <th className="px-3 sm:px-4 py-2 sm:py-3 text-right whitespace-nowrap">Qty Carton</th>
                   <th className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap hidden sm:table-cell">Cluster</th>
@@ -167,7 +202,7 @@ export default function StockListPage() {
                 {filteredData.length === 0 && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={9}
                       className="px-4 py-8 sm:py-12 text-center text-sm text-slate-500"
                     >
                       <div className="flex flex-col items-center gap-2">
@@ -189,6 +224,13 @@ export default function StockListPage() {
                       </div>
                     </td>
                     <td className="px-3 sm:px-4 py-2 sm:py-3 align-middle text-slate-700 text-xs sm:text-sm whitespace-nowrap">{row.batch}</td>
+                    <td className="px-3 sm:px-4 py-2 sm:py-3 align-middle text-slate-700 text-xs sm:text-sm whitespace-nowrap">
+                      <div className="flex items-center gap-1">
+                        <span className="inline-flex items-center justify-center bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-semibold">
+                          📅 {new Date(row.firstInAt).toLocaleDateString('id-ID')}
+                        </span>
+                      </div>
+                    </td>
                     <td className="px-3 sm:px-4 py-2 sm:py-3 align-middle text-right tabular-nums font-semibold text-slate-900 text-xs sm:text-sm">
                       {row.qtyPallet}
                     </td>

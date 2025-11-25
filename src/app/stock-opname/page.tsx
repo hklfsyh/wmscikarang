@@ -19,6 +19,10 @@ export default function StockOpnamePage() {
     []
   );
 
+  // Search and filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "FILLED" | "EMPTY">("ALL");
+
   // Inisialisasi data opname dari STOCK_LIST_MOCK
   const [items, setItems] = useState<OpnameItem[]>(() =>
     STOCK_LIST_MOCK.map((row: StockRow) => ({
@@ -31,6 +35,26 @@ export default function StockOpnamePage() {
       reason: "",
     }))
   );
+
+  // Filtered items based on search and status
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      // Filter by status
+      if (statusFilter === "FILLED" && item.physicalQty === 0) return false;
+      if (statusFilter === "EMPTY" && item.physicalQty !== 0) return false;
+      
+      // Filter by search query
+      if (searchQuery.trim() !== "") {
+        const query = searchQuery.toLowerCase();
+        const productMatch = item.product.toLowerCase().includes(query);
+        const batchMatch = item.batch.toLowerCase().includes(query);
+        const locationMatch = item.location.toLowerCase().includes(query);
+        return productMatch || batchMatch || locationMatch;
+      }
+      
+      return true;
+    });
+  }, [items, searchQuery, statusFilter]);
 
   const handlePhysicalChange = (id: number, value: string) => {
     const num = Number(value.replace(/[^\d-]/g, "")) || 0;
@@ -124,6 +148,61 @@ export default function StockOpnamePage() {
             <span className="text-sm sm:text-base">Input Qty Fisik</span>
           </h2>
 
+          {/* Search and Filter Bar */}
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pb-4 border-b border-slate-200">
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-slate-700 mb-2">
+                🔍 Search Produk / Batch / Lokasi
+              </label>
+              <input
+                type="text"
+                placeholder="Cari nama produk, batch, atau lokasi..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full rounded-lg border-2 border-slate-300 px-3 sm:px-4 py-2 sm:py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+              />
+            </div>
+            <div className="sm:w-48">
+              <label className="block text-xs font-semibold text-slate-700 mb-2">
+                📊 Filter Status
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as "ALL" | "FILLED" | "EMPTY")}
+                className="w-full rounded-lg border-2 border-slate-300 px-3 sm:px-4 py-2 sm:py-2.5 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+              >
+                <option value="ALL">Semua Item</option>
+                <option value="FILLED">Sudah Diisi</option>
+                <option value="EMPTY">Belum Diisi</option>
+              </select>
+            </div>
+            {(searchQuery || statusFilter !== "ALL") && (
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setStatusFilter("ALL");
+                  }}
+                  className="rounded-lg border-2 border-slate-300 bg-white px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 transition-all"
+                >
+                  🔄 Reset
+                </button>
+              </div>
+            )}
+          </div>
+
+          {filteredItems.length === 0 && (
+            <div className="text-center py-6 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-900 font-medium">
+                ⚠️ Tidak ada item yang sesuai dengan filter
+              </p>
+              <p className="text-xs text-amber-700 mt-1">
+                Coba ubah kata kunci atau filter status
+              </p>
+            </div>
+          )}
+
           <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-sm -mx-4 sm:mx-0">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 border-b-2 border-slate-200">
@@ -140,7 +219,7 @@ export default function StockOpnamePage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {filteredItems.map((item) => (
                   <tr
                     key={item.id}
                     className="border-t border-slate-100 hover:bg-blue-50/50 transition-colors"

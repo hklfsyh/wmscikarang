@@ -13,6 +13,7 @@ export interface StockRow {
   row: string; // contoh: 'BARIS 1'
   pallet: number; // nomor pallet
   status: StockStatus;
+  firstInAt: string; // Tanggal masuk untuk FIFO
 }
 
 /**
@@ -33,6 +34,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 1,
     status: "RELEASE",
+    firstInAt: "2024-11-01",
   },
   {
     id: 2,
@@ -45,6 +47,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 2,
     status: "RELEASE",
+    firstInAt: "2024-11-03",
   },
   {
     id: 3,
@@ -57,6 +60,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 3,
     status: "RELEASE",
+    firstInAt: "2024-11-05",
   },
   {
     id: 4,
@@ -69,6 +73,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 5,
     status: "HOLD",
+    firstInAt: "2024-11-07",
   },
   {
     id: 5,
@@ -81,6 +86,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 6,
     status: "RELEASE",
+    firstInAt: "2024-11-10",
   },
   {
     id: 6,
@@ -93,6 +99,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 8,
     status: "RELEASE",
+    firstInAt: "2024-11-12",
   },
 
   // 600ML AQUA 1X24 - Cluster B
@@ -107,6 +114,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 2",
     pallet: 1,
     status: "RELEASE",
+    firstInAt: "2024-10-20",
   },
   {
     id: 8,
@@ -119,6 +127,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 2",
     pallet: 2,
     status: "RELEASE",
+    firstInAt: "2024-10-22",
   },
   {
     id: 9,
@@ -131,6 +140,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 2",
     pallet: 3,
     status: "RELEASE",
+    firstInAt: "2024-10-25",
   },
   {
     id: 10,
@@ -143,6 +153,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 2",
     pallet: 5,
     status: "RELEASE",
+    firstInAt: "2024-10-28",
   },
   {
     id: 11,
@@ -155,6 +166,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 2",
     pallet: 7,
     status: "RELEASE",
+    firstInAt: "2024-11-01",
   },
   {
     id: 12,
@@ -167,6 +179,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 2",
     pallet: 8,
     status: "HOLD",
+    firstInAt: "2024-11-05",
   },
 
   // 1500ML AQUA 1X12 - Cluster C
@@ -181,6 +194,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 1,
     status: "RELEASE",
+    firstInAt: "2024-10-15",
   },
   {
     id: 14,
@@ -193,6 +207,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 2,
     status: "HOLD",
+    firstInAt: "2024-10-18",
   },
   {
     id: 15,
@@ -205,6 +220,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 3,
     status: "RELEASE",
+    firstInAt: "2024-10-20",
   },
   {
     id: 16,
@@ -217,6 +233,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 5,
     status: "RELEASE",
+    firstInAt: "2024-10-25",
   },
 
   // 330ML AQUA REFLECTIONS 1X24 - Cluster D
@@ -231,6 +248,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 1,
     status: "RELEASE",
+    firstInAt: "2024-11-08",
   },
   {
     id: 18,
@@ -243,6 +261,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 2,
     status: "RELEASE",
+    firstInAt: "2024-11-10",
   },
   {
     id: 19,
@@ -255,6 +274,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 4,
     status: "RELEASE",
+    firstInAt: "2024-11-12",
   },
   {
     id: 20,
@@ -267,6 +287,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 6,
     status: "RELEASE",
+    firstInAt: "2024-11-15",
   },
   {
     id: 21,
@@ -279,6 +300,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 8,
     status: "RELEASE",
+    firstInAt: "2024-11-17",
   },
   {
     id: 22,
@@ -291,6 +313,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 10,
     status: "RELEASE",
+    firstInAt: "2024-11-20",
   },
 
   // 19L AQUA GALON - Cluster E
@@ -305,6 +328,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 1,
     status: "RELEASE",
+    firstInAt: "2024-10-10",
   },
   {
     id: 24,
@@ -317,6 +341,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 2,
     status: "RELEASE",
+    firstInAt: "2024-10-12",
   },
   {
     id: 25,
@@ -329,6 +354,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 3,
     status: "HOLD",
+    firstInAt: "2024-10-15",
   },
   {
     id: 26,
@@ -341,6 +367,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 5,
     status: "RELEASE",
+    firstInAt: "2024-10-18",
   },
   {
     id: 27,
@@ -353,6 +380,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 6,
     status: "RELEASE",
+    firstInAt: "2024-10-22",
   },
   {
     id: 28,
@@ -365,6 +393,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 7,
     status: "RELEASE",
+    firstInAt: "2024-10-25",
   },
   {
     id: 29,
@@ -377,6 +406,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 3",
     pallet: 9,
     status: "RELEASE",
+    firstInAt: "2024-10-28",
   },
 
   // Tambahan data untuk Cluster C
@@ -391,6 +421,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 4,
     status: "RELEASE",
+    firstInAt: "2024-10-27",
   },
   {
     id: 31,
@@ -403,6 +434,7 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 6,
     status: "RELEASE",
+    firstInAt: "2024-11-02",
   },
   {
     id: 32,
@@ -415,5 +447,6 @@ export const STOCK_LIST_MOCK: StockRow[] = [
     row: "BARIS 1",
     pallet: 7,
     status: "RELEASE",
+    firstInAt: "2024-11-06",
   },
 ];
