@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { STOCK_LIST_MOCK, StockRow } from "@/lib/mock/stocklistmock";
+import { stockListData, type StockItem } from "@/lib/mock/stocklistmock";
 
 type OpnameItem = {
-  id: number;
+  id: string;
   product: string;
   batch: string;
   location: string;
@@ -23,14 +23,14 @@ export default function StockOpnamePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "FILLED" | "EMPTY">("ALL");
 
-  // Inisialisasi data opname dari STOCK_LIST_MOCK
+  // Inisialisasi data opname dari stockListData
   const [items, setItems] = useState<OpnameItem[]>(() =>
-    STOCK_LIST_MOCK.map((row: StockRow) => ({
-      id: row.id,
-      product: row.product,
-      batch: row.batch,
-      location: `${row.cluster} - ${row.aisle} - ${row.row} - ${row.pallet}`,
-      systemQty: row.qtyPallet, // untuk opname kita pakai qty pallet dulu
+    stockListData.map((stock: StockItem) => ({
+      id: stock.id,
+      product: stock.productName,
+      batch: stock.batchNumber,
+      location: `${stock.location.cluster} - ${stock.location.lorong} - ${stock.location.baris} - ${stock.location.level}`,
+      systemQty: stock.qtyPallet, // untuk opname kita pakai qty pallet
       physicalQty: 0,
       reason: "",
     }))
@@ -56,7 +56,7 @@ export default function StockOpnamePage() {
     });
   }, [items, searchQuery, statusFilter]);
 
-  const handlePhysicalChange = (id: number, value: string) => {
+  const handlePhysicalChange = (id: string, value: string) => {
     const num = Number(value.replace(/[^\d-]/g, "")) || 0;
     setItems((prev) =>
       prev.map((item) =>
@@ -65,7 +65,7 @@ export default function StockOpnamePage() {
     );
   };
 
-  const handleReasonChange = (id: number, value: string) => {
+  const handleReasonChange = (id: string, value: string) => {
     setItems((prev) =>
       prev.map((item) =>
         item.id === id ? { ...item, reason: value } : item

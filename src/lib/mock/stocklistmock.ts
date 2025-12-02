@@ -1,452 +1,217 @@
-// src/lib/mock/stockListMock.ts
+// Stock List Mock Data - Data barang yang sudah ada di gudang
+// Layout: 5 lorong (A1-A5) x 9 baris (01-09) per cluster (A, B, C, D)
+// Data diacak untuk simulasi kondisi gudang yang ramai
+// Setiap record punya expired date untuk FEFO
 
-export type StockStatus = "RELEASE" | "HOLD";
-
-export interface StockRow {
-  id: number;
-  product: string;
-  batch: string;
+export interface StockItem {
+  id: string;
+  productCode: string;
+  productName: string;
+  bbPallet: string;      // BB Pallet (instead of batch)
+  batchNumber: string;   // Kept for compatibility
+  lotNumber: string;
+  location: {
+    cluster: string; // A, B, C, D
+    lorong: string;  // L1, L2, L3, ... L11
+    baris: string;   // B1, B2, B3, ... B9
+    level: string;   // P1, P2, P3, P4 (Pallet position)
+  };
   qtyPallet: number;
   qtyCarton: number;
-  cluster: "A" | "B" | "C" | "D" | "E";
-  aisle: string; // contoh: 'L1'
-  row: string; // contoh: 'BARIS 1'
-  pallet: number; // nomor pallet
-  status: StockStatus;
-  firstInAt: string; // Tanggal masuk untuk FIFO
+  qtyPcs: number;
+  expiredDate: string;
+  inboundDate: string;
+  status: "available" | "reserved" | "quarantine";
+  notes?: string;
 }
 
-/**
- * Mock data stock list.
- * Nanti sumber aslinya akan diganti dari tabel `stocks` + `locations`.
- * Untuk sekarang kita bikin lumayan banyak untuk test filter & scroll.
- */
-export const STOCK_LIST_MOCK: StockRow[] = [
-  // 200ML AQUA LOCAL 1X48 - Cluster A
-  {
-    id: 1,
-    product: "200ML AQUA LOCAL 1X48",
-    batch: "BB001",
-    qtyPallet: 10,
-    qtyCarton: 0,
-    cluster: "A",
-    aisle: "L1",
-    row: "BARIS 1",
-    pallet: 1,
-    status: "RELEASE",
-    firstInAt: "2024-11-01",
-  },
-  {
-    id: 2,
-    product: "200ML AQUA LOCAL 1X48",
-    batch: "BB002",
-    qtyPallet: 8,
-    qtyCarton: 0,
-    cluster: "A",
-    aisle: "L1",
-    row: "BARIS 1",
-    pallet: 2,
-    status: "RELEASE",
-    firstInAt: "2024-11-03",
-  },
-  {
-    id: 3,
-    product: "200ML AQUA LOCAL 1X48",
-    batch: "BB003",
-    qtyPallet: 0,
-    qtyCarton: 15,
-    cluster: "A",
-    aisle: "L1",
-    row: "BARIS 1",
-    pallet: 3,
-    status: "RELEASE",
-    firstInAt: "2024-11-05",
-  },
-  {
-    id: 4,
-    product: "200ML AQUA LOCAL 1X48",
-    batch: "BB004",
-    qtyPallet: 5,
-    qtyCarton: 0,
-    cluster: "A",
-    aisle: "L1",
-    row: "BARIS 1",
-    pallet: 5,
-    status: "HOLD",
-    firstInAt: "2024-11-07",
-  },
-  {
-    id: 5,
-    product: "200ML AQUA LOCAL 1X48",
-    batch: "BB005",
-    qtyPallet: 12,
-    qtyCarton: 0,
-    cluster: "A",
-    aisle: "L2",
-    row: "BARIS 1",
-    pallet: 6,
-    status: "RELEASE",
-    firstInAt: "2024-11-10",
-  },
-  {
-    id: 6,
-    product: "200ML AQUA LOCAL 1X48",
-    batch: "BB006",
-    qtyPallet: 15,
-    qtyCarton: 0,
-    cluster: "A",
-    aisle: "L2",
-    row: "BARIS 1",
-    pallet: 8,
-    status: "RELEASE",
-    firstInAt: "2024-11-12",
-  },
+// Helper function untuk generate random date
+function getRandomDate(startDaysFromNow: number, endDaysFromNow: number): string {
+  const start = new Date();
+  start.setDate(start.getDate() + startDaysFromNow);
+  const end = new Date();
+  end.setDate(end.getDate() + endDaysFromNow);
+  
+  const date = new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
+  return date.toISOString().split('T')[0];
+}
 
-  // 600ML AQUA 1X24 - Cluster B
-  {
-    id: 7,
-    product: "600ML AQUA 1X24",
-    batch: "BB101",
-    qtyPallet: 20,
-    qtyCarton: 0,
-    cluster: "B",
-    aisle: "L1",
-    row: "BARIS 2",
-    pallet: 1,
-    status: "RELEASE",
-    firstInAt: "2024-10-20",
-  },
-  {
-    id: 8,
-    product: "600ML AQUA 1X24",
-    batch: "BB102",
-    qtyPallet: 18,
-    qtyCarton: 5,
-    cluster: "B",
-    aisle: "L1",
-    row: "BARIS 2",
-    pallet: 2,
-    status: "RELEASE",
-    firstInAt: "2024-10-22",
-  },
-  {
-    id: 9,
-    product: "600ML AQUA 1X24",
-    batch: "BB103",
-    qtyPallet: 0,
-    qtyCarton: 30,
-    cluster: "B",
-    aisle: "L1",
-    row: "BARIS 2",
-    pallet: 3,
-    status: "RELEASE",
-    firstInAt: "2024-10-25",
-  },
-  {
-    id: 10,
-    product: "600ML AQUA 1X24",
-    batch: "BB104",
-    qtyPallet: 14,
-    qtyCarton: 0,
-    cluster: "B",
-    aisle: "L2",
-    row: "BARIS 2",
-    pallet: 5,
-    status: "RELEASE",
-    firstInAt: "2024-10-28",
-  },
-  {
-    id: 11,
-    product: "600ML AQUA 1X24",
-    batch: "BB105",
-    qtyPallet: 8,
-    qtyCarton: 12,
-    cluster: "B",
-    aisle: "L2",
-    row: "BARIS 2",
-    pallet: 7,
-    status: "RELEASE",
-    firstInAt: "2024-11-01",
-  },
-  {
-    id: 12,
-    product: "600ML AQUA 1X24",
-    batch: "BB106",
-    qtyPallet: 0,
-    qtyCarton: 20,
-    cluster: "B",
-    aisle: "L3",
-    row: "BARIS 2",
-    pallet: 8,
-    status: "HOLD",
-    firstInAt: "2024-11-05",
-  },
+// Helper function untuk generate inbound date (masa lalu)
+function getInboundDate(): string {
+  const daysAgo = Math.floor(Math.random() * 90) + 1; // 1-90 hari yang lalu
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  return date.toISOString().split('T')[0];
+}
 
-  // 1500ML AQUA 1X12 - Cluster C
-  {
-    id: 13,
-    product: "1500ML AQUA 1X12",
-    batch: "BB201",
-    qtyPallet: 10,
-    qtyCarton: 0,
-    cluster: "C",
-    aisle: "L1",
-    row: "BARIS 1",
-    pallet: 1,
-    status: "RELEASE",
-    firstInAt: "2024-10-15",
-  },
-  {
-    id: 14,
-    product: "1500ML AQUA 1X12",
-    batch: "BB202",
-    qtyPallet: 9,
-    qtyCarton: 0,
-    cluster: "C",
-    aisle: "L1",
-    row: "BARIS 1",
-    pallet: 2,
-    status: "HOLD",
-    firstInAt: "2024-10-18",
-  },
-  {
-    id: 15,
-    product: "1500ML AQUA 1X12",
-    batch: "BB203",
-    qtyPallet: 12,
-    qtyCarton: 0,
-    cluster: "C",
-    aisle: "L1",
-    row: "BARIS 1",
-    pallet: 3,
-    status: "RELEASE",
-    firstInAt: "2024-10-20",
-  },
-  {
-    id: 16,
-    product: "1500ML AQUA 1X12",
-    batch: "BB204",
-    qtyPallet: 16,
-    qtyCarton: 0,
-    cluster: "C",
-    aisle: "L2",
-    row: "BARIS 1",
-    pallet: 5,
-    status: "RELEASE",
-    firstInAt: "2024-10-25",
-  },
+// Product codes dengan cluster assignment
+const clusterProductMap: Record<string, { code: string; name: string; qtyPerCarton: number }> = {
+  "A": { code: "AQ-200ML-48", name: "200ML AQUA LOCAL 1X48", qtyPerCarton: 48 },
+  "B": { code: "AQ-600ML-24", name: "600ML AQUA LOCAL 1X24", qtyPerCarton: 24 },
+  "C": { code: "AQ-1500ML-12", name: "1500ML AQUA LOCAL 1X12", qtyPerCarton: 12 },
+  "D": { code: "AQ-330ML-24", name: "330ML AQUA LOCAL 1X24", qtyPerCarton: 24 },
+};
 
-  // 330ML AQUA REFLECTIONS 1X24 - Cluster D
-  {
-    id: 17,
-    product: "330ML AQUA REFLECTIONS 1X24",
-    batch: "BB301",
-    qtyPallet: 12,
-    qtyCarton: 0,
-    cluster: "D",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 1,
-    status: "RELEASE",
-    firstInAt: "2024-11-08",
-  },
-  {
-    id: 18,
-    product: "330ML AQUA REFLECTIONS 1X24",
-    batch: "BB302",
-    qtyPallet: 10,
-    qtyCarton: 8,
-    cluster: "D",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 2,
-    status: "RELEASE",
-    firstInAt: "2024-11-10",
-  },
-  {
-    id: 19,
-    product: "330ML AQUA REFLECTIONS 1X24",
-    batch: "BB303",
-    qtyPallet: 15,
-    qtyCarton: 0,
-    cluster: "D",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 4,
-    status: "RELEASE",
-    firstInAt: "2024-11-12",
-  },
-  {
-    id: 20,
-    product: "330ML AQUA REFLECTIONS 1X24",
-    batch: "BB304",
-    qtyPallet: 9,
-    qtyCarton: 0,
-    cluster: "D",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 6,
-    status: "RELEASE",
-    firstInAt: "2024-11-15",
-  },
-  {
-    id: 21,
-    product: "330ML AQUA REFLECTIONS 1X24",
-    batch: "BB305",
-    qtyPallet: 0,
-    qtyCarton: 20,
-    cluster: "D",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 8,
-    status: "RELEASE",
-    firstInAt: "2024-11-17",
-  },
-  {
-    id: 22,
-    product: "330ML AQUA REFLECTIONS 1X24",
-    batch: "BB306",
-    qtyPallet: 13,
-    qtyCarton: 0,
-    cluster: "D",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 10,
-    status: "RELEASE",
-    firstInAt: "2024-11-20",
-  },
-
-  // 19L AQUA GALON - Cluster E
-  {
-    id: 23,
-    product: "19L AQUA GALON",
-    batch: "BB401",
-    qtyPallet: 30,
-    qtyCarton: 0,
-    cluster: "E",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 1,
-    status: "RELEASE",
-    firstInAt: "2024-10-10",
-  },
-  {
-    id: 24,
-    product: "19L AQUA GALON",
-    batch: "BB402",
-    qtyPallet: 25,
-    qtyCarton: 0,
-    cluster: "E",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 2,
-    status: "RELEASE",
-    firstInAt: "2024-10-12",
-  },
-  {
-    id: 25,
-    product: "19L AQUA GALON",
-    batch: "BB403",
-    qtyPallet: 20,
-    qtyCarton: 0,
-    cluster: "E",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 3,
-    status: "HOLD",
-    firstInAt: "2024-10-15",
-  },
-  {
-    id: 26,
-    product: "19L AQUA GALON",
-    batch: "BB404",
-    qtyPallet: 28,
-    qtyCarton: 0,
-    cluster: "E",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 5,
-    status: "RELEASE",
-    firstInAt: "2024-10-18",
-  },
-  {
-    id: 27,
-    product: "19L AQUA GALON",
-    batch: "BB405",
-    qtyPallet: 0,
-    qtyCarton: 50,
-    cluster: "E",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 6,
-    status: "RELEASE",
-    firstInAt: "2024-10-22",
-  },
-  {
-    id: 28,
-    product: "19L AQUA GALON",
-    batch: "BB406",
-    qtyPallet: 22,
-    qtyCarton: 0,
-    cluster: "E",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 7,
-    status: "RELEASE",
-    firstInAt: "2024-10-25",
-  },
-  {
-    id: 29,
-    product: "19L AQUA GALON",
-    batch: "BB407",
-    qtyPallet: 35,
-    qtyCarton: 0,
-    cluster: "E",
-    aisle: "L3",
-    row: "BARIS 3",
-    pallet: 9,
-    status: "RELEASE",
-    firstInAt: "2024-10-28",
-  },
-
-  // Tambahan data untuk Cluster C
-  {
-    id: 30,
-    product: "1500ML AQUA 1X12",
-    batch: "BB205",
-    qtyPallet: 11,
-    qtyCarton: 0,
-    cluster: "C",
-    aisle: "L1",
-    row: "BARIS 1",
-    pallet: 4,
-    status: "RELEASE",
-    firstInAt: "2024-10-27",
-  },
-  {
-    id: 31,
-    product: "1500ML AQUA 1X12",
-    batch: "BB206",
-    qtyPallet: 13,
-    qtyCarton: 0,
-    cluster: "C",
-    aisle: "L2",
-    row: "BARIS 1",
-    pallet: 6,
-    status: "RELEASE",
-    firstInAt: "2024-11-02",
-  },
-  {
-    id: 32,
-    product: "1500ML AQUA 1X12",
-    batch: "BB207",
-    qtyPallet: 8,
-    qtyCarton: 0,
-    cluster: "C",
-    aisle: "L2",
-    row: "BARIS 1",
-    pallet: 7,
-    status: "RELEASE",
-    firstInAt: "2024-11-06",
-  },
+const allProducts = [
+  { code: "AQ-200ML-48", name: "200ML AQUA LOCAL 1X48", qtyPerCarton: 48 },
+  { code: "AQ-600ML-24", name: "600ML AQUA LOCAL 1X24", qtyPerCarton: 24 },
+  { code: "AQ-1500ML-12", name: "1500ML AQUA LOCAL 1X12", qtyPerCarton: 12 },
+  { code: "AQ-330ML-24", name: "330ML AQUA LOCAL 1X24", qtyPerCarton: 24 },
 ];
+
+const clusters = ["A", "B", "C", "D"];
+const lorongList = ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11"];
+const barisList = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"];
+const levelList = ["P1", "P2", "P3", "P4"]; // Pallet positions
+
+// Generate stock data
+const stockListData: StockItem[] = [];
+let idCounter = 1;
+
+// Generate data untuk setiap cluster
+clusters.forEach(cluster => {
+  // Produk yang seharusnya ada di cluster ini
+  const correctProduct = clusterProductMap[cluster];
+  
+  // Generate data untuk setiap lorong
+  lorongList.forEach(lorong => {
+    // Generate data untuk setiap baris
+    barisList.forEach(baris => {
+      // Random 1-2 level terisi per lokasi (baris) - reduced density for more variety
+      const numLevels = Math.floor(Math.random() * 2) + 1;
+      const usedLevels = levelList.slice(0, numLevels).sort(() => Math.random() - 0.5);
+      
+      usedLevels.forEach(level => {
+        // 85% correct product, 15% wrong product (untuk simulasi salah cluster)
+        const isCorrectProduct = Math.random() < 0.85;
+        const product = isCorrectProduct 
+          ? correctProduct 
+          : allProducts[Math.floor(Math.random() * allProducts.length)];
+        
+        // Random quantity
+        const qtyPallet = Math.floor(Math.random() * 3) + 1; // 1-3 pallet
+        const qtyCarton = Math.floor(Math.random() * 20) + 5; // 5-24 carton
+        const qtyPcs = qtyCarton * product.qtyPerCarton;
+        
+        // Random batch and BB Pallet
+        const batchMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
+        const batchYear = 2024;
+        const batchSeq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
+        const batchNumber = `BATCH-${batchYear}${batchMonth}-${batchSeq}`;
+        const lotNumber = `LOT-${batchYear}${batchMonth}-${batchSeq}`;
+        const bbPallet = `BB-${batchYear}${batchMonth}-${String(idCounter).padStart(4, '0')}`;
+        
+        // Expired date distribution:
+        // 30% green (near expiry: 10-90 days) - harus release segera (FEFO priority)
+        // 55% yellow (medium expiry: 91-180 days)
+        // 15% yellow (long expiry: 181-540 days)
+        const expRand = Math.random();
+        let expiredDate: string;
+        if (expRand < 0.30) {
+          // Green: 10-90 hari (near expiry)
+          expiredDate = getRandomDate(10, 90);
+        } else if (expRand < 0.85) {
+          // Yellow: 91-180 hari (medium expiry)
+          expiredDate = getRandomDate(91, 180);
+        } else {
+          // Yellow: 181-540 hari (long expiry)
+          expiredDate = getRandomDate(181, 540);
+        }
+        
+        const inboundDate = getInboundDate();
+        
+        // Random status (kebanyakan available)
+        const randStatus = Math.random();
+        let status: "available" | "reserved" | "quarantine";
+        if (randStatus < 0.88) {
+          status = "available";
+        } else if (randStatus < 0.96) {
+          status = "reserved";
+        } else {
+          status = "quarantine";
+        }
+        
+        stockListData.push({
+          id: `STK-${String(idCounter).padStart(5, '0')}`,
+          productCode: product.code,
+          productName: product.name,
+          bbPallet,
+          batchNumber,
+          lotNumber,
+          location: {
+            cluster,
+            lorong,
+            baris,
+            level,
+          },
+          qtyPallet,
+          qtyCarton,
+          qtyPcs,
+          expiredDate,
+          inboundDate,
+          status,
+          notes: status === "quarantine" ? "Quality check in progress" : undefined,
+        });
+        
+        idCounter++;
+      });
+    });
+  });
+});
+
+export { stockListData };
+
+// Helper functions
+export const getStockByLocation = (cluster: string, lorong: string, baris: string, level: string): StockItem | undefined => {
+  return stockListData.find(
+    s => s.location.cluster === cluster && 
+         s.location.lorong === lorong && 
+         s.location.baris === baris && 
+         s.location.level === level
+  );
+};
+
+export const getStockByProduct = (productCode: string): StockItem[] => {
+  return stockListData.filter(s => s.productCode === productCode);
+};
+
+export const getStockByCluster = (cluster: string): StockItem[] => {
+  return stockListData.filter(s => s.location.cluster === cluster);
+};
+
+// Get available stock sorted by FEFO (First Expired First Out)
+export const getAvailableStockFEFO = (productCode?: string): StockItem[] => {
+  let stocks = stockListData.filter(s => s.status === "available");
+  
+  if (productCode) {
+    stocks = stocks.filter(s => s.productCode === productCode);
+  }
+  
+  return stocks.sort((a, b) => {
+    const dateA = new Date(a.expiredDate).getTime();
+    const dateB = new Date(b.expiredDate).getTime();
+    return dateA - dateB; // Ascending: expired date terdekat dulu
+  });
+};
+
+// Get stock statistics
+export const getStockStats = () => {
+  const totalItems = stockListData.length;
+  const totalPallets = stockListData.reduce((sum, s) => sum + s.qtyPallet, 0);
+  const totalCartons = stockListData.reduce((sum, s) => sum + s.qtyCarton, 0);
+  const totalPcs = stockListData.reduce((sum, s) => sum + s.qtyPcs, 0);
+  
+  const statusCount = {
+    available: stockListData.filter(s => s.status === "available").length,
+    reserved: stockListData.filter(s => s.status === "reserved").length,
+    quarantine: stockListData.filter(s => s.status === "quarantine").length,
+  };
+  
+  return {
+    totalItems,
+    totalPallets,
+    totalCartons,
+    totalPcs,
+    statusCount,
+  };
+};

@@ -1,32 +1,70 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Inter } from "next/font/google";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Map,
   ArrowDownToLine,
   ArrowUpFromLine,
   List,
   ClipboardCheck,
+  Database,
 } from "lucide-react";
 
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
 
-const menuItems = [
-  { href: "/", label: "Layout Gudang", icon: Map },
+type UserRole = "admin_warehouse" | "superadmin";
+
+interface User {
+  username: string;
+  role: UserRole;
+  name: string;
+}
+
+const baseMenuItems = [
+  { href: "/warehouse-layout", label: "Layout Gudang", icon: Map },
   { href: "/inbound", label: "Inbound", icon: ArrowDownToLine },
   { href: "/outbound", label: "Outbound", icon: ArrowUpFromLine },
   { href: "/stock-list", label: "Stock List", icon: List },
   { href: "/stock-opname", label: "Stock Opname", icon: ClipboardCheck },
 ];
 
+const superadminMenuItems = [
+  ...baseMenuItems,
+  { href: "/stock-list-master", label: "Master Data Stock", icon: Database },
+];
+
 function RootLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const userStr = localStorage.getItem("user");
+    if (userStr) {
+      setUser(JSON.parse(userStr));
+    } else if (pathname !== "/login") {
+      router.push("/login");
+    }
+  }, [pathname, router]);
+
+  const handleLogout = () => {
+    localStorage.removeItem("user");
+    router.push("/login");
+  };
+
+  // Don't show sidebar on login page
+  if (pathname === "/login") {
+    return <div>{children}</div>;
+  }
+
+  // Get menu items based on role
+  const menuItems = user?.role === "superadmin" ? superadminMenuItems : baseMenuItems;
 
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -84,8 +122,10 @@ function RootLayoutContent({ children }: { children: React.ReactNode }) {
               <Map className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-white">WMS Lite</h1>
-              <p className="text-xs text-slate-400">AQUA Cikarang</p>
+              <h1 className="text-lg font-bold text-white">WMS Cikarang</h1>
+              <p className="text-xs text-slate-400">
+                {user?.role === "superadmin" ? "Super Admin" : "Admin Warehouse"}
+              </p>
             </div>
           </div>
         </div>
@@ -112,9 +152,21 @@ function RootLayoutContent({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-700 text-xs text-slate-400 flex-shrink-0">
-          <p className="font-medium">Prototype WMS Lite</p>
-          <p className="mt-1">Mock data — belum tersambung database</p>
+        <div className="p-4 border-t border-slate-700 flex-shrink-0">
+          {user && (
+            <div className="mb-3 pb-3 border-b border-slate-700">
+              <p className="text-sm font-semibold text-white">{user.name}</p>
+              <p className="text-xs text-slate-400">
+                {user.role === "superadmin" ? "Super Admin" : "Admin Warehouse"}
+              </p>
+            </div>
+          )}
+          <button
+            onClick={handleLogout}
+            className="w-full px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-semibold transition-all"
+          >
+            Logout
+          </button>
         </div>
       </aside>
 
