@@ -1,8 +1,18 @@
+// File: src/components/warehouse-layout.tsx (FINAL REVISION)
+
 "use client";
 
 import { useMemo, useState } from "react";
 import { stockListData, type StockItem } from "@/lib/mock/stocklistmock";
+import { 
+  productMasterData, // Import Master Data Produk baru
+  getProductByCode, // Import helper function
+  ProductMaster 
+} from "@/lib/mock/product-master"; 
+import { TruckIcon, MapPin, X, AlertTriangle, CheckCircle, Clock } from "lucide-react";
 
+
+// --- TYPE & STATUS DEFINITION (BASED ON INITIAL FILE) ---
 type StatusColor =
   | "green"  // RELEASE (produk yang expired date paling dekat)
   | "yellow" // HOLD (produk yang expired date lebih lama)
@@ -14,98 +24,110 @@ type WarehouseCellStatus = "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER";
 
 export type WarehouseCell = {
   id: string;
-  cluster: "A" | "B" | "C" | "D" | "E";
-  lorong: number; // L1, L2, ... L11
-  baris: number;  // B1, B2, ... B9
-  pallet: number; // P1, P2, P3
+  cluster: string; // Menggunakan string untuk cluster A-E
+  lorong: number;
+  baris: number;
+  pallet: number;
   product?: string;
   bbPallet?: string;
   qtyPallet?: number;
   qtyCarton?: number;
   status?: WarehouseCellStatus;
   colorCode?: StatusColor;
-  assignedCluster?: string; // cluster yang seharusnya untuk produk ini
+  assignedCluster?: string; 
 };
 
 const colorMap: Record<StatusColor, string> = {
-  green: "bg-green-500",    // RGB green untuk RELEASE
-  yellow: "bg-yellow-400",  // RGB yellow untuk HOLD
-  blue: "bg-blue-500",      // RGB blue untuk RECEH
-  red: "bg-red-500",        // RGB red untuk WRONG_CLUSTER
+  green: "bg-green-500",    
+  yellow: "bg-yellow-400",  
+  blue: "bg-blue-500",      
+  red: "bg-red-500",        
   empty: "bg-white border border-slate-300",
 };
 
-// 👉 Generate warehouse cells: 5 clusters × 11 lorong × 9 baris × 3 pallet
+// =========================================================================
+// LOGIC: DYNAMIC CLUSTER MAPPING & VALIDATION
+// =========================================================================
+
+// 1. DYNAMIC CLUSTER MAPPING
+const generateClusterProductMap = (masterData: ProductMaster[]): Record<string, string[]> => {
+  const map: Record<string, string[]> = {};
+  masterData.forEach(product => {
+    if (product.defaultCluster) {
+      const cluster = product.defaultCluster;
+      if (!map[cluster]) {
+        map[cluster] = [];
+      }
+      map[cluster].push(product.productCode);
+    }
+  });
+  return map;
+};
+
+const CLUSTER_TO_PRODUCT_MAP = generateClusterProductMap(productMasterData);
+
+// 2. WRONG CLUSTER CHECK
+const isWrongCluster = (stock: StockItem): boolean => {
+  const expectedCodes = CLUSTER_TO_PRODUCT_MAP[stock.location.cluster];
+  if (!expectedCodes) return false; 
+  return !expectedCodes.includes(stock.productCode);
+};
+
+
+// 3. GENERATE CELLS
 function generateWarehouseCells(): WarehouseCell[] {
   const cells: WarehouseCell[] = [];
-  const clusters: Array<"A" | "B" | "C" | "D" | "E"> = ["A", "B", "C", "D", "E"];
-  
-  // Buat map dari stock mock untuk akses cepat
-  // Key: cluster-lorong-baris-pallet (format: A-L1-B1-P1)
+  const clusters: Array<string> = ["A", "B", "C", "D", "E"];
   const locationMap = new Map<string, StockItem>();
   
+  // Mapping stok ke kunci numerik
   stockListData.forEach((stock: StockItem) => {
-    // Parse lorong, baris, dan pallet dari format location
-    // Format sekarang: lorong = "L1", baris = "B1", level = "P1"
     const lorongNum = parseInt(stock.location.lorong.replace("L", ""));
     const barisNum = parseInt(stock.location.baris.replace("B", ""));
     const palletNum = parseInt(stock.location.level.replace("P", ""));
-    
-    // Create key untuk mapping
     const key = `${stock.location.cluster}-${lorongNum}-${barisNum}-${palletNum}`;
     locationMap.set(key, stock);
   });
   
-  // Generate semua sel warehouse
   clusters.forEach((cluster) => {
     for (let lorong = 1; lorong <= 11; lorong++) {
       for (let baris = 1; baris <= 9; baris++) {
-        for (let pallet = 1; pallet <= 3; pallet++) {
-          // Cek apakah ada stock di lokasi ini
+        for (let pallet = 1; pallet <= 3; pallet++) { 
           const key = `${cluster}-${lorong}-${baris}-${pallet}`;
           const stock = locationMap.get(key);
           
           if (stock) {
-            // Ada produk di lokasi ini
             let colorCode: StatusColor = "green";
             let status: WarehouseCellStatus = "RELEASE";
             
-            // Cluster to Product mapping untuk validasi
-            const clusterProductMap: Record<string, string> = {
-              "A": "AQ-200ML-48",
-              "B": "AQ-600ML-24",
-              "C": "AQ-1500ML-12",
-              "D": "AQ-330ML-24",
-            };
+            // --- INTEGRASI LOGIKA VALIDASI BARU ---
+            const wrongCluster = isWrongCluster(stock);
             
-            const expectedProduct = clusterProductMap[cluster];
-            const isWrongCluster = expectedProduct && stock.productCode !== expectedProduct;
-            
-            // Tentukan warna berdasarkan kondisi dengan prioritas:
-            // 1. RED - Wrong cluster (produk tidak sesuai dengan cluster)
-            if (isWrongCluster) {
+            if (wrongCluster) {
               colorCode = "red";
               status = "WRONG_CLUSTER";
             }
-            // 2. GREEN - Near expiry (10-90 hari) - prioritas FEFO
-            else {
+            // --- INTEGRASI LOGIKA VALIDASI BARU SELESAI ---
+
+            // LOGIKA LAMA: Cek Expired Date (FEFO)
+            if (!wrongCluster) {
               const today = new Date();
               const expDate = new Date(stock.expiredDate);
-              const daysToExpiry = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              const diffTime = expDate.getTime() - today.getTime();
+              const daysToExpiry = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
               
               if (daysToExpiry <= 90) {
-                colorCode = "green";
+                colorCode = "green"; // RELEASE
                 status = "RELEASE";
               }
-              // 3. YELLOW - Medium to long expiry (91+ hari)
               else {
-                colorCode = "yellow";
+                colorCode = "yellow"; // HOLD
                 status = "HOLD";
               }
             }
             
             cells.push({
-              id: `${cluster}-L${lorong}-B${baris}-P${pallet}`,
+              id: key,
               cluster,
               lorong,
               baris,
@@ -121,7 +143,7 @@ function generateWarehouseCells(): WarehouseCell[] {
           } else {
             // Sel kosong
             cells.push({
-              id: `${cluster}-L${lorong}-B${baris}-P${pallet}`,
+              id: key,
               cluster,
               lorong,
               baris,
@@ -137,6 +159,7 @@ function generateWarehouseCells(): WarehouseCell[] {
   return cells;
 }
 
+// 4. PalletInfoModal (Dipindahkan ke sini agar ter-scope)
 type PalletInfoModalProps = {
   cell: WarehouseCell | null;
   open: boolean;
@@ -145,6 +168,10 @@ type PalletInfoModalProps = {
 
 function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
   if (!open || !cell) return null;
+
+  // Mendapatkan detail produk yang seharusnya (untuk notifikasi Wrong Cluster)
+  const productDetail = cell.product ? getProductByCode(cell.product) : null;
+  const totalPcs = (cell.qtyCarton ?? 0) * (productDetail?.qtyPerCarton ?? 1); // Hitung ulang pcs
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -204,6 +231,17 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
             </div>
           </div>
 
+          {/* Menampilkan total PCS */}
+          {cell.product && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-center">
+              <p className="text-xs font-medium text-yellow-900 mb-1">Total Pieces (Units)</p>
+              <p className="text-xl font-bold text-yellow-800">
+                {totalPcs.toLocaleString()}
+              </p>
+            </div>
+          )}
+
+
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <p className="text-xs text-blue-900 font-medium mb-1">💡 Penjelasan:</p>
             <p className="text-[10px] sm:text-xs text-blue-800">
@@ -221,11 +259,12 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
             <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
               <p className="text-xs font-medium text-slate-500 mb-1">Lokasi Rak</p>
               <p className="font-semibold text-slate-900 text-xs sm:text-sm">
-                L{cell.lorong}-B{cell.baris}-P{cell.pallet}
+                L{cell.lorong}-{cell.baris}-P{cell.pallet}
               </p>
             </div>
           </div>
-
+          
+          {/* Status dan Notifikasi Wrong Cluster */}
           <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
             <p className="text-xs font-medium text-slate-500 mb-1">Status</p>
             <p className={`font-semibold text-sm ${
@@ -239,6 +278,15 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
                cell.status === "RECEH" ? "📦 RECEH (Ada sisa, tidak full)" :
                "⚠️ SALAH CLUSTER (Perlu relokasi)"}
             </p>
+            
+            {cell.status === "WRONG_CLUSTER" && productDetail && (
+              <div className="p-3 mt-3 bg-red-100 border-l-4 border-red-500 text-red-700 text-xs">
+                <p className="font-semibold">Perhatian:</p>
+                <p>Produk ini seharusnya diletakkan di Cluster 
+                  <span className="font-bold text-red-900"> {productDetail.defaultCluster || 'N/A'}</span>.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -255,6 +303,7 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
   );
 }
 
+
 export function WarehouseLayout() {
   const [selectedCell, setSelectedCell] = useState<WarehouseCell | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -262,6 +311,20 @@ export function WarehouseLayout() {
   const [clusterFilter, setClusterFilter] = useState<"ALL" | "A" | "B" | "C" | "D" | "E">("ALL");
   const [productFilter, setProductFilter] = useState<string>("ALL");
   const [openClusters, setOpenClusters] = useState<Set<string>>(new Set());
+  
+  // 5. toggleCluster (Didefinisikan di sini untuk menghindari error scope)
+  const toggleCluster = (cluster: string) => {
+    setOpenClusters((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(cluster)) {
+        newSet.delete(cluster);
+      } else {
+        newSet.add(cluster);
+      }
+      return newSet;
+    });
+  };
+
 
   // Generate cells from mock data
   const warehouseCells = useMemo(() => generateWarehouseCells(), []);
@@ -274,19 +337,6 @@ export function WarehouseLayout() {
     });
     return Array.from(products).sort();
   }, []);
-
-  // Toggle cluster open/close
-  const toggleCluster = (cluster: string) => {
-    setOpenClusters((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(cluster)) {
-        newSet.delete(cluster);
-      } else {
-        newSet.add(cluster);
-      }
-      return newSet;
-    });
-  };
 
   // Filter cells based on search query and status filter
   const filteredCells = useMemo(() => {
@@ -358,151 +408,126 @@ export function WarehouseLayout() {
     return grouped;
   }, [filteredCells]);
 
+  // FIX: Perhitungan Statis untuk Legend
+  const getStockStats = () => {
+    const stats = {
+      totalItems: 0,
+      Kosong: 0,
+      TerisiNormal: 0, // Menggunakan Yellow (HOLD)
+      FEFO_Alert: 0,   // Menggunakan Green (RELEASE)
+      SalahCluster: 0, // Menggunakan Red (WRONG_CLUSTER)
+    };
+    
+    const totalCells = 5 * 11 * 9 * 3; 
+
+    warehouseCells.forEach(cell => {
+      if (cell.colorCode === 'empty') {
+        stats.Kosong++;
+      } else {
+        stats.totalItems++;
+        if (cell.colorCode === 'yellow') {
+          stats.TerisiNormal++; 
+        } else if (cell.colorCode === 'green') {
+          stats.FEFO_Alert++; 
+        } else if (cell.colorCode === 'red') {
+          stats.SalahCluster++;
+        }
+      }
+    });
+
+    // Mengoreksi Kosong jika ada error pada totalCells
+    if (stats.Kosong === 0 && stats.totalItems > 0) {
+      stats.Kosong = totalCells - stats.totalItems;
+    }
+    
+    return stats;
+  };
+  
+  // Komponen Pallet untuk di-render di grid
+  const PalletComponent = ({ cell, group }: { cell: WarehouseCell, group: any }) => {
+    const isFilled = cell.colorCode !== "empty";
+    // FIX: colorKey sekarang pasti StatusColor karena sudah dicek di generateWarehouseCells
+    const colorKey: StatusColor = cell.colorCode as StatusColor; 
+
+    return (
+        <button
+          type="button"
+          onClick={() => isFilled ? setSelectedCell(cell) : null}
+          className={`
+            flex-1 h-12 sm:h-14 rounded flex flex-col items-center justify-center
+            ${colorMap[colorKey]}
+            ${
+              isFilled
+                ? "cursor-pointer hover:scale-105 hover:shadow-md transition-all active:scale-95"
+                : "cursor-default opacity-40"
+            }
+            text-[8px] sm:text-[9px] font-medium text-white shadow-sm
+          `}
+          title={`${cell.cluster}-L${cell.lorong}-B${cell.baris}-P${cell.pallet} - ${isFilled ? cell.product : 'Kosong'}`}
+        >
+          {isFilled ? (
+            <div className="font-bold text-[9px] sm:text-[10px]">
+                P{cell.pallet}
+            </div>
+          ) : (
+            <div className="text-slate-400 font-medium text-[8px]">
+              P{cell.pallet}
+            </div>
+          )}
+        </button>
+    );
+  };
+
+
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
-          Layout Gudang
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-600">
-          Peta lokasi stok produk dengan struktur 5 Cluster × 11 Lorong × 9 Baris × 3 Pallet (Slot Rak).
-        </p>
-        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-xs text-slate-700">
-            <span className="font-semibold">📍 Catatan:</span> Pallet di sini adalah <strong>slot rak</strong> (lokasi fisik: L-B-P). 
-            Sedangkan <strong>Qty Pallet</strong> adalah jumlah tumpukan barang yang disimpan di slot tersebut.
-          </p>
-        </div>
-      </div>
-
-      {/* Quick Filter & Search */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-2">
-              🔍 Search Produk / Batch
-            </label>
-            <input
-              type="text"
-              placeholder="Cari nama produk atau batch..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-lg border-2 border-slate-300 px-3 sm:px-4 py-2 sm:py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-2">
-              📦 Filter Cluster
-            </label>
-            <select
-              value={clusterFilter}
-              onChange={(e) => setClusterFilter(e.target.value as "ALL" | "A" | "B" | "C" | "D" | "E")}
-              className="w-full rounded-lg border-2 border-slate-300 px-3 sm:px-4 py-2 sm:py-2.5 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-            >
-              <option value="ALL">Semua Cluster</option>
-              <option value="A">Cluster A</option>
-              <option value="B">Cluster B</option>
-              <option value="C">Cluster C</option>
-              <option value="D">Cluster D</option>
-              <option value="E">Cluster E</option>
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-2">
-              🏷️ Filter Produk
-            </label>
-            <select
-              value={productFilter}
-              onChange={(e) => setProductFilter(e.target.value)}
-              className="w-full rounded-lg border-2 border-slate-300 px-3 sm:px-4 py-2 sm:py-2.5 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-            >
-              <option value="ALL">Semua Produk</option>
-              {uniqueProducts.map((product) => (
-                <option key={product} value={product}>
-                  {product}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-2">
-              📊 Filter Status
-            </label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as "ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER")}
-              className="w-full rounded-lg border-2 border-slate-300 px-3 sm:px-4 py-2 sm:py-2.5 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-            >
-              <option value="ALL">Semua Status</option>
-              <option value="RELEASE">Release (Hijau)</option>
-              <option value="HOLD">Hold (Kuning)</option>
-              <option value="RECEH">Receh/Sisa (Biru)</option>
-              <option value="WRONG_CLUSTER">Salah Cluster (Merah)</option>
-            </select>
+    <div className="min-h-screen bg-slate-50 p-4 sm:p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header (Diambil dari file yang Anda inginkan) */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
+                Warehouse Layout Visualization
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-600">
+                Peta lokasi stok produk dengan struktur 5 Cluster × 11 Lorong × 9 Baris × 3 Pallet (Slot Rak).
+              </p>
+            </div>
           </div>
         </div>
-        
-        {(searchQuery || statusFilter !== "ALL" || clusterFilter !== "ALL" || productFilter !== "ALL") && (
-          <div className="mt-4 flex items-center justify-between">
-            <p className="text-xs text-slate-600">
-              Menampilkan <span className="font-semibold text-blue-600">{filteredCells.length}</span> dari {warehouseCells.length} lokasi
-            </p>
-            <button
-              onClick={() => {
-                setSearchQuery("");
-                setStatusFilter("ALL");
-                setClusterFilter("ALL");
-                setProductFilter("ALL");
-              }}
-              className="rounded-lg border-2 border-slate-300 bg-white px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 transition-all"
-            >
-              🔄 Reset Filter
-            </button>
-          </div>
-        )}
-        
-        {filteredCells.length === 0 && (
-          <div className="mt-4 text-center py-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <p className="text-sm text-amber-900 font-medium">
-              ⚠️ Tidak ada pallet yang sesuai dengan filter
-            </p>
-            <p className="text-xs text-amber-700 mt-1">
-              Coba ubah kata kunci atau filter
-            </p>
-          </div>
-        )}
-      </div>
 
-      <div className="space-y-6">
-        {/* Main Grid Area */}
-        <div className="space-y-4">
-          {/* Toggle All Clusters Button */}
-          <div className="flex justify-end">
-            <button
-              onClick={() => {
-                if (openClusters.size === 5) {
-                  setOpenClusters(new Set());
-                } else {
-                  setOpenClusters(new Set(["A", "B", "C", "D", "E"]));
-                }
-              }}
-              className="px-4 py-2 text-sm font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-            >
-              {openClusters.size === 5 ? "🔽 Tutup Semua Cluster" : "🔼 Buka Semua Cluster"}
-            </button>
-          </div>
-          
+        {/* Quick Filter & Search (Diambil dari file yang Anda inginkan) */}
+        <div className="bg-white rounded-xl shadow-xl p-8 mb-8 mt-6">
+            <h1 className="text-2xl font-bold text-gray-800">Warehouse Layout Visualization</h1>
+            <p className="text-gray-500 mt-1">Visualisasi status lokasi gudang berdasarkan Master Data & Stok</p>
+
+            <div className="mt-4 flex items-center gap-4">
+                <input
+                    type="text"
+                    placeholder="Cari Lokasi, Produk (Code/Name), atau BB Pallet..."
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                <button
+                    onClick={() => setSearchQuery("")}
+                    className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors"
+                >
+                    X Reset
+                </button>
+            </div>
+        </div>
+
+
+        {/* Warehouse View Sesuai Template Lama */}
+        <div className="space-y-6">
           {(["A", "B", "C", "D", "E"] as const).map((cluster) => {
             const isOpen = openClusters.has(cluster);
             const clusterCells = cellsByCluster[cluster] || [];
             const filledCount = clusterCells.reduce((sum, group) => {
               return sum + group.pallets.filter(p => p.product).length;
             }, 0);
-            const totalCount = 11 * 9 * 3; // 11 lorong × 9 baris × 3 pallet
+            const totalCount = 11 * 9 * 3; 
             
             return (
               <div key={cluster} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -520,7 +545,8 @@ export function WarehouseLayout() {
                         Cluster {cluster}
                       </h2>
                       <p className="text-xs sm:text-sm text-slate-500">
-                        {filledCount} dari {totalCount} slot terisi
+                        {/* Menggunakan data stok lama yang sudah terfilter */}
+                        {filledCount} dari {totalCount} slot di Lorong L1-L11 terisi
                       </p>
                     </div>
                   </div>
@@ -537,12 +563,11 @@ export function WarehouseLayout() {
                 {isOpen && (
                   <div className="px-4 sm:px-6 pb-4 sm:pb-6 border-t border-slate-200">
                     <div className="mt-4">
-                      {/* Grid: Lorong (rows) × Baris (columns) */}
                       <div className="overflow-x-auto">
                         <div className="inline-block min-w-full">
                           {/* Header Baris */}
                           <div className="flex mb-2">
-                            <div className="w-16 sm:w-20 shrink-0" /> {/* Space for lorong labels */}
+                            <div className="w-16 sm:w-20 shrink-0" /> 
                             {Array.from({ length: 9 }, (_, i) => i + 1).map((barisNum) => (
                               <div key={barisNum} className="w-20 sm:w-24 text-center shrink-0">
                                 <div className="text-xs font-semibold text-slate-600 bg-slate-100 rounded px-2 py-1">
@@ -573,43 +598,13 @@ export function WarehouseLayout() {
                                     <div className="flex gap-0.5">
                                       {/* 3 Pallets Horizontal */}
                                       {[1, 2, 3].map((palletNum) => {
-                                        const cell = group?.pallets.find((p) => p.pallet === palletNum);
-                                        const isFilled = !!cell?.product;
-                                        const colorKey: StatusColor = isFilled
-                                          ? cell.colorCode ?? "green"
-                                          : "empty";
-
+                                        // Cari cell dari semua cell yang sudah difilter/digroup
+                                        const cell = group?.pallets.find((p) => p.pallet === palletNum) || 
+                                          warehouseCells.find(c => c.cluster === cluster && c.lorong === lorongNum && c.baris === barisNum && c.pallet === palletNum) || 
+                                          {id: `${cluster}-L${lorongNum}-B${barisNum}-P${palletNum}`, cluster, lorong: lorongNum, baris: barisNum, pallet: palletNum, colorCode: "empty"} as WarehouseCell;
+                                        
                                         return (
-                                          <button
-                                            key={palletNum}
-                                            type="button"
-                                            onClick={() =>
-                                              cell?.product ? setSelectedCell(cell) : null
-                                            }
-                                            className={`
-                                              flex-1 h-12 sm:h-14 rounded flex flex-col items-center justify-center
-                                              ${colorMap[colorKey]}
-                                              ${
-                                                isFilled
-                                                  ? "cursor-pointer hover:scale-105 hover:shadow-md transition-all active:scale-95"
-                                                  : "cursor-default opacity-40"
-                                              }
-                                              text-[8px] sm:text-[9px] font-medium text-white shadow-sm
-                                            `}
-                                            title={isFilled ? `${cell.product} - P${palletNum}` : `Kosong - P${palletNum}`}
-                                          >
-                                            {isFilled ? (
-                                              <>
-                                                <div className="font-bold text-[9px] sm:text-[10px]">
-                                                  P{palletNum}
-                                                </div>
-                                              </>
-                                            ) : (
-                                              <div className="text-slate-400 font-medium text-[8px]">
-                                                P{palletNum}
-                                              </div>
-                                            )}
-                                          </button>
+                                          <PalletComponent key={palletNum} cell={cell} group={group} />
                                         );
                                       })}
                                     </div>

@@ -1,30 +1,24 @@
+// File: src/components/inbound-form.tsx (UPDATED)
+
 "use client";
 
 import { useState } from "react";
-import { productMasterData, getProductByCode } from "@/lib/mock/product-master";
+// --- START: Perubahan Import ---
+import { 
+  productMasterData, 
+  getProductByCode, 
+  ekspedisiMaster // Mengimpor Master Ekspedisi baru
+} from "@/lib/mock/product-master";
 import { stockListData } from "@/lib/mock/stocklistmock";
 import { QRScanner, QRData } from "./qr-scanner";
 import { Camera, X, CheckCircle, XCircle } from "lucide-react";
+// --- END: Perubahan Import ---
 
-// Ekspedisi options
-const ekspedisiOptions = [
-  { value: "HGS", label: "HGS" },
-  { value: "SJP", label: "SJP" },
-  { value: "SMR", label: "SMR" },
-];
+// --- START: Menghilangkan Hardcoded Data Lama ---
 
-// Cluster assignment berdasarkan produk (business rule)
-const productClusterMap: Record<string, string> = {
-  "AQ-200ML-48": "A",   // 200ML AQUA LOCAL 1X48 -> Cluster A
-  "AQ-600ML-24": "B",   // 600ML AQUA LOCAL 1X24 -> Cluster B
-  "AQ-1500ML-12": "C",  // 1500ML AQUA LOCAL 1X12 -> Cluster C
-  "AQ-330ML-24": "D",   // 330ML AQUA LOCAL 1X24 -> Cluster D
-  // QR Code variants (tanpa dash)
-  "AQ200_1X48": "A",
-  "AQ600_1X24": "B",
-  "AQ1500_1X12": "C",
-  "AQ330_1X24": "D",
-};
+// Menghilangkan ekspedisiOptions lama karena sudah ada di product-master.ts
+
+// Menghilangkan productClusterMap lama karena sekarang menggunakan defaultCluster dari ProductMaster
 
 interface RecommendedLocation {
   cluster: string;
@@ -32,6 +26,8 @@ interface RecommendedLocation {
   baris: string;
   level: string;
 }
+
+// --- END: Menghilangkan Hardcoded Data Lama ---
 
 type InboundFormState = {
   ekspedisi: string;
@@ -76,7 +72,12 @@ export function InboundForm() {
 
   // Get selected product data
   const selectedProduct = form.productCode ? getProductByCode(form.productCode) : null;
-  const autoCluster = form.productCode ? productClusterMap[form.productCode] || "" : "";
+  
+  // --- START: Logika Cluster Baru ---
+  // Gunakan defaultCluster dari ProductMaster yang baru
+  const autoCluster = selectedProduct?.defaultCluster || ""; 
+  // --- END: Logika Cluster Baru ---
+  
   const autoQtyPerPallet = selectedProduct?.qtyPerPallet || 0;
 
   // Dropdown options untuk lokasi
@@ -119,7 +120,10 @@ export function InboundForm() {
 
     // Auto-fill cluster ketika produk dipilih
     if (field === "productCode" && value) {
-      const cluster = productClusterMap[value] || "";
+      const selectedProd = getProductByCode(value);
+      // Gunakan defaultCluster yang baru
+      const cluster = selectedProd?.defaultCluster || ""; 
+      
       // Auto-set cluster jika rekomendasi otomatis aktif
       if (autoRecommend && cluster) {
         setForm(prev => ({ ...prev, cluster }));
@@ -135,6 +139,12 @@ export function InboundForm() {
             pallet: location.level, // Ganti level jadi pallet
           }));
         }
+      } else if (cluster) {
+        // Jika tidak auto, hanya set cluster (yang direkomendasikan)
+        setForm(prev => ({ ...prev, cluster }));
+      } else {
+        // Jika tidak ada cluster default, kosongkan cluster
+        setForm(prev => ({ ...prev, cluster: "" }));
       }
     }
   };
@@ -152,15 +162,24 @@ export function InboundForm() {
 
   // Handle QR Scan Success
   const handleQRScanSuccess = (data: QRData) => {
-    // Mapping QR product ID ke product code yang benar
+    // --- START: Penyesuaian Mapping QR Lama ke Kode Produk Baru ---
+    // Karena QR scanner Anda sebelumnya menggunakan kode 'AQ200_1X48' dll,
+    // yang tidak ada di master baru, kita buat mapping sementara.
+    // Jika format QR baru mengikuti productCode yang baru (misal AQ-200ML), 
+    // mapping ini bisa dihilangkan. 
     const productCodeMap: Record<string, string> = {
-      "AQ200_1X48": "AQ-200ML-48",
-      "AQ600_1X24": "AQ-600ML-24",
-      "AQ1500_1X12": "AQ-1500ML-12",
-      "AQ330_1X24": "AQ-330ML-24",
+      // Mapping dari kode lama ke kode baru yang sesuai di product-master.ts
+      "AQ200_1X48": "AQ-200ML", // (Kode baru)
+      "AQ600_1X24": "AQ-600ML",
+      "AQ1500_1X12": "AQ-1500ML",
+      "AQ330_1X24": "AQ-330ML",
+      // Tambahkan mapping untuk produk baru jika QR code menggunakan ID/Code lama
     };
 
     const mappedProductCode = productCodeMap[data.produkId] || data.produkId;
+    const selectedProd = getProductByCode(mappedProductCode);
+    // --- END: Penyesuaian Mapping QR Lama ke Kode Produk Baru ---
+
 
     // Auto-fill form dari QR data
     const newForm: InboundFormState = {
@@ -180,7 +199,9 @@ export function InboundForm() {
     setForm(newForm);
 
     // Auto-fill cluster dan rekomendasi lokasi jika auto recommend aktif
-    const cluster = productClusterMap[mappedProductCode] || "";
+    // Gunakan defaultCluster dari produk yang baru
+    const cluster = selectedProd?.defaultCluster || ""; 
+    
     if (autoRecommend && cluster) {
       const location = findRecommendedLocation(cluster);
       setRecommendedLocation(location);
@@ -194,10 +215,10 @@ export function InboundForm() {
         }));
       }
     } else if (cluster) {
-      // Jika tidak auto, hanya set cluster
+      // Jika tidak auto, hanya set cluster yang direkomendasikan
       setForm(prev => ({ ...prev, cluster }));
     }
-
+    
     setShowQRScanner(false);
   };
 
@@ -264,9 +285,19 @@ export function InboundForm() {
       return;
     }
 
-    // Check recommended location
-    if (!recommendedLocation) {
-      setErrorMessages(["Gudang penuh! Tidak ada lokasi kosong tersedia."]);
+    // Cek apakah lokasi ini sudah terisi (re-run logic)
+    const locationIsOccupied = stockListData.some(
+      (item) =>
+        item.location.cluster === form.cluster &&
+        item.location.lorong === form.lorong &&
+        item.location.baris === form.baris &&
+        item.location.level === form.pallet
+    );
+
+    if (locationIsOccupied) {
+      setErrorMessages([
+        `Lokasi ${form.cluster}-${form.lorong}-${form.baris}-${form.pallet} sudah terisi.`,
+      ]);
       setShowErrorModal(true);
       return;
     }
@@ -274,7 +305,7 @@ export function InboundForm() {
     // Simulasi inbound (dalam real app, ini akan POST ke API)
     console.log("Inbound Data:", {
       ...form,
-      cluster: autoCluster,
+      cluster: autoCluster, // Menggunakan autoCluster/defaultCluster
       qtyPerPallet: autoQtyPerPallet,
       recommendedLocation,
     });
@@ -328,7 +359,7 @@ export function InboundForm() {
             </button>
           </div>
 
-          {/* QR Scanner Modal */}
+          {/* QR Scanner Modal (No change needed here) */}
           {showQRScanner && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2">
               <div className="bg-white rounded-lg p-1.5 w-full max-w-60 relative shadow-xl">
@@ -354,7 +385,7 @@ export function InboundForm() {
             </div>
           )}
 
-          {/* Error Modal */}
+          {/* Error Modal (No change needed here) */}
           {showErrorModal && (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-bounce-in">
@@ -395,7 +426,7 @@ export function InboundForm() {
             </div>
           )}
 
-          {/* Success Modal */}
+          {/* Success Modal (No change needed here) */}
           {showSuccess && recommendedLocation && (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
@@ -454,11 +485,13 @@ export function InboundForm() {
                   }`}
                 >
                   <option value="">-- Pilih Ekspedisi --</option>
-                  {ekspedisiOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
+                  {/* --- START: Menggunakan ekspedisiMaster yang baru --- */}
+                  {ekspedisiMaster.map((opt) => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.name}
                     </option>
                   ))}
+                  {/* --- END: Menggunakan ekspedisiMaster yang baru --- */}
                 </select>
                 {errors.ekspedisi && (
                   <p className="text-red-500 text-xs mt-1">{errors.ekspedisi}</p>
@@ -498,6 +531,7 @@ export function InboundForm() {
                 }`}
               >
                 <option value="">-- Pilih Produk --</option>
+                {/* productMasterData sudah diperbarui di Langkah 1 */}
                 {productMasterData.map((product) => (
                   <option key={product.id} value={product.productCode}>
                     {product.productName} ({product.productCode})
@@ -577,6 +611,8 @@ export function InboundForm() {
                   className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                     errors.qtyCarton ? "border-red-500" : "border-gray-200"
                   }`}
+                  // Placeholder dan penamaan field (Qty Carton) harusnya Qty Pallet sesuai mock data
+                  placeholder="Masukkan Qty Pallet (per tumpukan)"
                 />
                 {errors.qtyCarton && (
                   <p className="text-red-500 text-xs mt-1">{errors.qtyCarton}</p>
@@ -617,6 +653,7 @@ export function InboundForm() {
                     } ${autoRecommend ? "bg-gray-100" : ""}`}
                     maxLength={1}
                     disabled={autoRecommend}
+                    // Nilai field ini sudah diisi otomatis berdasarkan selectedProduct.defaultCluster
                   />
                   {errors.cluster && (
                     <p className="text-red-500 text-xs mt-1">{errors.cluster}</p>
@@ -708,9 +745,13 @@ export function InboundForm() {
                 <p className="text-yellow-800 font-semibold">
                   📦 Total Quantity:{" "}
                   <span className="text-yellow-900 text-xl">
-                    {Number(form.qtyCarton) * selectedProduct.qtyPerCarton} pcs
+                    {/* Menggunakan qtyPerPallet yang baru */}
+                    {Number(form.qtyCarton) * selectedProduct.qtyPerPallet} pcs
                   </span>{" "}
-                  ({form.qtyCarton} Pallet × {selectedProduct.qtyPerCarton} pcs/carton)
+                  ({form.qtyCarton} Pallet × {selectedProduct.qtyPerPallet} pcs/pallet) 
+                </p>
+                <p className="text-xs text-yellow-700 mt-1">
+                    ⚠️ Saat ini, Qty Pallet di form diasumsikan sebagai "Jumlah Pallet (Tumpukan)". Total Pcs dihitung menggunakan Qty Produk/Pallet dari Master Data.
                 </p>
               </div>
             )}
@@ -747,14 +788,15 @@ export function InboundForm() {
                     <span className="font-semibold text-slate-900">{form.expiredDate || "-"}</span>
                   </div>
                   <div>
-                    <span className="text-slate-600">Qty Carton:</span>{" "}
+                    <span className="text-slate-600">Qty Pallet (Tumpukan):</span>{" "}
                     <span className="font-semibold text-slate-900">{form.qtyCarton || "-"}</span>
                   </div>
                   {selectedProduct && form.qtyCarton && (
                     <div className="col-span-2">
                       <span className="text-slate-600">Total Pcs:</span>{" "}
                       <span className="font-bold text-slate-900 text-lg">
-                        {Number(form.qtyCarton) * selectedProduct.qtyPerCarton} pcs
+                        {/* Menggunakan qtyPerPallet yang baru */}
+                        {Number(form.qtyCarton) * selectedProduct.qtyPerPallet} pcs
                       </span>
                     </div>
                   )}

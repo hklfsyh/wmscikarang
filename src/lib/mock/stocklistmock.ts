@@ -1,7 +1,12 @@
+// File: src/lib/mock/stocklistmock.ts (UPDATED - Teratur)
+
 // Stock List Mock Data - Data barang yang sudah ada di gudang
-// Layout: 5 lorong (A1-A5) x 9 baris (01-09) per cluster (A, B, C, D)
-// Data diacak untuk simulasi kondisi gudang yang ramai
+// Data diatur untuk simulasi kondisi gudang yang teratur di 2 lorong pertama
 // Setiap record punya expired date untuk FEFO
+
+// --- START: Perubahan Import ---
+import { ProductMaster, productMasterData } from "@/lib/mock/product-master";
+// --- END: Perubahan Import ---
 
 export interface StockItem {
   id: string;
@@ -11,14 +16,14 @@ export interface StockItem {
   batchNumber: string;   // Kept for compatibility
   lotNumber: string;
   location: {
-    cluster: string; // A, B, C, D
-    lorong: string;  // L1, L2, L3, ... L11
-    baris: string;   // B1, B2, B3, ... B9
-    level: string;   // P1, P2, P3, P4 (Pallet position)
+    cluster: string; 
+    lorong: string;  
+    baris: string;   
+    level: string;   
   };
-  qtyPallet: number;
-  qtyCarton: number;
-  qtyPcs: number;
+  qtyPallet: number; // Jumlah tumpukan pallet di lokasi rak
+  qtyCarton: number; // Total karton/box (menggunakan qtyPerPallet dari Master)
+  qtyPcs: number; // Total pcs/unit
   expiredDate: string;
   inboundDate: string;
   status: "available" | "reserved" | "quarantine";
@@ -44,67 +49,70 @@ function getInboundDate(): string {
   return date.toISOString().split('T')[0];
 }
 
-// Product codes dengan cluster assignment
-const clusterProductMap: Record<string, { code: string; name: string; qtyPerCarton: number }> = {
-  "A": { code: "AQ-200ML-48", name: "200ML AQUA LOCAL 1X48", qtyPerCarton: 48 },
-  "B": { code: "AQ-600ML-24", name: "600ML AQUA LOCAL 1X24", qtyPerCarton: 24 },
-  "C": { code: "AQ-1500ML-12", name: "1500ML AQUA LOCAL 1X12", qtyPerCarton: 12 },
-  "D": { code: "AQ-330ML-24", name: "330ML AQUA LOCAL 1X24", qtyPerCarton: 24 },
-};
+// --- START: Logika Data Generator BARU (Teratur) ---
 
-const allProducts = [
-  { code: "AQ-200ML-48", name: "200ML AQUA LOCAL 1X48", qtyPerCarton: 48 },
-  { code: "AQ-600ML-24", name: "600ML AQUA LOCAL 1X24", qtyPerCarton: 24 },
-  { code: "AQ-1500ML-12", name: "1500ML AQUA LOCAL 1X12", qtyPerCarton: 12 },
-  { code: "AQ-330ML-24", name: "330ML AQUA LOCAL 1X24", qtyPerCarton: 24 },
-];
+// Daftar Cluster yang digunakan
+const clusters = ["A", "B", "C", "D", "E"]; 
 
-const clusters = ["A", "B", "C", "D"];
-const lorongList = ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11"];
-const barisList = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"];
-const levelList = ["P1", "P2", "P3", "P4"]; // Pallet positions
+// Filter produk yang memiliki defaultCluster
+const allProductsWithCluster = productMasterData.filter(p => p.defaultCluster);
+
+// Gunakan 2 Lorong dan 9 Baris (Permintaan User)
+const lorongList = ["L1", "L2"]; // Hanya 2 Lorong pertama
+const barisList = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"]; // Semua 9 Baris
+// Gunakan 3 Level (Pallet) per Baris/Rak
+const levelList = ["P1", "P2", "P3"]; 
 
 // Generate stock data
 const stockListData: StockItem[] = [];
 let idCounter = 1;
 
-// Generate data untuk setiap cluster
+// Loop untuk generate data di Cluster A, B, C, D, E
 clusters.forEach(cluster => {
-  // Produk yang seharusnya ada di cluster ini
-  const correctProduct = clusterProductMap[cluster];
+  // Produk yang default clusternya sama dengan cluster yang sedang di-loop
+  const clusterDefaultProducts = productMasterData.filter(p => p.defaultCluster === cluster);
   
-  // Generate data untuk setiap lorong
+  // Ambil 1 produk utama untuk cluster ini (Jika ada)
+  const mainProduct = clusterDefaultProducts.length > 0 
+    ? clusterDefaultProducts[0]
+    : productMasterData[Math.floor(Math.random() * productMasterData.length)];
+
+
+  // Loop Lorong, Baris, dan Level yang diminta
   lorongList.forEach(lorong => {
-    // Generate data untuk setiap baris
     barisList.forEach(baris => {
-      // Random 1-2 level terisi per lokasi (baris) - reduced density for more variety
-      const numLevels = Math.floor(Math.random() * 2) + 1;
-      const usedLevels = levelList.slice(0, numLevels).sort(() => Math.random() - 0.5);
-      
-      usedLevels.forEach(level => {
-        // 85% correct product, 15% wrong product (untuk simulasi salah cluster)
-        const isCorrectProduct = Math.random() < 0.85;
-        const product = isCorrectProduct 
-          ? correctProduct 
-          : allProducts[Math.floor(Math.random() * allProducts.length)];
+      levelList.forEach(level => { // P1, P2, P3 akan terisi penuh
+        
+        // 90% produk yang benar (default cluster), 10% produk acak (salah penempatan)
+        const isCorrectProduct = Math.random() < 0.90;
+        let product: ProductMaster;
+
+        if (isCorrectProduct && clusterDefaultProducts.length > 0) {
+            // Pilih produk utama atau produk yang sesuai dengan cluster
+            product = mainProduct;
+        } else {
+            // Pilih produk secara acak dari semua produk (simulasi salah penempatan)
+            product = productMasterData[Math.floor(Math.random() * productMasterData.length)];
+        }
         
         // Random quantity
-        const qtyPallet = Math.floor(Math.random() * 3) + 1; // 1-3 pallet
-        const qtyCarton = Math.floor(Math.random() * 20) + 5; // 5-24 carton
+        const qtyPallet = Math.floor(Math.random() * 3) + 1; // 1-3 tumpukan pallet
+        
+        // Hitung qtyCarton/qtyBox (Qty Pallet * Qty Produk/Pallet)
+        const qtyCarton = qtyPallet * product.qtyPerPallet; 
+        
+        // Hitung qtyPcs (Qty Carton * Qty per Karton)
         const qtyPcs = qtyCarton * product.qtyPerCarton;
         
         // Random batch and BB Pallet
         const batchMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
-        const batchYear = 2024;
+        const batchYear = 2025; 
         const batchSeq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
         const batchNumber = `BATCH-${batchYear}${batchMonth}-${batchSeq}`;
         const lotNumber = `LOT-${batchYear}${batchMonth}-${batchSeq}`;
         const bbPallet = `BB-${batchYear}${batchMonth}-${String(idCounter).padStart(4, '0')}`;
         
-        // Expired date distribution:
-        // 30% green (near expiry: 10-90 days) - harus release segera (FEFO priority)
-        // 55% yellow (medium expiry: 91-180 days)
-        // 15% yellow (long expiry: 181-540 days)
+        // Expired date distribution (FEFO logic):
         const expRand = Math.random();
         let expiredDate: string;
         if (expRand < 0.30) {
@@ -120,7 +128,7 @@ clusters.forEach(cluster => {
         
         const inboundDate = getInboundDate();
         
-        // Random status (kebanyakan available)
+        // Random status (lebih banyak available)
         const randStatus = Math.random();
         let status: "available" | "reserved" | "quarantine";
         if (randStatus < 0.88) {
@@ -133,8 +141,8 @@ clusters.forEach(cluster => {
         
         stockListData.push({
           id: `STK-${String(idCounter).padStart(5, '0')}`,
-          productCode: product.code,
-          productName: product.name,
+          productCode: product.productCode,
+          productName: product.productName,
           bbPallet,
           batchNumber,
           lotNumber,
@@ -159,9 +167,12 @@ clusters.forEach(cluster => {
   });
 });
 
+// --- END: Logika Data Generator BARU (Teratur) ---
+
 export { stockListData };
 
-// Helper functions
+// Helper functions (Tidak perlu diubah)
+
 export const getStockByLocation = (cluster: string, lorong: string, baris: string, level: string): StockItem | undefined => {
   return stockListData.find(
     s => s.location.cluster === cluster && 

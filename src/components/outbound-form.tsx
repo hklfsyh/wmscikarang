@@ -1,7 +1,11 @@
+// File: src/components/outbound-form.tsx (UPDATED)
+
 "use client";
 
 import { useState } from "react";
+// --- START: Perubahan Import ---
 import { productMasterData, getProductByCode } from "@/lib/mock/product-master";
+// --- END: Perubahan Import ---
 import { stockListData } from "@/lib/mock/stocklistmock";
 import { TruckIcon, MapPin } from "lucide-react";
 
@@ -71,7 +75,7 @@ export function OutboundForm() {
     for (const stock of availableStocks) {
       if (remainingQtyPallet <= 0) break;
 
-      // Gunakan qtyPallet langsung dari stock data
+      // Gunakan qtyPallet (jumlah tumpukan pallet di slot) dari stock data
       const availablePallet = stock.qtyPallet;
       
       if (availablePallet > 0) {
@@ -114,6 +118,13 @@ export function OutboundForm() {
     setForm(initialState);
     setFefoLocations([]);
   };
+
+  // --- START: Kalkulasi Total Pcs Baru ---
+  const totalPcs = selectedProduct && form.qtyPallet
+    ? Number(form.qtyPallet) * selectedProduct.qtyPerPallet 
+    : 0;
+  // --- END: Kalkulasi Total Pcs Baru ---
+
 
   return (
     <div className="min-h-screen bg-linear-to-br from-orange-50 to-red-100 p-4 md:p-8">
@@ -196,7 +207,7 @@ export function OutboundForm() {
                   📍 Lokasi Pengambilan (FEFO - First Expired First Out):
                 </h3>
                 <p className="text-sm text-emerald-700">
-                  💡 Pilih produk terlebih dahulu untuk melihat rekomendasi lokasi pengambilan berdasarkan FEFO.
+                  💡 Pilih produk dan kuantitas terlebih dahulu untuk melihat rekomendasi lokasi pengambilan berdasarkan FEFO.
                 </p>
               </div>
             </div>
@@ -214,15 +225,23 @@ export function OutboundForm() {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-600">Qty:</span>
+                  <span className="text-slate-600">Qty Pallet Diminta:</span>
                   <span className="font-semibold text-slate-900">
-                    {form.qtyPallet || "Belum diisi"}
+                    {form.qtyPallet || "-"}
                   </span>
                 </div>
+                {/* --- START: Menampilkan Total Pcs Baru --- */}
+                <div className="flex justify-between pt-2 border-t border-slate-300">
+                  <span className="text-slate-600">Total Pcs Diambil:</span>
+                  <span className="font-bold text-slate-900 text-lg">
+                    {totalPcs.toLocaleString()} pcs
+                  </span>
+                </div>
+                {/* --- END: Menampilkan Total Pcs Baru --- */}
               </div>
               <div className="mt-3 pt-3 border-t border-slate-300">
                 <p className="text-xs text-blue-700 font-medium">
-                  ℹ️ Catatan: Sistem hanya menampilkan rekomendasi lokasi berdasarkan FEFO. Saat terhubung database, sistem akan otomatis mengurangi stok dari lokasi-lokasi tersebut.
+                  ℹ️ Catatan: Sistem hanya menampilkan rekomendasi lokasi berdasarkan FEFO.
                 </p>
               </div>
             </div>
@@ -232,12 +251,14 @@ export function OutboundForm() {
           <div className="flex gap-3">
             <button
               onClick={calculateFEFO}
+              type="button"
               className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold hover:bg-blue-600 transition-colors shadow-lg flex items-center justify-center gap-2"
             >
-              🔍 Simpan
+              🔍 Hitung Lokasi FEFO
             </button>
             <button
               onClick={handleReset}
+              type="button"
               className="px-6 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition-colors flex items-center justify-center gap-2"
             >
               🔄 Reset
