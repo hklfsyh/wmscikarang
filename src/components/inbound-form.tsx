@@ -1,24 +1,16 @@
-// File: src/components/inbound-form.tsx (UPDATED)
+// File: src/components/inbound-form.tsx (Langkah 11: Kalkulasi Qty Dinamis)
 
 "use client";
 
-import { useState } from "react";
-// --- START: Perubahan Import ---
+import { useState, useEffect, useMemo } from "react"; // Tambah useMemo
 import { 
   productMasterData, 
   getProductByCode, 
-  ekspedisiMaster // Mengimpor Master Ekspedisi baru
+  ekspedisiMaster 
 } from "@/lib/mock/product-master";
 import { stockListData } from "@/lib/mock/stocklistmock";
 import { QRScanner, QRData } from "./qr-scanner";
 import { Camera, X, CheckCircle, XCircle } from "lucide-react";
-// --- END: Perubahan Import ---
-
-// --- START: Menghilangkan Hardcoded Data Lama ---
-
-// Menghilangkan ekspedisiOptions lama karena sudah ada di product-master.ts
-
-// Menghilangkan productClusterMap lama karena sekarang menggunakan defaultCluster dari ProductMaster
 
 interface RecommendedLocation {
   cluster: string;
@@ -27,17 +19,17 @@ interface RecommendedLocation {
   level: string;
 }
 
-// --- END: Menghilangkan Hardcoded Data Lama ---
-
 type InboundFormState = {
   ekspedisi: string;
   tanggal: string;
   productCode: string;
-  bbPallet: string;
+  bbProduk: string;
   kdPlant: string;
   expiredDate: string;
-  qtyCarton: string;
-  // Location fields
+  // --- PERUBAHAN QTY STATE ---
+  qtyPalletInput: string; // Input Qty Pallet (User mengisi pallet utuh)
+  qtyCartonInput: string; // Input Qty Carton (User mengisi karton/sisa)
+  // --- AKHIR PERUBAHAN QTY STATE ---
   cluster: string;
   lorong: string;
   baris: string;
@@ -50,15 +42,44 @@ const initialState: InboundFormState = {
   ekspedisi: "",
   tanggal: today,
   productCode: "",
-  bbPallet: "",
+  bbProduk: "", 
   kdPlant: "",
   expiredDate: "",
-  qtyCarton: "",
+  qtyPalletInput: "", 
+  qtyCartonInput: "",
   cluster: "",
   lorong: "",
   baris: "",
   pallet: "",
 };
+
+// --- FUNGSI UTILITY: PARSING BB PRODUK ---
+const parseBBProduk = (bb: string): { expiredDate: string, kdPlant: string, isValid: boolean } => {
+  const expiredDateStr = bb.substring(0, 6); // YYMMDD
+  const kdPlantStr = bb.substring(6, 10);    // 4 digit berikutnya
+  
+  if (bb.length !== 10) {
+    return { expiredDate: "", kdPlant: "", isValid: false };
+  }
+
+  const yearPrefix = (new Date().getFullYear() < 2050 && Number(expiredDateStr.substring(0, 2)) > 50) ? '19' : '20';
+  const year = `${yearPrefix}${expiredDateStr.substring(0, 2)}`;
+  const month = expiredDateStr.substring(2, 4);
+  const day = expiredDateStr.substring(4, 6);
+  
+  const dateObj = new Date(`${year}-${month}-${day}`);
+  const validDate = !isNaN(dateObj.getTime()) && dateObj.getMonth() + 1 === Number(month);
+
+  return {
+    expiredDate: validDate ? `${year}-${month}-${day}` : "",
+    kdPlant: kdPlantStr,
+    isValid: validDate,
+  };
+};
+
+// --- FUNGSI UTILITY: QTY PALLET STACK OPTIONS ---
+const palletStackOptions = Array.from({ length: 5 }, (_, i) => i + 1);
+
 
 export function InboundForm() {
   const [form, setForm] = useState<InboundFormState>(initialState);
@@ -68,30 +89,53 @@ export function InboundForm() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
-  const [autoRecommend, setAutoRecommend] = useState(true); // Checkbox rekomendasi otomatis
+  const [autoRecommend, setAutoRecommend] = useState(true);
 
-  // Get selected product data
+  // --- LOGIKA QTY DINAMIS (CALCULATED VALUES) ---
   const selectedProduct = form.productCode ? getProductByCode(form.productCode) : null;
+  const qtyPerPalletStd = selectedProduct?.qtyPerPallet || 0; // Standard Qty Produk per 1 Pallet
   
-  // --- START: Logika Cluster Baru ---
-  // Gunakan defaultCluster dari ProductMaster yang baru
+  const { totalPallets, remainingCartons, totalCartons } = useMemo(() => {
+    // 1. Ambil input dari user (default ke 0 jika kosong)
+    const palletInput = Number(form.qtyPalletInput) || 0;
+    const cartonInput = Number(form.qtyCartonInput) || 0;
+    
+    // 2. Hitung total karton jika Qty Per Pallet ada
+    const totalCartons = (palletInput * qtyPerPalletStd) + cartonInput;
+    
+    if (qtyPerPalletStd === 0) {
+      return { totalPallets: 0, remainingCartons: cartonInput, totalCartons: cartonInput };
+    }
+
+    // 3. Hitung Pallet Utuh (Full Pallet)
+    const calculatedPallets = Math.floor(totalCartons / qtyPerPalletStd);
+    
+    // 4. Hitung Sisa Karton (Receh)
+    const remaining = totalCartons % qtyPerPalletStd;
+    
+    return {
+      totalPallets: calculatedPallets,
+      remainingCartons: remaining,
+      totalCartons: totalCartons,
+    };
+  }, [form.qtyPalletInput, form.qtyCartonInput, qtyPerPalletStd]);
+  
+  // Logika Receh: Hanya jika ada sisa karton
+  const isReceh = remainingCartons > 0;
+  // --- AKHIR LOGIKA QTY DINAMIS ---
+
+
+  // --- LOGIKA REKOMENDASI LOKASI ---
   const autoCluster = selectedProduct?.defaultCluster || ""; 
-  // --- END: Logika Cluster Baru ---
-  
-  const autoQtyPerPallet = selectedProduct?.qtyPerPallet || 0;
+  const lorongOptions = Array.from({ length: 11 }, (_, i) => `L${i + 1}`); 
+  const barisOptions = Array.from({ length: 9 }, (_, i) => `B${i + 1}`); 
+  const palletOptions = Array.from({ length: 3 }, (_, i) => `P${i + 1}`); 
 
-  // Dropdown options untuk lokasi
-  const lorongOptions = Array.from({ length: 11 }, (_, i) => `L${i + 1}`); // L1-L11
-  const barisOptions = Array.from({ length: 9 }, (_, i) => `B${i + 1}`); // B1-B9
-  const palletOptions = Array.from({ length: 3 }, (_, i) => `P${i + 1}`); // P1-P3
-
-  // Function untuk mencari lokasi kosong yang recommended
   const findRecommendedLocation = (cluster: string): RecommendedLocation | null => {
     const lorongList = lorongOptions;
     const barisList = barisOptions;
     const levelList = palletOptions;
 
-    // Cari lokasi kosong di cluster yang sesuai
     for (const lorong of lorongList) {
       for (const baris of barisList) {
         for (const level of levelList) {
@@ -110,86 +154,95 @@ export function InboundForm() {
       }
     }
 
-    return null; // Gudang penuh
+    return null; 
   };
+  // --- AKHIR LOGIKA REKOMENDASI LOKASI ---
 
-  // Handle field change
+
+  // --- EFFECT DAN HANDLER ---
+  useEffect(() => {
+    if (form.bbProduk.length === 10) {
+      const { expiredDate, kdPlant, isValid } = parseBBProduk(form.bbProduk);
+      if (isValid) {
+        setForm(prev => ({ ...prev, expiredDate: expiredDate, kdPlant: kdPlant }));
+        setErrors(prev => ({ ...prev, bbProduk: "" }));
+      } else {
+         setForm(prev => ({ ...prev, expiredDate: "", kdPlant: "" }));
+         setErrors(prev => ({ ...prev, bbProduk: "Format Expired Date (YYMMDD) di BB Produk tidak valid." }));
+      }
+    } else {
+      setForm(prev => ({ ...prev, expiredDate: "", kdPlant: "" }));
+      if (form.bbProduk.length > 0 && form.bbProduk.length < 10) {
+        setErrors(prev => ({ ...prev, bbProduk: "BB Produk harus 10 karakter (YYMMDDXXXX)." }));
+      } else {
+        setErrors(prev => ({ ...prev, bbProduk: "" }));
+      }
+    }
+  }, [form.bbProduk]);
+  
   const handleChange = (field: keyof InboundFormState, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
     setErrors(prev => ({ ...prev, [field]: "" }));
 
-    // Auto-fill cluster ketika produk dipilih
     if (field === "productCode" && value) {
       const selectedProd = getProductByCode(value);
-      // Gunakan defaultCluster yang baru
       const cluster = selectedProd?.defaultCluster || ""; 
       
-      // Auto-set cluster jika rekomendasi otomatis aktif
       if (autoRecommend && cluster) {
         setForm(prev => ({ ...prev, cluster }));
         const location = findRecommendedLocation(cluster);
         setRecommendedLocation(location);
-        // Auto-fill location jika ada rekomendasi
         if (location) {
           setForm(prev => ({
             ...prev,
             cluster: location.cluster,
             lorong: location.lorong,
             baris: location.baris,
-            pallet: location.level, // Ganti level jadi pallet
+            pallet: location.level, 
           }));
         }
       } else if (cluster) {
-        // Jika tidak auto, hanya set cluster (yang direkomendasikan)
         setForm(prev => ({ ...prev, cluster }));
       } else {
-        // Jika tidak ada cluster default, kosongkan cluster
         setForm(prev => ({ ...prev, cluster: "" }));
       }
     }
   };
 
-  // Validate tanggal (hanya boleh hari ini)
   const validateTanggal = (tanggal: string): boolean => {
     const today = new Date().toISOString().slice(0, 10);
     return tanggal === today;
   };
 
-  // Validate BB Pallet (bebas, tidak strict)
-  const validateBBPallet = (bbPallet: string): boolean => {
-    return bbPallet.trim().length > 0;
-  };
-
-  // Handle QR Scan Success
   const handleQRScanSuccess = (data: QRData) => {
-    // --- START: Penyesuaian Mapping QR Lama ke Kode Produk Baru ---
-    // Karena QR scanner Anda sebelumnya menggunakan kode 'AQ200_1X48' dll,
-    // yang tidak ada di master baru, kita buat mapping sementara.
-    // Jika format QR baru mengikuti productCode yang baru (misal AQ-200ML), 
-    // mapping ini bisa dihilangkan. 
     const productCodeMap: Record<string, string> = {
-      // Mapping dari kode lama ke kode baru yang sesuai di product-master.ts
-      "AQ200_1X48": "AQ-200ML", // (Kode baru)
+      "AQ200_1X48": "AQ-200ML", 
       "AQ600_1X24": "AQ-600ML",
       "AQ1500_1X12": "AQ-1500ML",
       "AQ330_1X24": "AQ-330ML",
-      // Tambahkan mapping untuk produk baru jika QR code menggunakan ID/Code lama
     };
 
     const mappedProductCode = productCodeMap[data.produkId] || data.produkId;
     const selectedProd = getProductByCode(mappedProductCode);
-    // --- END: Penyesuaian Mapping QR Lama ke Kode Produk Baru ---
+    
+    const expDate = new Date(data.expiredDate);
+    const YY = String(expDate.getFullYear()).slice(-2);
+    const MM = String(expDate.getMonth() + 1).padStart(2, '0');
+    const DD = String(expDate.getDate()).padStart(2, '0');
+    const expiredDateYYMMDD = `${YY}${MM}${DD}`;
 
+    const newBBProduk = `${expiredDateYYMMDD}${data.kdPlant}`;
+    const { expiredDate: parsedExpDate, kdPlant: parsedKdPlant } = parseBBProduk(newBBProduk);
 
-    // Auto-fill form dari QR data
     const newForm: InboundFormState = {
       ekspedisi: data.ekspedisi,
       tanggal: today,
       productCode: mappedProductCode,
-      bbPallet: data.bbPallet,
-      kdPlant: data.kdPlant,
-      expiredDate: data.expiredDate,
-      qtyCarton: "",
+      bbProduk: newBBProduk, 
+      kdPlant: parsedKdPlant, 
+      expiredDate: parsedExpDate, 
+      qtyPalletInput: "1", // Default 1 Pallet dari QR
+      qtyCartonInput: "", // Kosongkan, user harus input Qty Produk aktual
       cluster: "",
       lorong: "",
       baris: "",
@@ -198,8 +251,6 @@ export function InboundForm() {
 
     setForm(newForm);
 
-    // Auto-fill cluster dan rekomendasi lokasi jika auto recommend aktif
-    // Gunakan defaultCluster dari produk yang baru
     const cluster = selectedProd?.defaultCluster || ""; 
     
     if (autoRecommend && cluster) {
@@ -215,68 +266,42 @@ export function InboundForm() {
         }));
       }
     } else if (cluster) {
-      // Jika tidak auto, hanya set cluster yang direkomendasikan
       setForm(prev => ({ ...prev, cluster }));
     }
     
     setShowQRScanner(false);
   };
 
-  // Handle submit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validasi
     const newErrors: Record<string, string> = {};
     const errorList: string[] = [];
+    
+    if (!form.ekspedisi) { newErrors.ekspedisi = "Ekspedisi harus diisi"; errorList.push("Ekspedisi harus diisi"); }
+    if (!validateTanggal(form.tanggal)) { newErrors.tanggal = "Tanggal harus hari ini"; errorList.push("Tanggal harus hari ini"); }
+    if (!form.productCode) { newErrors.productCode = "Produk harus dipilih"; errorList.push("Produk harus dipilih"); }
 
-    if (!form.ekspedisi) {
-      newErrors.ekspedisi = "Ekspedisi harus diisi";
-      errorList.push("Ekspedisi harus diisi");
+    if (!form.bbProduk || form.bbProduk.length !== 10 || errors.bbProduk) {
+      newErrors.bbProduk = errors.bbProduk || "BB Produk harus 10 karakter (YYMMDDXXXX) dan format tanggal valid.";
+      errorList.push(newErrors.bbProduk);
     }
-    if (!validateTanggal(form.tanggal)) {
-      newErrors.tanggal = "Tanggal harus hari ini";
-      errorList.push("Tanggal harus hari ini");
+    
+    // Validasi Qty: Salah satu harus terisi
+    if (totalCartons === 0) {
+        if (!form.qtyPalletInput && !form.qtyCartonInput) {
+            newErrors.qtyPalletInput = "Setidaknya Qty Pallet atau Qty Produk harus diisi";
+            errorList.push("Qty (Pallet/Karton) harus diisi.");
+        } else if (form.qtyPalletInput && form.qtyCartonInput && Number(form.qtyPalletInput) + Number(form.qtyCartonInput) === 0) {
+             newErrors.qtyPalletInput = "Total Qty tidak boleh nol.";
+            errorList.push("Total Qty tidak boleh nol.");
+        }
     }
-    if (!form.productCode) {
-      newErrors.productCode = "Produk harus dipilih";
-      errorList.push("Produk harus dipilih");
-    }
-    if (!form.bbPallet) {
-      newErrors.bbPallet = "BB Pallet harus diisi";
-      errorList.push("BB Pallet harus diisi");
-    } else if (!validateBBPallet(form.bbPallet)) {
-      newErrors.bbPallet = "BB Pallet tidak boleh kosong";
-      errorList.push("BB Pallet tidak boleh kosong");
-    }
-    if (!form.kdPlant) {
-      newErrors.kdPlant = "Kd Plant harus diisi";
-      errorList.push("Kd Plant harus diisi");
-    }
-    if (!form.expiredDate) {
-      newErrors.expiredDate = "Expired Date harus diisi";
-      errorList.push("Expired Date harus diisi");
-    }
-    if (!form.qtyCarton) {
-      newErrors.qtyCarton = "Qty Carton harus diisi";
-      errorList.push("Qty Carton harus diisi");
-    }
-    if (!form.cluster) {
-      newErrors.cluster = "Cluster harus diisi";
-      errorList.push("Cluster harus diisi");
-    }
-    if (!form.lorong) {
-      newErrors.lorong = "Lorong harus diisi";
-      errorList.push("Lorong harus diisi");
-    }
-    if (!form.baris) {
-      newErrors.baris = "Baris harus diisi";
-      errorList.push("Baris harus diisi");
-    }
-    if (!form.pallet) {
-      newErrors.pallet = "Pallet/Level harus diisi";
-      errorList.push("Pallet/Level harus diisi");
-    }
+    
+    if (!form.cluster) { newErrors.cluster = "Cluster harus diisi"; errorList.push("Cluster harus diisi"); }
+    if (!form.lorong) { newErrors.lorong = "Lorong harus diisi"; errorList.push("Lorong harus diisi"); }
+    if (!form.baris) { newErrors.baris = "Baris harus diisi"; errorList.push("Baris harus diisi"); }
+    if (!form.pallet) { newErrors.pallet = "Pallet/Level harus diisi"; errorList.push("Pallet/Level harus diisi"); }
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -285,7 +310,7 @@ export function InboundForm() {
       return;
     }
 
-    // Cek apakah lokasi ini sudah terisi (re-run logic)
+    // Cek apakah lokasi ini sudah terisi
     const locationIsOccupied = stockListData.some(
       (item) =>
         item.location.cluster === form.cluster &&
@@ -302,11 +327,16 @@ export function InboundForm() {
       return;
     }
 
-    // Simulasi inbound (dalam real app, ini akan POST ke API)
+    // Simulasi inbound
     console.log("Inbound Data:", {
       ...form,
-      cluster: autoCluster, // Menggunakan autoCluster/defaultCluster
-      qtyPerPallet: autoQtyPerPallet,
+      bbPallet: form.bbProduk, 
+      qtyPalletStack: totalPallets, // Kirim Qty Pallet (Hasil Kalkulasi)
+      qtyCartonActual: remainingCartons, // Kirim Sisa Karton (Hasil Kalkulasi)
+      totalCartons: totalCartons, // Kirim Total Karton (Untuk pencatatan)
+      isReceh: isReceh, // Status Receh
+      cluster: autoCluster,
+      standardQtyPerPallet: qtyPerPalletStd,
       recommendedLocation,
     });
 
@@ -321,6 +351,8 @@ export function InboundForm() {
       setErrors({});
     }, 2000);
   };
+  // --- AKHIR EFFECT DAN HANDLER ---
+
 
   return (
     <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-100 p-4 md:p-8">
@@ -346,7 +378,7 @@ export function InboundForm() {
               </div>
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Inbound Form</h1>
-                <p className="text-sm text-gray-500">Ambil dari Master Data & Auto Lokasi</p>
+                <p className="text-sm text-gray-500">Input Data Penerimaan (Primary)</p>
               </div>
             </div>
             <button
@@ -359,7 +391,8 @@ export function InboundForm() {
             </button>
           </div>
 
-          {/* QR Scanner Modal (No change needed here) */}
+          {/* Modals (Dihilangkan untuk brevity) */}
+          {/* ... (QR Scanner Modal) */}
           {showQRScanner && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2">
               <div className="bg-white rounded-lg p-1.5 w-full max-w-60 relative shadow-xl">
@@ -385,7 +418,7 @@ export function InboundForm() {
             </div>
           )}
 
-          {/* Error Modal (No change needed here) */}
+          {/* Error Modal (Asli) */}
           {showErrorModal && (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-bounce-in">
@@ -426,7 +459,7 @@ export function InboundForm() {
             </div>
           )}
 
-          {/* Success Modal (No change needed here) */}
+          {/* Success Modal (Asli) */}
           {showSuccess && recommendedLocation && (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
@@ -449,7 +482,7 @@ export function InboundForm() {
                       📍 Lokasi Rekomendasi:
                     </p>
                     <div className="flex items-center justify-center">
-                      <span className="px-6 py-3 bg-green-600 text-white rounded-xl font-bold text-2xl tracking-wider">
+                      <span className="px-6 py-3 bg-green-600 text-white rounded-lg font-bold text-2xl tracking-wider">
                         {recommendedLocation.cluster}-{recommendedLocation.lorong}-
                         {recommendedLocation.baris}-{recommendedLocation.level}
                       </span>
@@ -468,11 +501,12 @@ export function InboundForm() {
               </div>
             </div>
           )}
-
+          
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Ekspedisi & Tanggal */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Field Ekspedisi (Tetap) */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Ekspedisi <span className="text-red-500">*</span>
@@ -485,19 +519,18 @@ export function InboundForm() {
                   }`}
                 >
                   <option value="">-- Pilih Ekspedisi --</option>
-                  {/* --- START: Menggunakan ekspedisiMaster yang baru --- */}
                   {ekspedisiMaster.map((opt) => (
                     <option key={opt.code} value={opt.code}>
                       {opt.name}
                     </option>
                   ))}
-                  {/* --- END: Menggunakan ekspedisiMaster yang baru --- */}
                 </select>
                 {errors.ekspedisi && (
                   <p className="text-red-500 text-xs mt-1">{errors.ekspedisi}</p>
                 )}
               </div>
 
+              {/* Field Tanggal (Tetap) */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Tanggal Inbound <span className="text-red-500">*</span>
@@ -531,7 +564,6 @@ export function InboundForm() {
                 }`}
               >
                 <option value="">-- Pilih Produk --</option>
-                {/* productMasterData sudah diperbarui di Langkah 1 */}
                 {productMasterData.map((product) => (
                   <option key={product.id} value={product.productCode}>
                     {product.productName} ({product.productCode})
@@ -543,82 +575,81 @@ export function InboundForm() {
               )}
             </div>
 
-            {/* BB Pallet & Kd Plant */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  BB Pallet <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.bbPallet}
-                  onChange={(e) => handleChange("bbPallet", e.target.value)}
-                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
-                    errors.bbPallet ? "border-red-500" : "border-gray-200"
-                  }`}
-                />
-                {errors.bbPallet && (
-                  <p className="text-red-500 text-xs mt-1">{errors.bbPallet}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Kd Plant <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.kdPlant}
-                  onChange={(e) => handleChange("kdPlant", e.target.value)}
-                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
-                    errors.kdPlant ? "border-red-500" : "border-gray-200"
-                  }`}
-                />
-                {errors.kdPlant && (
-                  <p className="text-red-500 text-xs mt-1">{errors.kdPlant}</p>
-                )}
+            {/* BB Produk */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                BB Produk (YYMMDDXXXX) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={form.bbProduk}
+                onChange={(e) => handleChange("bbProduk", e.target.value.toUpperCase())}
+                maxLength={10}
+                className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                  errors.bbProduk ? "border-red-500" : "border-gray-200"
+                }`}
+                placeholder="Contoh: 27090290A0"
+              />
+              {errors.bbProduk && (
+                <p className="text-red-500 text-xs mt-1">{errors.bbProduk}</p>
+              )}
+              {/* Display Parsed Values */}
+              <div className="mt-2 text-xs grid grid-cols-2 gap-2">
+                <div className="bg-slate-50 p-2 rounded-lg">
+                  <span className="text-slate-600">Kd Plant (4 digit):</span>{" "}
+                  <span className="font-semibold text-slate-800">{form.kdPlant || '-'}</span>
+                </div>
+                <div className="bg-slate-50 p-2 rounded-lg">
+                  <span className="text-slate-600">Expired Date:</span>{" "}
+                  <span className="font-semibold text-slate-800">{form.expiredDate || '-'}</span>
+                </div>
               </div>
             </div>
 
-            {/* Expired Date & Qty Carton */}
+            {/* --- START: Qty Gabungan (Pallet Input & Carton Input) --- */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Expired Date <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  value={form.expiredDate}
-                  onChange={(e) => handleChange("expiredDate", e.target.value)}
-                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
-                    errors.expiredDate ? "border-red-500" : "border-gray-200"
-                  }`}
-                />
-                {errors.expiredDate && (
-                  <p className="text-red-500 text-xs mt-1">{errors.expiredDate}</p>
-                )}
-              </div>
+                {/* Qty Pallet (Input Manual) */}
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Qty Pallet Utuh <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                        type="number"
+                        value={form.qtyPalletInput}
+                        onChange={(e) => handleChange("qtyPalletInput", e.target.value)}
+                        min="0"
+                        className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                            errors.qtyPalletInput ? "border-red-500" : "border-gray-200"
+                        }`}
+                        placeholder="Jumlah Pallet Utuh (cth: 1)"
+                    />
+                    {errors.qtyPalletInput && (
+                        <p className="text-red-500 text-xs mt-1">{errors.qtyPalletInput}</p>
+                    )}
+                </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Quantity (Pallet) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  value={form.qtyCarton}
-                  onChange={(e) => handleChange("qtyCarton", e.target.value)}
-                  min="1"
-                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
-                    errors.qtyCarton ? "border-red-500" : "border-gray-200"
-                  }`}
-                  // Placeholder dan penamaan field (Qty Carton) harusnya Qty Pallet sesuai mock data
-                  placeholder="Masukkan Qty Pallet (per tumpukan)"
-                />
-                {errors.qtyCarton && (
-                  <p className="text-red-500 text-xs mt-1">{errors.qtyCarton}</p>
-                )}
-              </div>
+                {/* Qty Carton (Input Manual) */}
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Qty Karton Utuh/Sisa <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                        type="number"
+                        value={form.qtyCartonInput}
+                        onChange={(e) => handleChange("qtyCartonInput", e.target.value)}
+                        min="0"
+                        className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                            errors.qtyCartonInput ? "border-red-500" : "border-gray-200"
+                        }`}
+                        placeholder="Jumlah Karton (cth: 50)"
+                    />
+                    {errors.qtyCartonInput && (
+                        <p className="text-red-500 text-xs mt-1">{errors.qtyCartonInput}</p>
+                    )}
+                </div>
             </div>
+            {/* --- END: Qty Gabungan --- */}
+
 
             {/* Checkbox Rekomendasi Otomatis */}
             <div className="flex items-center gap-3 p-4 bg-purple-50 border-2 border-purple-200 rounded-xl">
@@ -634,7 +665,7 @@ export function InboundForm() {
               </label>
             </div>
 
-            {/* Location Fields */}
+            {/* Location Fields (Tetap) */}
             <div className="border-2 border-gray-200 rounded-xl p-4">
               <h3 className="font-semibold text-gray-800 mb-4">📍 Lokasi Penyimpanan</h3>
               
@@ -653,14 +684,13 @@ export function InboundForm() {
                     } ${autoRecommend ? "bg-gray-100" : ""}`}
                     maxLength={1}
                     disabled={autoRecommend}
-                    // Nilai field ini sudah diisi otomatis berdasarkan selectedProduct.defaultCluster
                   />
                   {errors.cluster && (
                     <p className="text-red-500 text-xs mt-1">{errors.cluster}</p>
                   )}
                 </div>
 
-                {/* Lorong */}
+                {/* Lorong, Baris, Pallet... (Tetap) */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Lorong <span className="text-red-500">*</span>
@@ -685,7 +715,6 @@ export function InboundForm() {
                   )}
                 </div>
 
-                {/* Baris */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Baris <span className="text-red-500">*</span>
@@ -710,7 +739,6 @@ export function InboundForm() {
                   )}
                 </div>
 
-                {/* Pallet */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Pallet <span className="text-red-500">*</span>
@@ -739,20 +767,24 @@ export function InboundForm() {
 
             {/* ========== SUMMARY SECTION ========== */}
 
-            {/* Calculated Qty Pcs */}
-            {selectedProduct && form.qtyCarton && (
-              <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
-                <p className="text-yellow-800 font-semibold">
-                  📦 Total Quantity:{" "}
-                  <span className="text-yellow-900 text-xl">
-                    {/* Menggunakan qtyPerPallet yang baru */}
-                    {Number(form.qtyCarton) * selectedProduct.qtyPerPallet} pcs
-                  </span>{" "}
-                  ({form.qtyCarton} Pallet × {selectedProduct.qtyPerPallet} pcs/pallet) 
+            {/* Calculated Qty & Logika Receh */}
+            {totalCartons > 0 && selectedProduct && (
+              <div className={`p-4 border-2 rounded-xl ${isReceh ? 'bg-blue-50 border-blue-300' : 'bg-yellow-50 border-yellow-200'}`}>
+                <p className="font-semibold text-sm">
+                  Kalkulasi Qty Penerimaan:
                 </p>
-                <p className="text-xs text-yellow-700 mt-1">
-                    ⚠️ Saat ini, Qty Pallet di form diasumsikan sebagai "Jumlah Pallet (Tumpukan)". Total Pcs dihitung menggunakan Qty Produk/Pallet dari Master Data.
+                <p className={`text-xl font-bold ${isReceh ? 'text-blue-700' : 'text-yellow-900'}`}>
+                    {totalPallets.toLocaleString()} Pallet {remainingCartons > 0 ? `+ ${remainingCartons.toLocaleString()} Karton Sisa` : ''}
                 </p>
+                <p className="text-xs mt-1">
+                    Standard 1 Pallet = {qtyPerPalletStd} Karton/Satuan.
+                    Total Karton yang diterima: **{totalCartons.toLocaleString()}**
+                </p>
+                {isReceh && (
+                    <p className="text-xs mt-1 font-semibold text-blue-700">
+                        Pallet ini akan ditandai **RECEH** (Warna Biru) karena terdapat sisa karton ({remainingCartons.toLocaleString()} unit).
+                    </p>
+                )}
               </div>
             )}
 
@@ -763,6 +795,7 @@ export function InboundForm() {
                   <span>📋</span> Ringkasan Data Inbound
                 </h3>
                 <div className="grid grid-cols-2 gap-3 text-sm">
+                  {/* ... (Ekspedisi, Tanggal, Produk, BB Produk, Kd Plant, Expired Date) */}
                   <div>
                     <span className="text-slate-600">Ekspedisi:</span>{" "}
                     <span className="font-semibold text-slate-900">{form.ekspedisi || "-"}</span>
@@ -775,9 +808,9 @@ export function InboundForm() {
                     <span className="text-slate-600">Produk:</span>{" "}
                     <span className="font-semibold text-slate-900">{selectedProduct?.productName || "-"}</span>
                   </div>
-                  <div>
-                    <span className="text-slate-600">BB Pallet:</span>{" "}
-                    <span className="font-semibold text-slate-900">{form.bbPallet || "-"}</span>
+                  <div className="col-span-2">
+                    <span className="text-slate-600">BB Produk:</span>{" "}
+                    <span className="font-bold text-slate-900">{form.bbProduk || "-"}</span>
                   </div>
                   <div>
                     <span className="text-slate-600">Kd Plant:</span>{" "}
@@ -787,21 +820,24 @@ export function InboundForm() {
                     <span className="text-slate-600">Expired Date:</span>{" "}
                     <span className="font-semibold text-slate-900">{form.expiredDate || "-"}</span>
                   </div>
+                  
+                  {/* Qty Pallet (Stack) Final */}
                   <div>
-                    <span className="text-slate-600">Qty Pallet (Tumpukan):</span>{" "}
-                    <span className="font-semibold text-slate-900">{form.qtyCarton || "-"}</span>
+                    <span className="text-slate-600">Qty Pallet Utuh:</span>{" "}
+                    <span className="font-semibold text-slate-900">{totalPallets.toLocaleString()}</span>
                   </div>
-                  {selectedProduct && form.qtyCarton && (
-                    <div className="col-span-2">
-                      <span className="text-slate-600">Total Pcs:</span>{" "}
-                      <span className="font-bold text-slate-900 text-lg">
-                        {/* Menggunakan qtyPerPallet yang baru */}
-                        {Number(form.qtyCarton) * selectedProduct.qtyPerPallet} pcs
-                      </span>
-                    </div>
-                  )}
+                  {/* Qty Produk Manual Final */}
+                  <div>
+                    <span className="text-slate-600">Qty Karton Sisa:</span>{" "}
+                    <span className="font-semibold text-slate-900">{remainingCartons.toLocaleString()}</span>
+                  </div>
+
                   <div className="col-span-2 pt-2 border-t border-slate-300">
-                    <span className="text-slate-600">Lokasi:</span>{" "}
+                    <span className="text-slate-600">Status Pallet:</span>{" "}
+                    <span className={`font-bold ${isReceh ? 'text-blue-700' : 'text-green-700'}`}>
+                        {isReceh ? 'RECEH' : 'NORMAL'}
+                    </span>
+                    <span className="ml-4 text-slate-600">Lokasi:</span>{" "}
                     <span className="font-bold text-slate-900">
                       {form.cluster && form.lorong && form.baris && form.pallet
                         ? `${form.cluster}-${form.lorong}-${form.baris}-${form.pallet}`
@@ -817,7 +853,7 @@ export function InboundForm() {
               </div>
             )}
 
-            {/* Recommended Location */}
+            {/* Recommended Location dan Submit Button (Tetap) */}
             {recommendedLocation && autoRecommend && (
               <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
                 <h3 className="font-semibold text-green-900 mb-2">
@@ -833,7 +869,6 @@ export function InboundForm() {
               </div>
             )}
 
-            {/* Submit Button */}
             <button
               type="submit"
               className="w-full bg-linear-to-r from-blue-500 to-indigo-600 text-white py-4 rounded-xl font-bold text-lg hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"

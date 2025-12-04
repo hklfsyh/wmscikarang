@@ -1,4 +1,4 @@
-// File: src/components/warehouse-layout.tsx (FINAL REVISION)
+// File: src/components/warehouse-layout.tsx (Langkah 10: Tukar Posisi P1 dan P3)
 
 "use client";
 
@@ -159,7 +159,7 @@ function generateWarehouseCells(): WarehouseCell[] {
   return cells;
 }
 
-// 4. PalletInfoModal (Dipindahkan ke sini agar ter-scope)
+// 4. PalletInfoModal
 type PalletInfoModalProps = {
   cell: WarehouseCell | null;
   open: boolean;
@@ -169,9 +169,8 @@ type PalletInfoModalProps = {
 function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
   if (!open || !cell) return null;
 
-  // Mendapatkan detail produk yang seharusnya (untuk notifikasi Wrong Cluster)
   const productDetail = cell.product ? getProductByCode(cell.product) : null;
-  const totalPcs = (cell.qtyCarton ?? 0) * (productDetail?.qtyPerCarton ?? 1); // Hitung ulang pcs
+  const totalPcs = (cell.qtyCarton ?? 0) * (productDetail?.qtyPerCarton ?? 1); 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -312,7 +311,6 @@ export function WarehouseLayout() {
   const [productFilter, setProductFilter] = useState<string>("ALL");
   const [openClusters, setOpenClusters] = useState<Set<string>>(new Set());
   
-  // 5. toggleCluster (Didefinisikan di sini untuk menghindari error scope)
   const toggleCluster = (cluster: string) => {
     setOpenClusters((prev) => {
       const newSet = new Set(prev);
@@ -408,14 +406,14 @@ export function WarehouseLayout() {
     return grouped;
   }, [filteredCells]);
 
-  // FIX: Perhitungan Statis untuk Legend
+  // FIX: Perhitungan Statis untuk Legend (Disesuaikan dengan status di generateWarehouseCells)
   const getStockStats = () => {
     const stats = {
       totalItems: 0,
       Kosong: 0,
-      TerisiNormal: 0, // Menggunakan Yellow (HOLD)
-      FEFO_Alert: 0,   // Menggunakan Green (RELEASE)
-      SalahCluster: 0, // Menggunakan Red (WRONG_CLUSTER)
+      TerisiNormal: 0, // HOLD (Yellow)
+      FEFO_Alert: 0,   // RELEASE (Green)
+      SalahCluster: 0, // WRONG_CLUSTER (Red)
     };
     
     const totalCells = 5 * 11 * 9 * 3; 
@@ -435,7 +433,6 @@ export function WarehouseLayout() {
       }
     });
 
-    // Mengoreksi Kosong jika ada error pada totalCells
     if (stats.Kosong === 0 && stats.totalItems > 0) {
       stats.Kosong = totalCells - stats.totalItems;
     }
@@ -446,7 +443,6 @@ export function WarehouseLayout() {
   // Komponen Pallet untuk di-render di grid
   const PalletComponent = ({ cell, group }: { cell: WarehouseCell, group: any }) => {
     const isFilled = cell.colorCode !== "empty";
-    // FIX: colorKey sekarang pasti StatusColor karena sudah dicek di generateWarehouseCells
     const colorKey: StatusColor = cell.colorCode as StatusColor; 
 
     return (
@@ -496,7 +492,7 @@ export function WarehouseLayout() {
           </div>
         </div>
 
-        {/* Quick Filter & Search (Diambil dari file yang Anda inginkan) */}
+        {/* Quick Filter & Search */}
         <div className="bg-white rounded-xl shadow-xl p-8 mb-8 mt-6">
             <h1 className="text-2xl font-bold text-gray-800">Warehouse Layout Visualization</h1>
             <p className="text-gray-500 mt-1">Visualisasi status lokasi gudang berdasarkan Master Data & Stok</p>
@@ -513,7 +509,7 @@ export function WarehouseLayout() {
                     onClick={() => setSearchQuery("")}
                     className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors"
                 >
-                    X Reset
+                    <X size={20} /> Reset
                 </button>
             </div>
         </div>
@@ -545,7 +541,6 @@ export function WarehouseLayout() {
                         Cluster {cluster}
                       </h2>
                       <p className="text-xs sm:text-sm text-slate-500">
-                        {/* Menggunakan data stok lama yang sudah terfilter */}
                         {filledCount} dari {totalCount} slot di Lorong L1-L11 terisi
                       </p>
                     </div>
@@ -589,7 +584,7 @@ export function WarehouseLayout() {
                               
                               {/* Baris Cells (each with 3 pallets) */}
                               {Array.from({ length: 9 }, (_, i) => i + 1).map((barisNum) => {
-                                const group = clusterCells.find(
+                                const group = cellsByCluster[cluster]?.find(
                                   (g) => g.lorong === lorongNum && g.baris === barisNum
                                 );
                                 
@@ -597,8 +592,8 @@ export function WarehouseLayout() {
                                   <div key={barisNum} className="w-20 sm:w-24 shrink-0 px-1">
                                     <div className="flex gap-0.5">
                                       {/* 3 Pallets Horizontal */}
-                                      {[1, 2, 3].map((palletNum) => {
-                                        // Cari cell dari semua cell yang sudah difilter/digroup
+                                      {[3, 2, 1].map((palletNum) => { // <-- PERUBAHAN UTAMA: Membalik urutan Pallet
+                                        // Cari cell di filteredCells
                                         const cell = group?.pallets.find((p) => p.pallet === palletNum) || 
                                           warehouseCells.find(c => c.cluster === cluster && c.lorong === lorongNum && c.baris === barisNum && c.pallet === palletNum) || 
                                           {id: `${cluster}-L${lorongNum}-B${barisNum}-P${palletNum}`, cluster, lorong: lorongNum, baris: barisNum, pallet: palletNum, colorCode: "empty"} as WarehouseCell;
