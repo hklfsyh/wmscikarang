@@ -17,9 +17,10 @@ export interface ProductMaster {
   id: string;
   productCode: string;
   productName: string;
-  qtyPerCarton: number; // Qty per karton (asumsi 1) - TIDAK ADA DATA di master baru
-  qtyPerPallet: number; // Qty Produk/Pallet (dari master baru klien)
+  qtyPerCarton: number; // Qty per karton (pcs/unit per carton)
+  qtyPerPallet: number; // Qty Produk/Pallet: 1 pallet = berapa CARTON (dari master baru klien)
   defaultCluster?: string; // Cluster yang direkomendasikan
+  // Per-product conversion: 1 pallet = qtyPerPallet cartons
 }
 
 // 3. Data Produk Baru

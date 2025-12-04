@@ -1,22 +1,29 @@
-// File: src/components/inbound-form.tsx (Langkah 11: Kalkulasi Qty Dinamis)
+// File: src/components/inbound-form.tsx (Langkah 14: Finalisasi Multi-Submission)
 
 "use client";
 
-import { useState, useEffect, useMemo } from "react"; // Tambah useMemo
+import { useState, useEffect, useMemo } from "react"; 
 import { 
   productMasterData, 
   getProductByCode, 
   ekspedisiMaster 
 } from "@/lib/mock/product-master";
-import { stockListData } from "@/lib/mock/stocklistmock";
+import { stockListData, StockItem } from "@/lib/mock/stocklistmock";
 import { QRScanner, QRData } from "./qr-scanner";
-import { Camera, X, CheckCircle, XCircle } from "lucide-react";
+import { CheckCircle, XCircle } from "lucide-react";
 
 interface RecommendedLocation {
   cluster: string;
   lorong: string;
   baris: string;
   level: string;
+  palletsCanFit: number; 
+}
+
+interface MultiLocationRecommendation {
+  locations: RecommendedLocation[];
+  totalPalletsPlaced: number;
+  needsMultipleLocations: boolean;
 }
 
 type InboundFormState = {
@@ -26,15 +33,25 @@ type InboundFormState = {
   bbProduk: string;
   kdPlant: string;
   expiredDate: string;
-  // --- PERUBAHAN QTY STATE ---
-  qtyPalletInput: string; // Input Qty Pallet (User mengisi pallet utuh)
-  qtyCartonInput: string; // Input Qty Carton (User mengisi karton/sisa)
-  // --- AKHIR PERUBAHAN QTY STATE ---
+  qtyPalletInput: string; 
+  qtyCartonInput: string;
+  bbReceh: string[]; 
   cluster: string;
   lorong: string;
   baris: string;
   pallet: string;
 };
+
+// --- INTERFACE UNTUK OUTPUT FINAL (SUBMISSION BATCH) ---
+interface FinalSubmission {
+    productCode: string;
+    location: string;
+    qtyPallet: number; // Selalu 1
+    qtyCarton: number; // Qty Karton Aktual per lokasi
+    bbPallet: string | string[]; // BB Produk (string) atau BB Receh (string[])
+    isReceh: boolean;
+}
+// --- AKHIR INTERFACE ---
 
 const today = new Date().toISOString().slice(0, 10);
 
@@ -47,6 +64,7 @@ const initialState: InboundFormState = {
   expiredDate: "",
   qtyPalletInput: "", 
   qtyCartonInput: "",
+  bbReceh: [], 
   cluster: "",
   lorong: "",
   baris: "",
@@ -55,8 +73,8 @@ const initialState: InboundFormState = {
 
 // --- FUNGSI UTILITY: PARSING BB PRODUK ---
 const parseBBProduk = (bb: string): { expiredDate: string, kdPlant: string, isValid: boolean } => {
-  const expiredDateStr = bb.substring(0, 6); // YYMMDD
-  const kdPlantStr = bb.substring(6, 10);    // 4 digit berikutnya
+  const expiredDateStr = bb.substring(0, 6); 
+  const kdPlantStr = bb.substring(6, 10);    
   
   if (bb.length !== 10) {
     return { expiredDate: "", kdPlant: "", isValid: false };
@@ -68,7 +86,7 @@ const parseBBProduk = (bb: string): { expiredDate: string, kdPlant: string, isVa
   const day = expiredDateStr.substring(4, 6);
   
   const dateObj = new Date(`${year}-${month}-${day}`);
-  const validDate = !isNaN(dateObj.getTime()) && dateObj.getMonth() + 1 === Number(month);
+  const validDate = !isNaN(dateObj.getTime()) && dateObj.getMonth() + 1 === Number(month) && Number(day) >= 1 && Number(day) <= 31;
 
   return {
     expiredDate: validDate ? `${year}-${month}-${day}` : "",
@@ -77,15 +95,12 @@ const parseBBProduk = (bb: string): { expiredDate: string, kdPlant: string, isVa
   };
 };
 
-// --- FUNGSI UTILITY: QTY PALLET STACK OPTIONS ---
-const palletStackOptions = Array.from({ length: 5 }, (_, i) => i + 1);
-
-
 export function InboundForm() {
   const [form, setForm] = useState<InboundFormState>(initialState);
-  const [showQRScanner, setShowQRScanner] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [recommendedLocation, setRecommendedLocation] = useState<RecommendedLocation | null>(null);
+  const [multiLocationRec, setMultiLocationRec] = useState<MultiLocationRecommendation | null>(null);
+  const [finalSubmissionData, setFinalSubmissionData] = useState<FinalSubmission[] | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
@@ -93,24 +108,20 @@ export function InboundForm() {
 
   // --- LOGIKA QTY DINAMIS (CALCULATED VALUES) ---
   const selectedProduct = form.productCode ? getProductByCode(form.productCode) : null;
-  const qtyPerPalletStd = selectedProduct?.qtyPerPallet || 0; // Standard Qty Produk per 1 Pallet
+  const qtyPerPalletStd = selectedProduct?.qtyPerPallet || 0; 
   
   const { totalPallets, remainingCartons, totalCartons } = useMemo(() => {
-    // 1. Ambil input dari user (default ke 0 jika kosong)
     const palletInput = Number(form.qtyPalletInput) || 0;
     const cartonInput = Number(form.qtyCartonInput) || 0;
     
-    // 2. Hitung total karton jika Qty Per Pallet ada
+    // Total Karton = (Input Pallet Utuh * Std Qty/Pallet) + Input Karton Sisa
     const totalCartons = (palletInput * qtyPerPalletStd) + cartonInput;
     
     if (qtyPerPalletStd === 0) {
       return { totalPallets: 0, remainingCartons: cartonInput, totalCartons: cartonInput };
     }
 
-    // 3. Hitung Pallet Utuh (Full Pallet)
     const calculatedPallets = Math.floor(totalCartons / qtyPerPalletStd);
-    
-    // 4. Hitung Sisa Karton (Receh)
     const remaining = totalCartons % qtyPerPalletStd;
     
     return {
@@ -120,41 +131,76 @@ export function InboundForm() {
     };
   }, [form.qtyPalletInput, form.qtyCartonInput, qtyPerPalletStd]);
   
-  // Logika Receh: Hanya jika ada sisa karton
   const isReceh = remainingCartons > 0;
+  // Total Lokasi Dibutuhkan = Pallet Utuh + (1 untuk Pallet Receh jika ada sisa)
+  const totalPalletsNeeded = totalPallets + (isReceh ? 1 : 0); 
   // --- AKHIR LOGIKA QTY DINAMIS ---
 
-
-  // --- LOGIKA REKOMENDASI LOKASI ---
-  const autoCluster = selectedProduct?.defaultCluster || ""; 
+  // --- LOGIKA REKOMENDASI LOKASI MULTI-LOCATION ---
+  const _autoCluster = selectedProduct?.defaultCluster || ""; 
   const lorongOptions = Array.from({ length: 11 }, (_, i) => `L${i + 1}`); 
   const barisOptions = Array.from({ length: 9 }, (_, i) => `B${i + 1}`); 
   const palletOptions = Array.from({ length: 3 }, (_, i) => `P${i + 1}`); 
 
-  const findRecommendedLocation = (cluster: string): RecommendedLocation | null => {
+  const findMultipleRecommendedLocations = (
+    cluster: string,
+    palletsNeeded: number
+  ): MultiLocationRecommendation => {
+    const locations: RecommendedLocation[] = [];
+    let remainingPallets = palletsNeeded;
+
     const lorongList = lorongOptions;
     const barisList = barisOptions;
     const levelList = palletOptions;
-
+    
     for (const lorong of lorongList) {
-      for (const baris of barisList) {
-        for (const level of levelList) {
-          const locationExists = stockListData.some(
-            (item) =>
-              item.location.cluster === cluster &&
-              item.location.lorong === lorong &&
-              item.location.baris === baris &&
-              item.location.level === level
-          );
-
-          if (!locationExists) {
-            return { cluster, lorong, baris, level };
-          }
+        if (remainingPallets === 0) break;
+        for (const baris of barisList) {
+            if (remainingPallets === 0) break;
+            
+            // Cari semua slot kosong di baris ini
+            const emptySlotsInBaris: RecommendedLocation[] = [];
+            for (const level of levelList) {
+                const locationExists = stockListData.some(
+                    (item: StockItem) =>
+                        item.location.cluster === cluster &&
+                        item.location.lorong === lorong &&
+                        item.location.baris === baris &&
+                        item.location.level === level
+                );
+                if (!locationExists) {
+                    emptySlotsInBaris.push({
+                        cluster,
+                        lorong,
+                        baris,
+                        level,
+                        palletsCanFit: 1,
+                    });
+                }
+            }
+            
+            // Alokasikan slot yang kosong (berurutan)
+            for(const slot of emptySlotsInBaris) {
+                if (remainingPallets === 0) break;
+                locations.push(slot);
+                remainingPallets--;
+            }
         }
-      }
     }
 
-    return null; 
+    return {
+      locations,
+      totalPalletsPlaced: palletsNeeded - remainingPallets,
+      needsMultipleLocations: palletsNeeded > 1 && locations.length > 1,
+    };
+  };
+
+  const _findRecommendedLocation = (cluster: string): RecommendedLocation | null => {
+    const multiRec = findMultipleRecommendedLocations(cluster, 1);
+    if (multiRec.locations.length > 0) {
+      return multiRec.locations[0];
+    }
+    return null;
   };
   // --- AKHIR LOGIKA REKOMENDASI LOKASI ---
 
@@ -180,32 +226,45 @@ export function InboundForm() {
     }
   }, [form.bbProduk]);
   
+  const handleRecommend = () => {
+    if (!form.productCode) { alert("Mohon pilih Produk terlebih dahulu."); return; }
+    if (totalPalletsNeeded === 0) { alert("Total Pallet yang dibutuhkan adalah nol."); return; }
+
+    const cluster = selectedProduct?.defaultCluster || "";
+    if (!cluster) { alert("Produk ini tidak memiliki Cluster Default."); return; }
+    
+    const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded);
+    
+    if (multiRec.locations.length < totalPalletsNeeded) {
+        alert(`Gudang penuh! Hanya ditemukan ${multiRec.locations.length} dari ${totalPalletsNeeded} lokasi yang dibutuhkan.`);
+        setMultiLocationRec(null);
+        setRecommendedLocation(null);
+        return;
+    }
+    
+    setMultiLocationRec(multiRec);
+    setRecommendedLocation(multiRec.locations.length === 1 ? multiRec.locations[0] : null);
+
+    const firstLoc = multiRec.locations[0];
+    setForm(prev => ({
+        ...prev,
+        cluster: firstLoc.cluster,
+        lorong: firstLoc.lorong,
+        baris: firstLoc.baris,
+        pallet: firstLoc.level,
+    }));
+  };
+
   const handleChange = (field: keyof InboundFormState, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
     setErrors(prev => ({ ...prev, [field]: "" }));
+    setMultiLocationRec(null); 
+    setRecommendedLocation(null);
 
     if (field === "productCode" && value) {
       const selectedProd = getProductByCode(value);
       const cluster = selectedProd?.defaultCluster || ""; 
-      
-      if (autoRecommend && cluster) {
-        setForm(prev => ({ ...prev, cluster }));
-        const location = findRecommendedLocation(cluster);
-        setRecommendedLocation(location);
-        if (location) {
-          setForm(prev => ({
-            ...prev,
-            cluster: location.cluster,
-            lorong: location.lorong,
-            baris: location.baris,
-            pallet: location.level, 
-          }));
-        }
-      } else if (cluster) {
-        setForm(prev => ({ ...prev, cluster }));
-      } else {
-        setForm(prev => ({ ...prev, cluster: "" }));
-      }
+      setForm(prev => ({ ...prev, cluster }));
     }
   };
 
@@ -215,61 +274,50 @@ export function InboundForm() {
   };
 
   const handleQRScanSuccess = (data: QRData) => {
-    const productCodeMap: Record<string, string> = {
-      "AQ200_1X48": "AQ-200ML", 
-      "AQ600_1X24": "AQ-600ML",
-      "AQ1500_1X12": "AQ-1500ML",
-      "AQ330_1X24": "AQ-330ML",
-    };
-
-    const mappedProductCode = productCodeMap[data.produkId] || data.produkId;
-    const selectedProd = getProductByCode(mappedProductCode);
+    // QR Format Baru: EKSPEDISI|PRODUK_CODE|QTY_PALLET|QTY_CARTON|BB_PRODUK
+    // Contoh: HGS|AQ-1500ML|2|50|2509150067
     
-    const expDate = new Date(data.expiredDate);
-    const YY = String(expDate.getFullYear()).slice(-2);
-    const MM = String(expDate.getMonth() + 1).padStart(2, '0');
-    const DD = String(expDate.getDate()).padStart(2, '0');
-    const expiredDateYYMMDD = `${YY}${MM}${DD}`;
+    const selectedProd = getProductByCode(data.produkCode);
+    
+    if (!selectedProd) {
+      setErrorMessages([`Produk dengan kode "${data.produkCode}" tidak ditemukan di database.`]);
+      setShowErrorModal(true);
+      return;
+    }
 
-    const newBBProduk = `${expiredDateYYMMDD}${data.kdPlant}`;
-    const { expiredDate: parsedExpDate, kdPlant: parsedKdPlant } = parseBBProduk(newBBProduk);
+    // Parse BB Produk untuk mendapatkan expired date dan kd plant
+    const { expiredDate: parsedExpDate, kdPlant: parsedKdPlant, isValid } = parseBBProduk(data.bbProduk);
+    
+    if (!isValid) {
+      setErrorMessages([`BB Produk "${data.bbProduk}" tidak valid. Format harus YYMMDDXXXX dengan tanggal valid.`]);
+      setShowErrorModal(true);
+      return;
+    }
 
+    // Set form dengan data dari QR
     const newForm: InboundFormState = {
-      ekspedisi: data.ekspedisi,
-      tanggal: today,
-      productCode: mappedProductCode,
-      bbProduk: newBBProduk, 
-      kdPlant: parsedKdPlant, 
-      expiredDate: parsedExpDate, 
-      qtyPalletInput: "1", // Default 1 Pallet dari QR
-      qtyCartonInput: "", // Kosongkan, user harus input Qty Produk aktual
-      cluster: "",
-      lorong: "",
-      baris: "",
-      pallet: "",
+        ekspedisi: data.ekspedisi, 
+        tanggal: today, 
+        productCode: data.produkCode, 
+        bbProduk: data.bbProduk, 
+        kdPlant: parsedKdPlant, 
+        expiredDate: parsedExpDate, 
+        qtyPalletInput: data.qtyPallet, 
+        qtyCartonInput: data.qtyCarton, 
+        bbReceh: [], 
+        cluster: selectedProd.defaultCluster || "", 
+        lorong: "", 
+        baris: "", 
+        pallet: "",
     };
 
     setForm(newForm);
-
-    const cluster = selectedProd?.defaultCluster || ""; 
+    setMultiLocationRec(null);
+    setRecommendedLocation(null);
+    setErrors({});
     
-    if (autoRecommend && cluster) {
-      const location = findRecommendedLocation(cluster);
-      setRecommendedLocation(location);
-      if (location) {
-        setForm(prev => ({
-          ...prev,
-          cluster: location.cluster,
-          lorong: location.lorong,
-          baris: location.baris,
-          pallet: location.level,
-        }));
-      }
-    } else if (cluster) {
-      setForm(prev => ({ ...prev, cluster }));
-    }
-    
-    setShowQRScanner(false);
+    // Show success notification
+    alert(`✅ QR Scan Berhasil!\n\nData telah diisi:\n- Ekspedisi: ${data.ekspedisi}\n- Produk: ${selectedProd.productName}\n- Qty: ${data.qtyPallet} Pallet + ${data.qtyCarton} Karton\n- BB: ${data.bbProduk}`);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -289,19 +337,47 @@ export function InboundForm() {
     
     // Validasi Qty: Salah satu harus terisi
     if (totalCartons === 0) {
-        if (!form.qtyPalletInput && !form.qtyCartonInput) {
-            newErrors.qtyPalletInput = "Setidaknya Qty Pallet atau Qty Produk harus diisi";
-            errorList.push("Qty (Pallet/Karton) harus diisi.");
-        } else if (form.qtyPalletInput && form.qtyCartonInput && Number(form.qtyPalletInput) + Number(form.qtyCartonInput) === 0) {
-             newErrors.qtyPalletInput = "Total Qty tidak boleh nol.";
-            errorList.push("Total Qty tidak boleh nol.");
-        }
+        newErrors.qtyPalletInput = "Total Qty (Pallet/Karton) tidak boleh nol.";
+        errorList.push("Qty (Pallet/Karton) harus diisi.");
     }
     
     if (!form.cluster) { newErrors.cluster = "Cluster harus diisi"; errorList.push("Cluster harus diisi"); }
-    if (!form.lorong) { newErrors.lorong = "Lorong harus diisi"; errorList.push("Lorong harus diisi"); }
-    if (!form.baris) { newErrors.baris = "Baris harus diisi"; errorList.push("Baris harus diisi"); }
-    if (!form.pallet) { newErrors.pallet = "Pallet/Level harus diisi"; errorList.push("Pallet/Level harus diisi"); }
+    
+    // --- VALIDASI LOKASI FINAL SEBELUM SUBMISSION ---
+    let locationsToSubmit: RecommendedLocation[] = [];
+    
+    // Case 1: Multi-pallet (Cek apakah rekomendasi sudah dijalankan dan cukup)
+    if (totalPalletsNeeded > 1) {
+        if (!multiLocationRec || multiLocationRec.locations.length < totalPalletsNeeded) {
+            newErrors.pallet = `Diperlukan ${totalPalletsNeeded} lokasi. Mohon klik tombol Rekomendasi Lokasi.`;
+            errorList.push(newErrors.pallet);
+        } else {
+            locationsToSubmit = multiLocationRec.locations;
+        }
+    } 
+    // Case 2: Single pallet (Cek input manual)
+    else if (totalPalletsNeeded === 1) {
+        const currentLoc = { cluster: form.cluster, lorong: form.lorong, baris: form.baris, level: form.pallet, palletsCanFit: 1 };
+        
+        if (!form.lorong || !form.baris || !form.pallet) {
+             newErrors.lorong = "Lokasi (Lorong, Baris, Pallet) harus diisi.";
+             errorList.push(newErrors.lorong);
+        } else {
+            const locationIsOccupied = stockListData.some(
+              (item) =>
+                item.location.cluster === currentLoc.cluster &&
+                item.location.lorong === currentLoc.lorong &&
+                item.location.baris === currentLoc.baris &&
+                item.location.level === currentLoc.level
+            );
+            if (locationIsOccupied) {
+              newErrors.pallet = `Lokasi ${form.cluster}-${form.lorong}-${form.baris}-${form.pallet} sudah terisi.`;
+              errorList.push(newErrors.pallet);
+            } else {
+                locationsToSubmit.push(currentLoc);
+            }
+        }
+    }
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -309,47 +385,41 @@ export function InboundForm() {
       setShowErrorModal(true);
       return;
     }
+    
+    // --- FINAL LOGIC: MEMECAH DATA UNTUK SUBMISSION ---
+    const finalSubmissions: FinalSubmission[] = [];
+    const standardCartons = qtyPerPalletStd;
+    
+    locationsToSubmit.forEach((loc, index) => {
+        const isLastPallet = index === locationsToSubmit.length - 1;
+        const isFinalReceh = isLastPallet && isReceh;
+        
+        let qtyToRecord = standardCartons;
+        let bbToRecord: string | string[] = form.bbProduk; // Default BB Produk Tunggal
 
-    // Cek apakah lokasi ini sudah terisi
-    const locationIsOccupied = stockListData.some(
-      (item) =>
-        item.location.cluster === form.cluster &&
-        item.location.lorong === form.lorong &&
-        item.location.baris === form.baris &&
-        item.location.level === form.pallet
-    );
+        if (isFinalReceh) {
+            qtyToRecord = remainingCartons;
+            // Jika user mengisi BB Receh (Multiple BB), gunakan itu. Jika tidak, gunakan BB Produk Tunggal.
+            bbToRecord = form.bbReceh.length > 0 ? form.bbReceh : form.bbProduk;
+        }
 
-    if (locationIsOccupied) {
-      setErrorMessages([
-        `Lokasi ${form.cluster}-${form.lorong}-${form.baris}-${form.pallet} sudah terisi.`,
-      ]);
-      setShowErrorModal(true);
-      return;
-    }
-
-    // Simulasi inbound
-    console.log("Inbound Data:", {
-      ...form,
-      bbPallet: form.bbProduk, 
-      qtyPalletStack: totalPallets, // Kirim Qty Pallet (Hasil Kalkulasi)
-      qtyCartonActual: remainingCartons, // Kirim Sisa Karton (Hasil Kalkulasi)
-      totalCartons: totalCartons, // Kirim Total Karton (Untuk pencatatan)
-      isReceh: isReceh, // Status Receh
-      cluster: autoCluster,
-      standardQtyPerPallet: qtyPerPalletStd,
-      recommendedLocation,
+        finalSubmissions.push({
+            productCode: form.productCode,
+            location: `${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.level}`,
+            qtyPallet: 1, // Selalu 1 pallet stack per lokasi
+            qtyCarton: qtyToRecord,
+            bbPallet: bbToRecord,
+            isReceh: isFinalReceh,
+        });
     });
+
+    setFinalSubmissionData(finalSubmissions);
+    console.log("FINAL INBOUND BATCH SUBMISSION:", finalSubmissions);
 
     // Show success modal
     setShowSuccess(true);
-
-    // Reset form after 2 seconds
-    setTimeout(() => {
-      setShowSuccess(false);
-      setForm(initialState);
-      setRecommendedLocation(null);
-      setErrors({});
-    }, 2000);
+    
+    // TIDAK AUTO CLOSE - User harus klik tombol "Tutup"
   };
   // --- AKHIR EFFECT DAN HANDLER ---
 
@@ -358,144 +428,109 @@ export function InboundForm() {
     <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-100 p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-blue-500 rounded-xl flex items-center justify-center">
-                <svg
-                  className="w-6 h-6 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
-                  />
-                </svg>
-              </div>
-              <div>
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Inbound Form</h1>
-                <p className="text-sm text-gray-500">Input Data Penerimaan (Primary)</p>
-              </div>
+          {/* Header with QR Scanner Button */}
+          <div className="mb-6 flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+                📦 Form Inbound Barang
+              </h1>
+              <p className="text-sm text-gray-600">
+                Lengkapi data inbound untuk pencatatan masuk barang
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowQRScanner(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
-            >
-              <Camera size={20} />
-              <span className="hidden md:inline">Scan QR</span>
-            </button>
+            <div>
+              <QRScanner 
+                onScanSuccess={handleQRScanSuccess}
+                onScanError={(error) => {
+                  setErrorMessages([error]);
+                  setShowErrorModal(true);
+                }}
+              />
+            </div>
           </div>
 
-          {/* Modals (Dihilangkan untuk brevity) */}
-          {/* ... (QR Scanner Modal) */}
-          {showQRScanner && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2">
-              <div className="bg-white rounded-lg p-1.5 w-full max-w-60 relative shadow-xl">
-                <div className="flex justify-between items-center mb-1">
-                  <h2 className="text-xs font-semibold text-gray-700">Scan QR</h2>
-                  <button
-                    onClick={() => setShowQRScanner(false)}
-                    className="p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-all"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-                <div className="w-full">
-                  <QRScanner
-                    onScanSuccess={handleQRScanSuccess}
-                    onScanError={(error) => {
-                      console.error("QR Scan Error:", error);
-                      setShowQRScanner(false);
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Error Modal (Asli) */}
+          {/* Error Modal */}
           {showErrorModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-bounce-in">
-                <div className="bg-red-500 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm">
-                      <XCircle className="w-6 h-6 text-white" />
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+                <div className="bg-linear-to-r from-red-500 to-pink-600 p-6">
+                  <div className="flex flex-col items-center text-center">
+                    <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
+                      <XCircle className="h-10 w-10 text-white" />
                     </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-white">Validasi Gagal</h3>
-                      <p className="text-sm text-red-100">Data belum lengkap</p>
-                    </div>
+                    <h3 className="text-2xl font-bold text-white mb-1">
+                      Validasi Gagal
+                    </h3>
+                    <p className="text-red-100 text-sm">
+                      Periksa kembali data yang Anda masukkan
+                    </p>
                   </div>
                 </div>
                 <div className="p-6">
-                  <p className="text-gray-700 font-semibold mb-3">
-                    Silakan lengkapi data berikut:
-                  </p>
-                  <ul className="space-y-2 mb-6">
-                    {errorMessages.map((error, index) => (
-                      <li key={index} className="flex items-start gap-2 text-sm text-red-700">
-                        <span className="text-red-500 mt-0.5">❌</span>
-                        <span>{error}</span>
+                  <ul className="space-y-2 mb-4">
+                    {errorMessages.map((msg, idx) => (
+                      <li key={idx} className="flex items-start gap-2 text-sm text-red-700">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span>{msg}</span>
                       </li>
                     ))}
                   </ul>
                   <button
-                    onClick={() => {
-                      setShowErrorModal(false);
-                      setErrorMessages([]);
-                    }}
-                    className="w-full bg-red-500 text-white py-3 rounded-xl font-semibold hover:bg-red-600 transition-colors"
+                    onClick={() => setShowErrorModal(false)}
+                    className="w-full bg-linear-to-r from-red-500 to-pink-600 text-white py-3 rounded-xl font-semibold hover:from-red-600 hover:to-pink-700 transition-all shadow-lg"
                   >
-                    Tutup & Perbaiki
+                    Tutup
                   </button>
                 </div>
               </div>
             </div>
           )}
-
-          {/* Success Modal (Asli) */}
-          {showSuccess && recommendedLocation && (
-            <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
+          
+          {/* Success Modal (Updated to display multi-submission) */}
+          {showSuccess && finalSubmissionData && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
                 <div className="bg-linear-to-r from-green-500 to-emerald-600 p-6">
                   <div className="flex flex-col items-center text-center">
-                    <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm mb-3">
-                      <CheckCircle className="w-10 h-10 text-white" />
+                    <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
+                      <CheckCircle className="h-10 w-10 text-white" />
                     </div>
-                    <h3 className="text-2xl font-bold text-white mb-2">
-                      Inbound Berhasil!
+                    <h3 className="text-2xl font-bold text-white mb-1">
+                      Inbound {finalSubmissionData.length} Pallet Berhasil!
                     </h3>
                     <p className="text-green-100 text-sm">
-                      Data berhasil disimpan ke sistem
+                      Data berhasil dicatat ke sistem
                     </p>
                   </div>
                 </div>
                 <div className="p-6">
-                  <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4 mb-4">
-                    <p className="text-sm text-green-700 font-semibold mb-2">
-                      📍 Lokasi Rekomendasi:
-                    </p>
-                    <div className="flex items-center justify-center">
-                      <span className="px-6 py-3 bg-green-600 text-white rounded-lg font-bold text-2xl tracking-wider">
-                        {recommendedLocation.cluster}-{recommendedLocation.lorong}-
-                        {recommendedLocation.baris}-{recommendedLocation.level}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-center text-gray-600 text-sm mb-4">
-                    Silakan tempatkan barang di lokasi yang direkomendasikan
+                  <p className="text-sm text-gray-700 font-semibold mb-3">
+                    Detail Lokasi Penempatan:
                   </p>
+                  <div className="mb-4 space-y-2 max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    {finalSubmissionData.map((item, idx) => (
+                      <div key={idx} className={`flex justify-between rounded-md p-2 ${item.isReceh ? 'bg-blue-100' : 'bg-green-100'}`}>
+                        <span className="font-semibold text-gray-800">
+                          {item.location}
+                        </span>
+                        <span className={`text-sm font-bold ${item.isReceh ? 'text-blue-700' : 'text-green-700'}`}>
+                          {item.qtyCarton} Karton {item.isReceh ? '(RECEH)' : '(UTUH)'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                   <button
-                    onClick={() => setShowSuccess(false)}
+                    onClick={() => {
+                      setShowSuccess(false);
+                      setForm(initialState);
+                      setMultiLocationRec(null);
+                      setRecommendedLocation(null);
+                      setFinalSubmissionData(null);
+                      setErrors({});
+                    }}
                     className="w-full bg-linear-to-r from-green-500 to-emerald-600 text-white py-3 rounded-xl font-semibold hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg"
                   >
-                    OK, Mengerti
+                    Tutup
                   </button>
                 </div>
               </div>
@@ -504,6 +539,8 @@ export function InboundForm() {
           
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* ... (Ekspedisi, Tanggal, Produk, BB Produk, Qty Inputs, BB Receh Tracking) */}
+
             {/* Ekspedisi & Tanggal */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Field Ekspedisi (Tetap) */}
@@ -519,11 +556,7 @@ export function InboundForm() {
                   }`}
                 >
                   <option value="">-- Pilih Ekspedisi --</option>
-                  {ekspedisiMaster.map((opt) => (
-                    <option key={opt.code} value={opt.code}>
-                      {opt.name}
-                    </option>
-                  ))}
+                  {ekspedisiMaster.map((opt) => (<option key={opt.code} value={opt.code}>{opt.name}</option>))}
                 </select>
                 {errors.ekspedisi && (
                   <p className="text-red-500 text-xs mt-1">{errors.ekspedisi}</p>
@@ -606,7 +639,7 @@ export function InboundForm() {
               </div>
             </div>
 
-            {/* --- START: Qty Gabungan (Pallet Input & Carton Input) --- */}
+            {/* Qty Gabungan (Pallet Input & Carton Input) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Qty Pallet (Input Manual) */}
                 <div>
@@ -648,8 +681,46 @@ export function InboundForm() {
                     )}
                 </div>
             </div>
-            {/* --- END: Qty Gabungan --- */}
 
+            {/* BB Receh Tracking (Tampil jika receh) */}
+            {isReceh && (
+              <div className="border-2 border-blue-300 bg-blue-50 rounded-xl p-4">
+                <h3 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                  <span>🏷️</span> BB Tracking untuk Receh (Opsional)
+                </h3>
+                <p className="text-xs text-blue-700 mb-3">
+                  Untuk pallet receh, Anda bisa menambahkan multiple BB jika pallet ini berisi produk dari beberapa batch berbeda (produk sama).
+                </p>
+                
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-blue-900 mb-2">
+                    BB Receh (Pisahkan dengan koma jika multiple)
+                  </label>
+                  <input
+                    type="text"
+                    value={form.bbReceh.join(', ')}
+                    onChange={(e) => {
+                      const bbArray = e.target.value
+                        .split(',')
+                        .map(bb => bb.trim().toUpperCase())
+                        .filter(bb => bb.length > 0);
+                      setForm(prev => ({ ...prev, bbReceh: bbArray }));
+                    }}
+                    className="w-full px-4 py-3 border-2 border-blue-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                    placeholder="Contoh: BB-202501-0001, BB-202501-0002"
+                  />
+                  {form.bbReceh.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {form.bbReceh.map((bb, idx) => (
+                        <span key={idx} className="px-3 py-1 bg-blue-600 text-white text-xs rounded-full font-semibold">
+                          {bb}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Checkbox Rekomendasi Otomatis */}
             <div className="flex items-center gap-3 p-4 bg-purple-50 border-2 border-purple-200 rounded-xl">
@@ -765,8 +836,6 @@ export function InboundForm() {
               </div>
             </div>
 
-            {/* ========== SUMMARY SECTION ========== */}
-
             {/* Calculated Qty & Logika Receh */}
             {totalCartons > 0 && selectedProduct && (
               <div className={`p-4 border-2 rounded-xl ${isReceh ? 'bg-blue-50 border-blue-300' : 'bg-yellow-50 border-yellow-200'}`}>
@@ -774,15 +843,14 @@ export function InboundForm() {
                   Kalkulasi Qty Penerimaan:
                 </p>
                 <p className={`text-xl font-bold ${isReceh ? 'text-blue-700' : 'text-yellow-900'}`}>
-                    {totalPallets.toLocaleString()} Pallet {remainingCartons > 0 ? `+ ${remainingCartons.toLocaleString()} Karton Sisa` : ''}
+                    {totalPallets.toLocaleString()} Pallet Utuh {remainingCartons > 0 ? `+ ${remainingCartons.toLocaleString()} Karton Sisa` : ''}
                 </p>
                 <p className="text-xs mt-1">
-                    Standard 1 Pallet = {qtyPerPalletStd} Karton/Satuan.
-                    Total Karton yang diterima: **{totalCartons.toLocaleString()}**
+                    Total Pallet Dibutuhkan: **{totalPalletsNeeded} Lokasi**
                 </p>
                 {isReceh && (
                     <p className="text-xs mt-1 font-semibold text-blue-700">
-                        Pallet ini akan ditandai **RECEH** (Warna Biru) karena terdapat sisa karton ({remainingCartons.toLocaleString()} unit).
+                        Pallet terakhir akan ditandai **RECEH** (Warna Biru).
                     </p>
                 )}
               </div>
@@ -853,19 +921,47 @@ export function InboundForm() {
               </div>
             )}
 
-            {/* Recommended Location dan Submit Button (Tetap) */}
-            {recommendedLocation && autoRecommend && (
+            {/* Recommended Location - Multi/Single Display */}
+            <div className="flex gap-3">
+                <button
+                    onClick={handleRecommend}
+                    type="button"
+                    className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors shadow-lg flex items-center justify-center gap-2"
+                >
+                    🔍 Rekomendasi Lokasi ({totalPalletsNeeded} Pallet)
+                </button>
+            </div>
+            
+            {(multiLocationRec || recommendedLocation) && (
               <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
                 <h3 className="font-semibold text-green-900 mb-2">
-                  ✅ Rekomendasi Lokasi Kosong:
+                  ✅ Rekomendasi Lokasi Ditemukan
                 </h3>
-                <div className="flex items-center gap-2">
-                  <span className="text-green-700">Lokasi:</span>
-                  <span className="px-4 py-2 bg-green-600 text-white rounded-lg font-bold text-lg">
-                    {recommendedLocation.cluster}-{recommendedLocation.lorong}-
-                    {recommendedLocation.baris}-{recommendedLocation.level}
-                  </span>
-                </div>
+                
+                {multiLocationRec && multiLocationRec.locations.length > 1 ? (
+                    <div className="space-y-2">
+                        <p className="text-sm font-semibold text-green-700">
+                            Diperlukan {totalPalletsNeeded} lokasi. Tersedia {multiLocationRec.locations.length} lokasi.
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                            {multiLocationRec.locations.map((loc, idx) => (
+                                <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg ${idx === 0 ? 'bg-green-600 text-white' : 'bg-green-100 text-green-800'}`}>
+                                    <span className="text-xs font-bold">#{idx + 1}</span>
+                                    <span className="font-bold text-sm">
+                                        {loc.cluster}-{loc.lorong}-{loc.baris}-{loc.level}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2">
+                        <span className="text-green-700">Lokasi:</span>
+                        <span className="px-4 py-2 bg-green-600 text-white rounded-lg font-bold text-lg">
+                            {form.cluster}-{form.lorong}-{form.baris}-{form.pallet}
+                        </span>
+                    </div>
+                )}
               </div>
             )}
 

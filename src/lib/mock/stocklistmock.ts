@@ -12,7 +12,7 @@ export interface StockItem {
   id: string;
   productCode: string;
   productName: string;
-  bbPallet: string;      // BB Pallet (instead of batch)
+  bbPallet: string | string[];      // BB Pallet - bisa array untuk receh dengan multiple BB
   batchNumber: string;   // Kept for compatibility
   lotNumber: string;
   location: {
@@ -21,20 +21,23 @@ export interface StockItem {
     baris: string;   
     level: string;   
   };
-  qtyPallet: number; // Jumlah tumpukan pallet di lokasi rak
+  qtyPallet: number; // Jumlah tumpukan pallet di lokasi rak (max 3 untuk full pallet)
   qtyCarton: number; // Total karton/box (menggunakan qtyPerPallet dari Master)
   qtyPcs: number; // Total pcs/unit
   expiredDate: string;
   inboundDate: string;
   status: "available" | "reserved" | "quarantine";
+  isReceh?: boolean; // Flag untuk pallet receh (tidak penuh)
   notes?: string;
 }
 
-// Helper function untuk generate random date
+// Helper function untuk generate random date berdasarkan hari ini (1 Sept 2025)
+const TODAY = new Date('2025-09-01'); // Anggap hari ini 1 September 2025
+
 function getRandomDate(startDaysFromNow: number, endDaysFromNow: number): string {
-  const start = new Date();
+  const start = new Date(TODAY);
   start.setDate(start.getDate() + startDaysFromNow);
-  const end = new Date();
+  const end = new Date(TODAY);
   end.setDate(end.getDate() + endDaysFromNow);
   
   const date = new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
@@ -44,18 +47,26 @@ function getRandomDate(startDaysFromNow: number, endDaysFromNow: number): string
 // Helper function untuk generate inbound date (masa lalu)
 function getInboundDate(): string {
   const daysAgo = Math.floor(Math.random() * 90) + 1; // 1-90 hari yang lalu
-  const date = new Date();
+  const date = new Date(TODAY);
   date.setDate(date.getDate() - daysAgo);
   return date.toISOString().split('T')[0];
+}
+
+// Helper function untuk generate BB Pallet berdasarkan expired date
+// Format: BB-YYMMDD-XXXX (contoh: BB-250901-0001)
+function generateBBPallet(expiredDate: string, plantCode: string): string {
+  const expDate = new Date(expiredDate);
+  const yy = String(expDate.getFullYear()).slice(-2); // 25 dari 2025
+  const mm = String(expDate.getMonth() + 1).padStart(2, '0'); // 01-12
+  const dd = String(expDate.getDate()).padStart(2, '0'); // 01-31
+  
+  return `BB-${yy}${mm}${dd}-${plantCode}`;
 }
 
 // --- START: Logika Data Generator BARU (Teratur) ---
 
 // Daftar Cluster yang digunakan
-const clusters = ["A", "B", "C", "D", "E"]; 
-
-// Filter produk yang memiliki defaultCluster
-const allProductsWithCluster = productMasterData.filter(p => p.defaultCluster);
+const clusters = ["A", "B", "C", "D", "E"];
 
 // Gunakan 2 Lorong dan 9 Baris (Permintaan User)
 const lorongList = ["L1", "L2"]; // Hanya 2 Lorong pertama
@@ -95,8 +106,8 @@ clusters.forEach(cluster => {
             product = productMasterData[Math.floor(Math.random() * productMasterData.length)];
         }
         
-        // Random quantity
-        const qtyPallet = Math.floor(Math.random() * 3) + 1; // 1-3 tumpukan pallet
+        // Qty Pallet harus 1 karena setiap slot (P1/P2/P3) hanya bisa 1 pallet
+        const qtyPallet = 1; // Setiap lokasi level (P1, P2, P3) = 1 slot fisik = 1 pallet
         
         // Hitung qtyCarton/qtyBox (Qty Pallet * Qty Produk/Pallet)
         const qtyCarton = qtyPallet * product.qtyPerPallet; 
@@ -104,27 +115,34 @@ clusters.forEach(cluster => {
         // Hitung qtyPcs (Qty Carton * Qty per Karton)
         const qtyPcs = qtyCarton * product.qtyPerCarton;
         
-        // Random batch and BB Pallet
-        const batchMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
-        const batchYear = 2025; 
-        const batchSeq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
-        const batchNumber = `BATCH-${batchYear}${batchMonth}-${batchSeq}`;
-        const lotNumber = `LOT-${batchYear}${batchMonth}-${batchSeq}`;
-        const bbPallet = `BB-${batchYear}${batchMonth}-${String(idCounter).padStart(4, '0')}`;
-        
         // Expired date distribution (FEFO logic):
+        // Hari ini: 1 Sept 2025 (250901)
         const expRand = Math.random();
         let expiredDate: string;
         if (expRand < 0.30) {
-          // Green: 10-90 hari (near expiry)
-          expiredDate = getRandomDate(10, 90);
+          // Green: 0-90 hari (near expiry) - RELEASE
+          expiredDate = getRandomDate(0, 90);
         } else if (expRand < 0.85) {
-          // Yellow: 91-180 hari (medium expiry)
+          // Yellow: 91-180 hari (medium expiry) - HOLD
           expiredDate = getRandomDate(91, 180);
         } else {
-          // Yellow: 181-540 hari (long expiry)
-          expiredDate = getRandomDate(181, 540);
+          // Yellow: 181-365 hari (long expiry) - HOLD
+          expiredDate = getRandomDate(181, 365);
         }
+        
+        // Generate Plant Code (4 digit unique per item)
+        const plantCode = String(idCounter).padStart(4, '0');
+        
+        // Generate BB Pallet berdasarkan expired date (Format: BB-YYMMDD-XXXX)
+        const bbPallet = generateBBPallet(expiredDate, plantCode);
+        
+        // Generate batch info
+        const expDate = new Date(expiredDate);
+        const batchMonth = String(expDate.getMonth() + 1).padStart(2, '0');
+        const batchYear = expDate.getFullYear();
+        const batchSeq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
+        const batchNumber = `BATCH-${batchYear}${batchMonth}-${batchSeq}`;
+        const lotNumber = `LOT-${batchYear}${batchMonth}-${batchSeq}`;
         
         const inboundDate = getInboundDate();
         
@@ -168,6 +186,93 @@ clusters.forEach(cluster => {
 });
 
 // --- END: Logika Data Generator BARU (Teratur) ---
+
+// --- START: Manual Receh Data dengan Multiple BB ---
+// Tambahkan beberapa contoh receh dengan multiple BB untuk testing dan visualisasi
+
+// Receh 1: Cluster A, L3, B1, P1 - Multiple BB dari batch berbeda (RELEASE - expired dekat)
+const receh1ExpDate = getRandomDate(30, 60); // 30-60 hari dari sekarang (GREEN)
+stockListData.push({
+  id: `STK-RECEH-001`,
+  productCode: "AQ-1100ML-BC",
+  productName: "1100ML AQUA LOCAL 1X12 BARCODE ON CAP",
+  bbPallet: [
+    generateBBPallet(getRandomDate(30, 40), "0101"), 
+    generateBBPallet(getRandomDate(35, 45), "0102"), 
+    generateBBPallet(getRandomDate(40, 50), "0103")
+  ], // Multiple BB dengan expired berbeda
+  batchNumber: "BATCH-202510-101",
+  lotNumber: "LOT-202510-101",
+  location: {
+    cluster: "A",
+    lorong: "L3",
+    baris: "B1",
+    level: "P1",
+  },
+  qtyPallet: 1,
+  qtyCarton: 25, // Kurang dari standard (42 karton per pallet)
+  qtyPcs: 300,
+  expiredDate: receh1ExpDate,
+  inboundDate: getInboundDate(),
+  status: "available",
+  isReceh: true,
+  notes: "Pallet receh dengan 3 BB berbeda (produk sama) - RELEASE",
+});
+
+// Receh 2: Cluster B, L3, B2, P2 - Multiple BB (HOLD - expired masih lama)
+const receh2ExpDate = getRandomDate(120, 150); // 120-150 hari dari sekarang (YELLOW)
+stockListData.push({
+  id: `STK-RECEH-002`,
+  productCode: "AQ-1500ML",
+  productName: "1500ML AQUA LOCAL 1X12",
+  bbPallet: [
+    generateBBPallet(getRandomDate(120, 130), "0201"), 
+    generateBBPallet(getRandomDate(130, 140), "0202")
+  ], // Multiple BB
+  batchNumber: "BATCH-202601-201",
+  lotNumber: "LOT-202601-201",
+  location: {
+    cluster: "B",
+    lorong: "L3",
+    baris: "B2",
+    level: "P2",
+  },
+  qtyPallet: 1,
+  qtyCarton: 50, // Kurang dari standard (70 karton per pallet)
+  qtyPcs: 600,
+  expiredDate: receh2ExpDate,
+  inboundDate: getInboundDate(),
+  status: "available",
+  isReceh: true,
+  notes: "Pallet receh dengan 2 BB berbeda (produk sama) - HOLD",
+});
+
+// Receh 3: Cluster C, L3, B3, P1 - Single BB (RELEASE - expired dekat)
+const receh3ExpDate = getRandomDate(60, 80); // 60-80 hari dari sekarang (GREEN)
+stockListData.push({
+  id: `STK-RECEH-003`,
+  productCode: "AQ-1500ML-MP",
+  productName: "1500ML AQUA LOCAL MULTIPACK 1X6",
+  bbPallet: generateBBPallet(receh3ExpDate, "0301"), // Single BB
+  batchNumber: "BATCH-202511-301",
+  lotNumber: "LOT-202511-301",
+  location: {
+    cluster: "C",
+    lorong: "L3",
+    baris: "B3",
+    level: "P1",
+  },
+  qtyPallet: 1,
+  qtyCarton: 80, // Kurang dari standard (112 karton per pallet)
+  qtyPcs: 480,
+  expiredDate: receh3ExpDate,
+  inboundDate: getInboundDate(),
+  status: "available",
+  isReceh: true,
+  notes: "Pallet receh dengan single BB - RELEASE",
+});
+
+// --- END: Manual Receh Data ---
 
 export { stockListData };
 

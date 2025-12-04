@@ -9,7 +9,7 @@ import {
   getProductByCode, // Import helper function
   ProductMaster 
 } from "@/lib/mock/product-master"; 
-import { TruckIcon, MapPin, X, AlertTriangle, CheckCircle, Clock } from "lucide-react";
+import { X } from "lucide-react";
 
 
 // --- TYPE & STATUS DEFINITION (BASED ON INITIAL FILE) ---
@@ -29,12 +29,13 @@ export type WarehouseCell = {
   baris: number;
   pallet: number;
   product?: string;
-  bbPallet?: string;
+  bbPallet?: string | string[]; // Support untuk array (multiple BB untuk receh)
   qtyPallet?: number;
   qtyCarton?: number;
   status?: WarehouseCellStatus;
   colorCode?: StatusColor;
-  assignedCluster?: string; 
+  assignedCluster?: string;
+  isReceh?: boolean; // Flag untuk receh
 };
 
 const colorMap: Record<StatusColor, string> = {
@@ -119,27 +120,33 @@ function generateWarehouseCells(): WarehouseCell[] {
               if (daysToExpiry <= 90) {
                 colorCode = "green"; // RELEASE
                 status = "RELEASE";
-              }
-              else {
-                colorCode = "yellow"; // HOLD
-                status = "HOLD";
-              }
+              }            else {
+              colorCode = "yellow"; // HOLD
+              status = "HOLD";
             }
             
-            cells.push({
-              id: key,
-              cluster,
-              lorong,
-              baris,
-              pallet,
-              product: stock.productName,
-              bbPallet: stock.bbPallet,
-              qtyPallet: stock.qtyPallet,
-              qtyCarton: stock.qtyCarton,
-              status,
-              colorCode,
-              assignedCluster: stock.location.cluster,
-            });
+            // Cek apakah receh (jika ada isReceh flag dari stock)
+            if (stock.isReceh) {
+              colorCode = "blue";
+              status = "RECEH";
+            }
+          }
+          
+          cells.push({
+            id: key,
+            cluster,
+            lorong,
+            baris,
+            pallet,
+            product: stock.productName,
+            bbPallet: stock.bbPallet,
+            qtyPallet: stock.qtyPallet,
+            qtyCarton: stock.qtyCarton,
+            status,
+            colorCode,
+            assignedCluster: stock.location.cluster,
+            isReceh: stock.isReceh,
+          });
           } else {
             // Sel kosong
             cells.push({
@@ -200,8 +207,17 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
             <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
               <p className="text-xs font-medium text-slate-500 mb-1">BB Pallet</p>
               <p className="font-semibold text-slate-900 text-xs sm:text-sm">
-                {cell.bbPallet ?? "-"}
+                {cell.bbPallet 
+                  ? Array.isArray(cell.bbPallet) 
+                    ? cell.bbPallet.join(", ") 
+                    : cell.bbPallet 
+                  : "-"}
               </p>
+              {cell.isReceh && Array.isArray(cell.bbPallet) && cell.bbPallet.length > 1 && (
+                <p className="text-[10px] text-blue-600 mt-1">
+                  🔵 Receh: {cell.bbPallet.length} BB dalam 1 pallet
+                </p>
+              )}
             </div>
           </div>
 
@@ -258,7 +274,7 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
             <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
               <p className="text-xs font-medium text-slate-500 mb-1">Lokasi Rak</p>
               <p className="font-semibold text-slate-900 text-xs sm:text-sm">
-                L{cell.lorong}-{cell.baris}-P{cell.pallet}
+                L{cell.lorong}-B{cell.baris}-P{cell.pallet}
               </p>
             </div>
           </div>
@@ -306,9 +322,9 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
 export function WarehouseLayout() {
   const [selectedCell, setSelectedCell] = useState<WarehouseCell | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER">("ALL");
-  const [clusterFilter, setClusterFilter] = useState<"ALL" | "A" | "B" | "C" | "D" | "E">("ALL");
-  const [productFilter, setProductFilter] = useState<string>("ALL");
+  const [statusFilter, _setStatusFilter] = useState<"ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER">("ALL");
+  const [clusterFilter, _setClusterFilter] = useState<"ALL" | "A" | "B" | "C" | "D" | "E">("ALL");
+  const [productFilter, _setProductFilter] = useState<string>("ALL");
   const [openClusters, setOpenClusters] = useState<Set<string>>(new Set());
   
   const toggleCluster = (cluster: string) => {
@@ -328,7 +344,7 @@ export function WarehouseLayout() {
   const warehouseCells = useMemo(() => generateWarehouseCells(), []);
 
   // Get unique products for filter
-  const uniqueProducts = useMemo(() => {
+  const _uniqueProducts = useMemo(() => {
     const products = new Set<string>();
     stockListData.forEach((stock: StockItem) => {
       if (stock.productName) products.add(stock.productName);
@@ -358,7 +374,17 @@ export function WarehouseLayout() {
       if (searchQuery.trim() !== "") {
         const query = searchQuery.toLowerCase();
         const productMatch = cell.product?.toLowerCase().includes(query);
-        const bbPalletMatch = cell.bbPallet?.toLowerCase().includes(query);
+        
+        // Handle bbPallet as both string and array
+        let bbPalletMatch = false;
+        if (cell.bbPallet) {
+          if (Array.isArray(cell.bbPallet)) {
+            bbPalletMatch = cell.bbPallet.some(bb => bb.toLowerCase().includes(query));
+          } else {
+            bbPalletMatch = cell.bbPallet.toLowerCase().includes(query);
+          }
+        }
+        
         return productMatch || bbPalletMatch;
       }
       
@@ -407,7 +433,7 @@ export function WarehouseLayout() {
   }, [filteredCells]);
 
   // FIX: Perhitungan Statis untuk Legend (Disesuaikan dengan status di generateWarehouseCells)
-  const getStockStats = () => {
+  const _getStockStats = () => {
     const stats = {
       totalItems: 0,
       Kosong: 0,
@@ -441,7 +467,7 @@ export function WarehouseLayout() {
   };
   
   // Komponen Pallet untuk di-render di grid
-  const PalletComponent = ({ cell, group }: { cell: WarehouseCell, group: any }) => {
+  const PalletComponent = ({ cell }: { cell: WarehouseCell }) => {
     const isFilled = cell.colorCode !== "empty";
     const colorKey: StatusColor = cell.colorCode as StatusColor; 
 
@@ -599,7 +625,7 @@ export function WarehouseLayout() {
                                           {id: `${cluster}-L${lorongNum}-B${barisNum}-P${palletNum}`, cluster, lorong: lorongNum, baris: barisNum, pallet: palletNum, colorCode: "empty"} as WarehouseCell;
                                         
                                         return (
-                                          <PalletComponent key={palletNum} cell={cell} group={group} />
+                                          <PalletComponent key={palletNum} cell={cell} />
                                         );
                                       })}
                                     </div>

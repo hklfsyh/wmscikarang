@@ -7,19 +7,26 @@ import { X, Camera, CheckCircle, XCircle, Info, Scan } from 'lucide-react';
 /**
  * QR Scanner Component with Real Camera (Improved)
  * 
- * Format QR Code yang diharapkan (text):
- * EKSPEDISI|PRODUK_ID|BB_PALLET|KD_PLANT|EXPIRED_DATE
+ * Format QR Code yang diharapkan (text) - AUTO FILL FORM:
+ * EKSPEDISI|PRODUK_CODE|QTY_PALLET|QTY_CARTON|BB_PRODUK
  * 
  * Contoh:
- * HGS|AQ200_1X48|270404|90A8|2025-12-31
+ * HGS|AQ-1500ML|2|50|2509150067
+ * 
+ * Keterangan:
+ * - EKSPEDISI: Kode ekspedisi (HGS, JNE, dll)
+ * - PRODUK_CODE: Kode produk dari product master (AQ-1500ML, AQ-200ML, dll)
+ * - QTY_PALLET: Jumlah pallet utuh (angka)
+ * - QTY_CARTON: Jumlah karton sisa/tambahan (angka, bisa 0)
+ * - BB_PRODUK: BB Produk format YYMMDDXXXX (10 digit, contoh: 2509150067)
  */
 
 export interface QRData {
   ekspedisi: string;
-  produkId: string;
-  bbPallet: string;
-  kdPlant: string;
-  expiredDate: string;
+  produkCode: string;
+  qtyPallet: string;
+  qtyCarton: string;
+  bbProduk: string;
 }
 
 interface QRScannerProps {
@@ -38,21 +45,30 @@ export function QRScanner({ onScanSuccess, onScanError }: QRScannerProps) {
       const decodedText = result[0].rawValue;
       setScanStatus("✅ QR Code terdeteksi! Memproses...");
       
-      // Parse format: EKSPEDISI|PRODUK_ID|BB_PALLET|KD_PLANT|EXPIRED_DATE
+      // Parse format: EKSPEDISI|PRODUK_CODE|QTY_PALLET|QTY_CARTON|BB_PRODUK
       const parts = decodedText.split("|");
       
       if (parts.length !== 5) {
-        const errorMsg = "Format QR tidak valid. Format: EKSPEDISI|PRODUK_ID|BB_PALLET|KD_PLANT|EXPIRED_DATE";
+        const errorMsg = "Format QR tidak valid. Format: EKSPEDISI|PRODUK_CODE|QTY_PALLET|QTY_CARTON|BB_PRODUK";
         setScanStatus("❌ " + errorMsg);
         setError(errorMsg);
         onScanError?.(errorMsg);
         return;
       }
 
-      const [ekspedisi, produkId, bbPallet, kdPlant, expiredDate] = parts;
+      const [ekspedisi, produkCode, qtyPallet, qtyCarton, bbProduk] = parts;
 
-      if (!ekspedisi || !produkId || !bbPallet || !kdPlant || !expiredDate) {
-        const errorMsg = "Salah satu field di QR code kosong";
+      if (!ekspedisi || !produkCode || !bbProduk) {
+        const errorMsg = "Field Ekspedisi, Produk Code, atau BB Produk tidak boleh kosong";
+        setScanStatus("❌ " + errorMsg);
+        setError(errorMsg);
+        onScanError?.(errorMsg);
+        return;
+      }
+
+      // Validasi BB Produk harus 10 digit
+      if (bbProduk.trim().length !== 10) {
+        const errorMsg = "BB Produk harus 10 digit (YYMMDDXXXX)";
         setScanStatus("❌ " + errorMsg);
         setError(errorMsg);
         onScanError?.(errorMsg);
@@ -63,10 +79,10 @@ export function QRScanner({ onScanSuccess, onScanError }: QRScannerProps) {
       setSuccess(true);
       onScanSuccess({
         ekspedisi: ekspedisi.trim(),
-        produkId: produkId.trim(),
-        bbPallet: bbPallet.trim(),
-        kdPlant: kdPlant.trim(),
-        expiredDate: expiredDate.trim(),
+        produkCode: produkCode.trim(),
+        qtyPallet: qtyPallet.trim() || "0",
+        qtyCarton: qtyCarton.trim() || "0",
+        bbProduk: bbProduk.trim(),
       });
       
       setTimeout(() => {
@@ -198,8 +214,11 @@ export function QRScanner({ onScanSuccess, onScanError }: QRScannerProps) {
                       Format QR:
                     </p>
                     <code className="text-[10px] bg-white px-2 py-1 rounded border border-slate-300 block font-mono text-slate-700 overflow-x-auto whitespace-nowrap">
-                      EKSPEDISI|PRODUK_ID|BB_PALLET|KD_PLANT|EXPIRED_DATE
+                      EKSPEDISI|PRODUK_CODE|QTY_PALLET|QTY_CARTON|BB_PRODUK
                     </code>
+                    <p className="text-[9px] text-slate-600 mt-1">
+                      Contoh: HGS|AQ-1500ML|2|50|2509150067
+                    </p>
                   </div>
                 </div>
               </div>
