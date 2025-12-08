@@ -5,7 +5,7 @@
 // Setiap record punya expired date untuk FEFO
 
 // --- START: Perubahan Import ---
-import { ProductMaster, productMasterData } from "@/lib/mock/product-master";
+import { productMasterData } from "@/lib/mock/product-master";
 // --- END: Perubahan Import ---
 
 export interface StockItem {
@@ -65,127 +65,324 @@ function generateBBPallet(expiredDate: string, plantCode: string): string {
 
 // --- START: Logika Data Generator BARU (Teratur) ---
 
-// Daftar Cluster yang digunakan
-const clusters = ["A", "B", "C", "D", "E"];
-
-// Gunakan 2 Lorong dan 9 Baris (Permintaan User)
-const lorongList = ["L1", "L2"]; // Hanya 2 Lorong pertama
-const barisList = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"]; // Semua 9 Baris
-// Gunakan 3 Level (Pallet) per Baris/Rak
-const levelList = ["P1", "P2", "P3"]; 
-
-// Generate stock data
+// Gunakan struktur sesuai screenshot untuk Cluster A
 const stockListData: StockItem[] = [];
 let idCounter = 1;
 
-// Loop untuk generate data di Cluster A, B, C, D, E
-clusters.forEach(cluster => {
-  // Produk yang default clusternya sama dengan cluster yang sedang di-loop
-  const clusterDefaultProducts = productMasterData.filter(p => p.defaultCluster === cluster);
+// Helper untuk generate stock item
+function addStockItem(
+  cluster: string,
+  lorong: number,
+  baris: number,
+  pallet: number,
+  productCode: string,
+  expDaysFrom: number,
+  expDaysTo: number
+) {
+  const product = productMasterData.find(p => p.productCode === productCode);
+  if (!product) return;
+
+  const qtyPallet = 1;
+  const qtyCarton = qtyPallet * product.qtyPerPallet;
+  const qtyPcs = qtyCarton * product.qtyPerCarton;
   
-  // Ambil 1 produk utama untuk cluster ini (Jika ada)
-  const mainProduct = clusterDefaultProducts.length > 0 
-    ? clusterDefaultProducts[0]
-    : productMasterData[Math.floor(Math.random() * productMasterData.length)];
-
-
-  // Loop Lorong, Baris, dan Level yang diminta
-  lorongList.forEach(lorong => {
-    barisList.forEach(baris => {
-      levelList.forEach(level => { // P1, P2, P3 akan terisi penuh
-        
-        // 90% produk yang benar (default cluster), 10% produk acak (salah penempatan)
-        const isCorrectProduct = Math.random() < 0.90;
-        let product: ProductMaster;
-
-        if (isCorrectProduct && clusterDefaultProducts.length > 0) {
-            // Pilih produk utama atau produk yang sesuai dengan cluster
-            product = mainProduct;
-        } else {
-            // Pilih produk secara acak dari semua produk (simulasi salah penempatan)
-            product = productMasterData[Math.floor(Math.random() * productMasterData.length)];
-        }
-        
-        // Qty Pallet harus 1 karena setiap slot (P1/P2/P3) hanya bisa 1 pallet
-        const qtyPallet = 1; // Setiap lokasi level (P1, P2, P3) = 1 slot fisik = 1 pallet
-        
-        // Hitung qtyCarton/qtyBox (Qty Pallet * Qty Produk/Pallet)
-        const qtyCarton = qtyPallet * product.qtyPerPallet; 
-        
-        // Hitung qtyPcs (Qty Carton * Qty per Karton)
-        const qtyPcs = qtyCarton * product.qtyPerCarton;
-        
-        // Expired date distribution (FEFO logic):
-        // Hari ini: 1 Sept 2025 (250901)
-        const expRand = Math.random();
-        let expiredDate: string;
-        if (expRand < 0.30) {
-          // Green: 0-90 hari (near expiry) - RELEASE
-          expiredDate = getRandomDate(0, 90);
-        } else if (expRand < 0.85) {
-          // Yellow: 91-180 hari (medium expiry) - HOLD
-          expiredDate = getRandomDate(91, 180);
-        } else {
-          // Yellow: 181-365 hari (long expiry) - HOLD
-          expiredDate = getRandomDate(181, 365);
-        }
-        
-        // Generate Plant Code (4 digit unique per item)
-        const plantCode = String(idCounter).padStart(4, '0');
-        
-        // Generate BB Pallet berdasarkan expired date (Format: BB-YYMMDD-XXXX)
-        const bbPallet = generateBBPallet(expiredDate, plantCode);
-        
-        // Generate batch info
-        const expDate = new Date(expiredDate);
-        const batchMonth = String(expDate.getMonth() + 1).padStart(2, '0');
-        const batchYear = expDate.getFullYear();
-        const batchSeq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
-        const batchNumber = `BATCH-${batchYear}${batchMonth}-${batchSeq}`;
-        const lotNumber = `LOT-${batchYear}${batchMonth}-${batchSeq}`;
-        
-        const inboundDate = getInboundDate();
-        
-        // Random status (lebih banyak available)
-        const randStatus = Math.random();
-        let status: "available" | "reserved" | "quarantine";
-        if (randStatus < 0.88) {
-          status = "available";
-        } else if (randStatus < 0.96) {
-          status = "reserved";
-        } else {
-          status = "quarantine";
-        }
-        
-        stockListData.push({
-          id: `STK-${String(idCounter).padStart(5, '0')}`,
-          productCode: product.productCode,
-          productName: product.productName,
-          bbPallet,
-          batchNumber,
-          lotNumber,
-          location: {
-            cluster,
-            lorong,
-            baris,
-            level,
-          },
-          qtyPallet,
-          qtyCarton,
-          qtyPcs,
-          expiredDate,
-          inboundDate,
-          status,
-          notes: status === "quarantine" ? "Quality check in progress" : undefined,
-        });
-        
-        idCounter++;
-      });
-    });
+  const expiredDate = getRandomDate(expDaysFrom, expDaysTo);
+  const plantCode = String(idCounter).padStart(4, '0');
+  const bbPallet = generateBBPallet(expiredDate, plantCode);
+  
+  const expDate = new Date(expiredDate);
+  const batchMonth = String(expDate.getMonth() + 1).padStart(2, '0');
+  const batchYear = expDate.getFullYear();
+  const batchSeq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
+  const batchNumber = `BATCH-${batchYear}${batchMonth}-${batchSeq}`;
+  const lotNumber = `LOT-${batchYear}${batchMonth}-${batchSeq}`;
+  
+  stockListData.push({
+    id: `STK-${String(idCounter).padStart(5, '0')}`,
+    productCode: product.productCode,
+    productName: product.productName,
+    bbPallet,
+    batchNumber,
+    lotNumber,
+    location: {
+      cluster,
+      lorong: `L${lorong}`,
+      baris: `B${baris}`,
+      level: `P${pallet}`,
+    },
+    qtyPallet,
+    qtyCarton,
+    qtyPcs,
+    expiredDate,
+    inboundDate: getInboundDate(),
+    status: "available",
   });
+  
+  idCounter++;
+}
+
+// === CLUSTER A: 220ML AQUA CUBE MINI (Lorong 1-3) ===
+// Lorong 1: TERISI PENUH (8 baris, 2 pallet per sel) - untuk testing
+for (let baris = 1; baris <= 8; baris++) {
+  for (let pallet = 1; pallet <= 2; pallet++) {
+    addStockItem("A", 1, baris, pallet, "AQ-220-CUBE-24", 30, 180);
+  }
+}
+
+// Lorong 2: SEBAGIAN TERISI (hanya baris 1-4 terisi, baris 5-8 kosong) - untuk testing inbound
+for (let baris = 1; baris <= 4; baris++) {
+  for (let pallet = 1; pallet <= 2; pallet++) {
+    addStockItem("A", 2, baris, pallet, "AQ-220-CUBE-24", 30, 180);
+  }
+}
+// Baris 5-8 di lorong 2 KOSONG (untuk testing rekomendasi)
+
+// Lorong 3: KOSONG SEMUA (9 baris) - untuk testing rekomendasi dari awal
+// TIDAK ADA DATA - full kosong untuk testing
+
+// === CLUSTER A: 200ML AQUA LOCAL (Lorong 4-5) ===
+// Lorong 4: SEBAGIAN TERISI (baris 1-6 terisi, baris 7-9 kosong)
+for (let baris = 1; baris <= 6; baris++) {
+  for (let pallet = 1; pallet <= 2; pallet++) {
+    addStockItem("A", 4, baris, pallet, "AQ-200-LOC-48", 60, 200);
+  }
+}
+// Baris 7-9 di lorong 4 KOSONG
+
+// Lorong 5: KOSONG SEMUA - untuk testing rekomendasi
+// TIDAK ADA DATA
+
+// === CLUSTER A: 600ML AQUA LOCAL (Lorong 6-11) ===
+// Lorong 6-7: TERISI PENUH (9 baris, 3 pallet per sel)
+for (let lorong = 6; lorong <= 7; lorong++) {
+  for (let baris = 1; baris <= 9; baris++) {
+    for (let pallet = 1; pallet <= 3; pallet++) {
+      addStockItem("A", lorong, baris, pallet, "AQ-600-LOC-24", 90, 250);
+    }
+  }
+}
+
+// Lorong 8: SEBAGIAN TERISI (baris 1-5 terisi, baris 6-9 kosong)
+for (let baris = 1; baris <= 5; baris++) {
+  for (let pallet = 1; pallet <= 3; pallet++) {
+    addStockItem("A", 8, baris, pallet, "AQ-600-LOC-24", 90, 250);
+  }
+}
+// Baris 6-9 di lorong 8 KOSONG
+
+// Lorong 9-10: KOSONG SEMUA - untuk testing rekomendasi
+// TIDAK ADA DATA
+
+// Lorong 11: SEBAGIAN TERISI (hanya baris 1-3 terisi, baris 4-9 kosong)
+for (let baris = 1; baris <= 3; baris++) {
+  for (let pallet = 1; pallet <= 3; pallet++) {
+    addStockItem("A", 11, baris, pallet, "AQ-600-LOC-24", 90, 250);
+  }
+}
+// Baris 4-9 di lorong 11 KOSONG
+
+// === CLUSTER B: Berdasarkan Instruksi User ===
+// Lorong 1-6: 1500ML AQUA LOCAL 1X12 (2 pallet per sel)
+for (let lorong = 1; lorong <= 6; lorong++) {
+  for (let baris = 1; baris <= 8; baris++) {
+    for (let pallet = 1; pallet <= 2; pallet++) {
+      // 80% filled
+      if (Math.random() < 0.8) {
+        addStockItem("B", lorong, baris, pallet, "AQ-1500ML", 90, 250);
+      }
+    }
+  }
+}
+
+// Lorong 6-12: 330ML AQUA LOCAL 1X24 (3 pallet per sel) - Note: Lorong 6 overlap dengan 1500ML
+for (let lorong = 6; lorong <= 12; lorong++) {
+  for (let baris = 1; baris <= 8; baris++) {
+    for (let pallet = 1; pallet <= 3; pallet++) {
+      // 85% filled untuk area ini (lebih penuh)
+      if (Math.random() < 0.85) {
+        addStockItem("B", lorong, baris, pallet, "AQ-330ML", 90, 250);
+      }
+    }
+  }
+}
+
+// Lorong 13-16: 750ML AQUA LOCAL 1X18 (2 pallet per sel)
+for (let lorong = 13; lorong <= 16; lorong++) {
+  for (let baris = 1; baris <= 8; baris++) {
+    for (let pallet = 1; pallet <= 2; pallet++) {
+      // 75% filled
+      if (Math.random() < 0.75) {
+        addStockItem("B", lorong, baris, pallet, "AQ-750ML", 60, 200);
+      }
+    }
+  }
+}
+
+// Lorong 17-18: 1100ML AQUA LOCAL 1X12 BARCODE ON CAP (2 pallet per sel)
+for (let lorong = 17; lorong <= 18; lorong++) {
+  for (let baris = 1; baris <= 8; baris++) {
+    for (let pallet = 1; pallet <= 2; pallet++) {
+      // 70% filled
+      if (Math.random() < 0.7) {
+        addStockItem("B", lorong, baris, pallet, "AQ-1100ML-BC", 60, 200);
+      }
+    }
+  }
+}
+
+// Lorong 19-20: 1500ML AQUA LOCAL MULTIPACK 1X6 (1 pallet per sel, 8 baris)
+for (let lorong = 19; lorong <= 20; lorong++) {
+  for (let baris = 1; baris <= 8; baris++) {
+    // 60% filled
+    if (Math.random() < 0.6) {
+      addStockItem("B", lorong, baris, 1, "AQ-1500ML-MP", 90, 250);
+    }
+  }
+}
+
+// Lorong 21: 600ML AQUA LOCAL MULTIPACK 1X6 (1 pallet per sel, 8 baris)
+for (let baris = 1; baris <= 8; baris++) {
+  // 65% filled
+  if (Math.random() < 0.65) {
+    addStockItem("B", 21, baris, 1, "AQ-600ML-MP", 60, 200);
+  }
+}
+
+// Lorong 22: 550ML VIT LOCAL 1X24 (2 pallet per sel, 8 baris)
+for (let baris = 1; baris <= 8; baris++) {
+  for (let pallet = 1; pallet <= 2; pallet++) {
+    // 70% filled
+    if (Math.random() < 0.7) {
+      addStockItem("B", 22, baris, pallet, "VIT-550ML", 60, 200);
+    }
+  }
+}
+
+// Lorong 23: 330ML VIT LOCAL 1X24 (2 pallet per sel, 8 baris)
+for (let baris = 1; baris <= 8; baris++) {
+  for (let pallet = 1; pallet <= 2; pallet++) {
+    // 70% filled
+    if (Math.random() < 0.7) {
+      addStockItem("B", 23, baris, pallet, "VIT-330ML", 60, 200);
+    }
+  }
+}
+
+// Lorong 24: 200ML VIT LOCAL 1X48 (2 pallet per sel, 8 baris)
+for (let baris = 1; baris <= 8; baris++) {
+  for (let pallet = 1; pallet <= 2; pallet++) {
+    // 65% filled
+    if (Math.random() < 0.65) {
+      addStockItem("B", 24, baris, pallet, "VIT-200ML", 60, 200);
+    }
+  }
+}
+
+// Lorong 25: 1500ML VIT LOCAL 1X12 (2 pallet per sel, 8 baris)
+for (let baris = 1; baris <= 8; baris++) {
+  for (let pallet = 1; pallet <= 2; pallet++) {
+    // 70% filled
+    if (Math.random() < 0.7) {
+      addStockItem("B", 25, baris, pallet, "VIT-1500ML", 90, 250);
+    }
+  }
+}
+
+// Lorong 26: ALL REFLECTIONS (6 baris, 1 pallet per baris)
+// Baris 1: 380ML AQUA REFLECTIONS SPARKLING 1X12
+if (Math.random() < 0.8) {
+  addStockItem("B", 26, 1, 1, "AQ-380-SPARK", 120, 300);
+}
+// Baris 2: 380ML AQUA REFLECTIONS BAL 1X12
+if (Math.random() < 0.8) {
+  addStockItem("B", 26, 2, 1, "AQ-380-BAL", 120, 300);
+}
+// Baris 3-4: 380ML AQUA REFLECTIONS SBUX BAL 1X12 (2 baris)
+for (let baris = 3; baris <= 4; baris++) {
+  if (Math.random() < 0.8) {
+    addStockItem("B", 26, baris, 1, "AQ-380-SBUX", 120, 300);
+  }
+}
+// Baris 5: 750ML AQUA SPARKLING BAL 1X6
+if (Math.random() < 0.8) {
+  addStockItem("B", 26, 5, 1, "AQ-750-SPARK-BAL", 120, 300);
+}
+// Baris 6: 750ML AQUA REFLECTIONS BAL 1X6
+if (Math.random() < 0.8) {
+  addStockItem("B", 26, 6, 1, "AQ-750-REF-BAL", 120, 300);
+}
+
+// === CLUSTER C: Mizone Products + In Transit Area ===
+// Lorong 1-3: 500ML MIZONE ACTIV LYCHEE LEMON 1X12 (5 baris, 3 pallet per sel)
+for (let lorong = 1; lorong <= 3; lorong++) {
+  for (let baris = 1; baris <= 5; baris++) {
+    for (let pallet = 1; pallet <= 3; pallet++) {
+      // 70% filled
+      if (Math.random() < 0.7) {
+        addStockItem("C", lorong, baris, pallet, "MIZ-ACTIV", 60, 200);
+      }
+    }
+  }
+}
+
+// Lorong 4-6: 500ML MIZONE MOOD UP CRANBERRY 1X12 (5 baris, 3 pallet per sel)
+for (let lorong = 4; lorong <= 6; lorong++) {
+  for (let baris = 1; baris <= 5; baris++) {
+    for (let pallet = 1; pallet <= 3; pallet++) {
+      // 70% filled
+      if (Math.random() < 0.7) {
+        addStockItem("C", lorong, baris, pallet, "MIZ-MOOD", 60, 200);
+      }
+    }
+  }
+}
+
+// Lorong 7-9: 500ML MIZONE COCO BOOST 1X12 (5 baris, 3 pallet per sel)
+for (let lorong = 7; lorong <= 9; lorong++) {
+  for (let baris = 1; baris <= 5; baris++) {
+    for (let pallet = 1; pallet <= 3; pallet++) {
+      // 70% filled
+      if (Math.random() < 0.7) {
+        addStockItem("C", lorong, baris, pallet, "MIZ-COCO", 60, 200);
+      }
+    }
+  }
+}
+
+// Lorong 10-16: IN TRANSIT AREA (Buffer/Overflow)
+// This area can contain overflow products from other clusters
+// For demonstration, we'll add some mixed products from other clusters that are "overflowed"
+const inTransitProducts = ["AQ-1500ML", "AQ-330ML", "VIT-550ML", "AQ-600-LOC-24"];
+for (let lorong = 10; lorong <= 16; lorong++) {
+  for (let baris = 1; baris <= 5; baris++) {
+    for (let pallet = 1; pallet <= 3; pallet++) {
+      // 30% filled (sparse, as it's temporary storage)
+      if (Math.random() < 0.3) {
+        const randomProduct = inTransitProducts[Math.floor(Math.random() * inTransitProducts.length)];
+        addStockItem("C", lorong, baris, pallet, randomProduct, 30, 180);
+      }
+    }
+  }
+}
+
+// === CLUSTER D: Simple single product ===
+const otherClusters = [
+  { cluster: "D", productCode: "TEH-350-BTL-12", lorongCount: 5, barisCount: 6, palletCount: 2 },
+];
+
+otherClusters.forEach(({ cluster, productCode, lorongCount, barisCount, palletCount }) => {
+  for (let lorong = 1; lorong <= lorongCount; lorong++) {
+    for (let baris = 1; baris <= barisCount; baris++) {
+      for (let pallet = 1; pallet <= palletCount; pallet++) {
+        // 60% filled untuk test
+        if (Math.random() < 0.6) {
+          addStockItem(cluster, lorong, baris, pallet, productCode, 30, 300);
+        }
+      }
+    }
+  }
 });
 
-// --- END: Logika Data Generator BARU (Teratur) ---
 
 // --- START: Manual Receh Data dengan Multiple BB ---
 // Tambahkan beberapa contoh receh dengan multiple BB untuk testing dan visualisasi

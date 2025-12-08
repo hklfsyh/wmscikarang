@@ -5,10 +5,16 @@
 import { useMemo, useState } from "react";
 import { stockListData, type StockItem } from "@/lib/mock/stocklistmock";
 import { 
-  productMasterData, // Import Master Data Produk baru
   getProductByCode, // Import helper function
-  ProductMaster 
 } from "@/lib/mock/product-master"; 
+import { 
+  clusterConfigs,
+  getBarisCountForLorong,
+  getPalletCapacityForCell,
+  validateProductLocation,
+  isInTransitLocation,
+  getInTransitRange,
+} from "@/lib/mock/warehouse-config";
 import { X } from "lucide-react";
 
 
@@ -36,6 +42,7 @@ export type WarehouseCell = {
   colorCode?: StatusColor;
   assignedCluster?: string;
   isReceh?: boolean; // Flag untuk receh
+  isInTransit?: boolean; // Flag untuk In Transit area
 };
 
 const colorMap: Record<StatusColor, string> = {
@@ -47,38 +54,15 @@ const colorMap: Record<StatusColor, string> = {
 };
 
 // =========================================================================
-// LOGIC: DYNAMIC CLUSTER MAPPING & VALIDATION
+// LOGIC: DYNAMIC CLUSTER MAPPING & VALIDATION (NOW USING warehouse-config)
 // =========================================================================
 
-// 1. DYNAMIC CLUSTER MAPPING
-const generateClusterProductMap = (masterData: ProductMaster[]): Record<string, string[]> => {
-  const map: Record<string, string[]> = {};
-  masterData.forEach(product => {
-    if (product.defaultCluster) {
-      const cluster = product.defaultCluster;
-      if (!map[cluster]) {
-        map[cluster] = [];
-      }
-      map[cluster].push(product.productCode);
-    }
-  });
-  return map;
-};
+// Legacy code kept for reference (now using validateProductLocation from warehouse-config)
+// const generateClusterProductMap = (masterData: ProductMaster[]): Record<string, string[]> => { ... }
 
-const CLUSTER_TO_PRODUCT_MAP = generateClusterProductMap(productMasterData);
-
-// 2. WRONG CLUSTER CHECK
-const isWrongCluster = (stock: StockItem): boolean => {
-  const expectedCodes = CLUSTER_TO_PRODUCT_MAP[stock.location.cluster];
-  if (!expectedCodes) return false; 
-  return !expectedCodes.includes(stock.productCode);
-};
-
-
-// 3. GENERATE CELLS
+// 3. GENERATE CELLS (DYNAMIC BASED ON CLUSTER CONFIG)
 function generateWarehouseCells(): WarehouseCell[] {
   const cells: WarehouseCell[] = [];
-  const clusters: Array<string> = ["A", "B", "C", "D", "E"];
   const locationMap = new Map<string, StockItem>();
   
   // Mapping stok ke kunci numerik
@@ -90,47 +74,64 @@ function generateWarehouseCells(): WarehouseCell[] {
     locationMap.set(key, stock);
   });
   
-  clusters.forEach((cluster) => {
-    for (let lorong = 1; lorong <= 11; lorong++) {
-      for (let baris = 1; baris <= 9; baris++) {
-        for (let pallet = 1; pallet <= 3; pallet++) { 
+  // Loop through all active cluster configs (DYNAMIC)
+  clusterConfigs.filter(c => c.isActive).forEach((clusterConfig) => {
+    const cluster = clusterConfig.cluster;
+    const maxLorong = clusterConfig.defaultLorongCount;
+    
+    for (let lorong = 1; lorong <= maxLorong; lorong++) {
+      // Get baris count for this specific lorong (DYNAMIC)
+      const maxBaris = getBarisCountForLorong(cluster, lorong);
+      
+      for (let baris = 1; baris <= maxBaris; baris++) {
+        // Get pallet capacity for this specific cell (DYNAMIC)
+        const maxPallet = getPalletCapacityForCell(cluster, lorong, baris);
+        
+        for (let pallet = 1; pallet <= maxPallet; pallet++) { 
           const key = `${cluster}-${lorong}-${baris}-${pallet}`;
           const stock = locationMap.get(key);
+          
+          // Check if this location is in In Transit area
+          const inTransit = isInTransitLocation(cluster, lorong);
           
           if (stock) {
             let colorCode: StatusColor = "green";
             let status: WarehouseCellStatus = "RELEASE";
             
-            // --- INTEGRASI LOGIKA VALIDASI BARU ---
-            const wrongCluster = isWrongCluster(stock);
-            
-            if (wrongCluster) {
+            // --- IN TRANSIT: Always RED (buffer/overflow products) ---
+            if (inTransit) {
               colorCode = "red";
-              status = "WRONG_CLUSTER";
-            }
-            // --- INTEGRASI LOGIKA VALIDASI BARU SELESAI ---
-
-            // LOGIKA LAMA: Cek Expired Date (FEFO)
-            if (!wrongCluster) {
-              const today = new Date();
-              const expDate = new Date(stock.expiredDate);
-              const diffTime = expDate.getTime() - today.getTime();
-              const daysToExpiry = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+              status = "WRONG_CLUSTER"; // Reuse status for visual consistency
+            } else {
+              // --- VALIDASI PRODUCT LOCATION (for non In Transit) ---
+              const validation = validateProductLocation(stock.productCode, cluster, lorong, baris);
+              const wrongCluster = !validation.isValid;
               
-              if (daysToExpiry <= 90) {
-                colorCode = "green"; // RELEASE
-                status = "RELEASE";
-              }            else {
-              colorCode = "yellow"; // HOLD
-              status = "HOLD";
+              if (wrongCluster) {
+                colorCode = "red";
+                status = "WRONG_CLUSTER";
+              } else {
+                // LOGIKA LAMA: Cek Expired Date (FEFO)
+                const today = new Date();
+                const expDate = new Date(stock.expiredDate);
+                const diffTime = expDate.getTime() - today.getTime();
+                const daysToExpiry = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                
+                if (daysToExpiry <= 90) {
+                  colorCode = "green"; // RELEASE
+                  status = "RELEASE";
+                } else {
+                  colorCode = "yellow"; // HOLD
+                  status = "HOLD";
+                }
+                
+                // Cek apakah receh (jika ada isReceh flag dari stock)
+                if (stock.isReceh) {
+                  colorCode = "blue";
+                  status = "RECEH";
+                }
+              }
             }
-            
-            // Cek apakah receh (jika ada isReceh flag dari stock)
-            if (stock.isReceh) {
-              colorCode = "blue";
-              status = "RECEH";
-            }
-          }
           
           cells.push({
             id: key,
@@ -146,6 +147,7 @@ function generateWarehouseCells(): WarehouseCell[] {
             colorCode,
             assignedCluster: stock.location.cluster,
             isReceh: stock.isReceh,
+            isInTransit: inTransit,
           });
           } else {
             // Sel kosong
@@ -156,6 +158,7 @@ function generateWarehouseCells(): WarehouseCell[] {
               baris,
               pallet,
               colorCode: "empty",
+              isInTransit: inTransit,
             });
           }
         }
@@ -294,7 +297,14 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
                "⚠️ SALAH CLUSTER (Perlu relokasi)"}
             </p>
             
-            {cell.status === "WRONG_CLUSTER" && productDetail && (
+            {cell.isInTransit && (
+              <div className="p-3 mt-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs">
+                <p className="font-semibold">🚚 In Transit Area (Buffer/Overflow):</p>
+                <p>Lokasi ini adalah area buffer sementara untuk produk overflow. Produk dapat disimpan di sini sementara menunggu relokasi ke home location yang sesuai.</p>
+              </div>
+            )}
+            
+            {cell.status === "WRONG_CLUSTER" && productDetail && !cell.isInTransit && (
               <div className="p-3 mt-3 bg-red-100 border-l-4 border-red-500 text-red-700 text-xs">
                 <p className="font-semibold">Perhatian:</p>
                 <p>Produk ini seharusnya diletakkan di Cluster 
@@ -432,7 +442,7 @@ export function WarehouseLayout() {
     return grouped;
   }, [filteredCells]);
 
-  // FIX: Perhitungan Statis untuk Legend (Disesuaikan dengan status di generateWarehouseCells)
+  // FIX: Perhitungan Dinamis untuk Legend (Berdasarkan actual cells yang di-generate)
   const _getStockStats = () => {
     const stats = {
       totalItems: 0,
@@ -442,7 +452,8 @@ export function WarehouseLayout() {
       SalahCluster: 0, // WRONG_CLUSTER (Red)
     };
     
-    const totalCells = 5 * 11 * 9 * 3; 
+    // DYNAMIC: Total cells adalah jumlah aktual cells yang di-generate
+    const totalCells = warehouseCells.length;
 
     warehouseCells.forEach(cell => {
       if (cell.colorCode === 'empty') {
@@ -512,7 +523,7 @@ export function WarehouseLayout() {
                 Warehouse Layout Visualization
               </h1>
               <p className="text-xs sm:text-sm text-slate-600">
-                Peta lokasi stok produk dengan struktur 5 Cluster × 11 Lorong × 9 Baris × 3 Pallet (Slot Rak).
+                Peta lokasi stok produk dengan struktur dinamis berdasarkan konfigurasi cluster (Cluster × Lorong × Baris × Pallet).
               </p>
             </div>
           </div>
@@ -543,13 +554,23 @@ export function WarehouseLayout() {
 
         {/* Warehouse View Sesuai Template Lama */}
         <div className="space-y-6">
-          {(["A", "B", "C", "D", "E"] as const).map((cluster) => {
+          {clusterConfigs.filter(c => c.isActive).map((clusterConfig) => {
+            const cluster = clusterConfig.cluster;
             const isOpen = openClusters.has(cluster);
             const clusterCells = cellsByCluster[cluster] || [];
             const filledCount = clusterCells.reduce((sum, group) => {
               return sum + group.pallets.filter(p => p.product).length;
             }, 0);
-            const totalCount = 11 * 9 * 3; 
+            
+            // DYNAMIC: Calculate total slots for this cluster
+            let totalCount = 0;
+            for (let lorong = 1; lorong <= clusterConfig.defaultLorongCount; lorong++) {
+              const barisCount = getBarisCountForLorong(cluster, lorong);
+              for (let baris = 1; baris <= barisCount; baris++) {
+                const palletCapacity = getPalletCapacityForCell(cluster, lorong, baris);
+                totalCount += palletCapacity;
+              }
+            }
             
             return (
               <div key={cluster} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -567,7 +588,7 @@ export function WarehouseLayout() {
                         Cluster {cluster}
                       </h2>
                       <p className="text-xs sm:text-sm text-slate-500">
-                        {filledCount} dari {totalCount} slot di Lorong L1-L11 terisi
+                        {filledCount} dari {totalCount} slot di Lorong L1-L{clusterConfig.defaultLorongCount} terisi
                       </p>
                     </div>
                   </div>
@@ -586,80 +607,125 @@ export function WarehouseLayout() {
                     <div className="mt-4">
                       <div className="overflow-x-auto">
                         <div className="inline-block min-w-full">
-                          {/* Header Baris */}
-                          <div className="flex mb-2">
-                            <div className="w-16 sm:w-20 shrink-0" /> 
-                            {Array.from({ length: 9 }, (_, i) => i + 1).map((barisNum) => (
-                              <div key={barisNum} className="w-20 sm:w-24 text-center shrink-0">
-                                <div className="text-xs font-semibold text-slate-600 bg-slate-100 rounded px-2 py-1">
-                                  B{barisNum}
+                          {(() => {
+                            // DYNAMIC: Get max baris for this cluster (across all lorong)
+                            const maxBaris = Math.max(
+                              ...Array.from({ length: clusterConfig.defaultLorongCount }, (_, i) => i + 1)
+                                .map(lorong => getBarisCountForLorong(cluster, lorong))
+                            );
+                            
+                            return (
+                              <>
+                                {/* Header Baris (DYNAMIC) */}
+                                <div className="flex mb-2">
+                                  <div className="w-16 sm:w-20 shrink-0" /> 
+                                  {Array.from({ length: maxBaris }, (_, i) => i + 1).map((barisNum) => (
+                                    <div key={barisNum} className="w-20 sm:w-24 text-center shrink-0">
+                                      <div className="text-xs font-semibold text-slate-600 bg-slate-100 rounded px-2 py-1">
+                                        B{barisNum}
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                          
-                          {/* Lorong Rows */}
-                          {Array.from({ length: 11 }, (_, i) => i + 1).map((lorongNum) => (
-                            <div key={lorongNum} className="flex mb-2">
-                              {/* Lorong Label */}
-                              <div className="w-16 sm:w-20 shrink-0 flex items-center">
-                                <div className="text-xs font-semibold text-slate-600 bg-slate-100 rounded px-2 py-1">
-                                  L{lorongNum}
-                                </div>
-                              </div>
-                              
-                              {/* Baris Cells (each with 3 pallets) */}
-                              {Array.from({ length: 9 }, (_, i) => i + 1).map((barisNum) => {
-                                const group = cellsByCluster[cluster]?.find(
-                                  (g) => g.lorong === lorongNum && g.baris === barisNum
-                                );
                                 
-                                return (
-                                  <div key={barisNum} className="w-20 sm:w-24 shrink-0 px-1">
-                                    <div className="flex gap-0.5">
-                                      {/* 3 Pallets Horizontal */}
-                                      {[3, 2, 1].map((palletNum) => { // <-- PERUBAHAN UTAMA: Membalik urutan Pallet
-                                        // Cari cell di filteredCells
-                                        const cell = group?.pallets.find((p) => p.pallet === palletNum) || 
-                                          warehouseCells.find(c => c.cluster === cluster && c.lorong === lorongNum && c.baris === barisNum && c.pallet === palletNum) || 
-                                          {id: `${cluster}-L${lorongNum}-B${barisNum}-P${palletNum}`, cluster, lorong: lorongNum, baris: barisNum, pallet: palletNum, colorCode: "empty"} as WarehouseCell;
+                                {/* Lorong Rows (DYNAMIC based on cluster config) */}
+                                {Array.from({ length: clusterConfig.defaultLorongCount }, (_, i) => i + 1).map((lorongNum) => {
+                                  const barisCountForThisLorong = getBarisCountForLorong(cluster, lorongNum);
+                                  const isInTransitLorong = isInTransitLocation(cluster, lorongNum);
+                                  
+                                  return (
+                                    <div key={lorongNum} className="flex mb-2">
+                                      {/* Lorong Label */}
+                                      <div className="w-16 sm:w-20 shrink-0 flex items-center">
+                                        <div className={`text-xs font-semibold rounded px-2 py-1 ${
+                                          isInTransitLorong 
+                                            ? "text-red-700 bg-red-100 border border-red-300" 
+                                            : "text-slate-600 bg-slate-100"
+                                        }`}>
+                                          L{lorongNum}
+                                          {isInTransitLorong && (
+                                            <div className="text-[8px] text-red-600">IN TRANSIT</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      
+                                      {/* Baris Cells (DYNAMIC for each lorong) */}
+                                      {Array.from({ length: maxBaris }, (_, i) => i + 1).map((barisNum) => {
+                                        // If this baris doesn't exist for this lorong, render empty spacer
+                                        if (barisNum > barisCountForThisLorong) {
+                                          return (
+                                            <div key={barisNum} className="w-20 sm:w-24 shrink-0 px-1">
+                                              <div className="flex gap-0.5 h-12 sm:h-14 items-center justify-center">
+                                                <span className="text-xs text-slate-300">-</span>
+                                              </div>
+                                            </div>
+                                          );
+                                        }
+                                        
+                                        const group = cellsByCluster[cluster]?.find(
+                                          (g) => g.lorong === lorongNum && g.baris === barisNum
+                                        );
+                                        
+                                        // DYNAMIC: Get actual pallet capacity for this cell
+                                        const palletCapacity = getPalletCapacityForCell(cluster, lorongNum, barisNum);
+                                        const palletNumbers = Array.from({ length: palletCapacity }, (_, i) => palletCapacity - i); // Reverse order: P3, P2, P1
                                         
                                         return (
-                                          <PalletComponent key={palletNum} cell={cell} />
+                                          <div key={barisNum} className="w-20 sm:w-24 shrink-0 px-1">
+                                            <div className="flex gap-0.5">
+                                              {/* DYNAMIC Pallets (quantity based on config) */}
+                                              {palletNumbers.map((palletNum) => {
+                                                // Cari cell di filteredCells
+                                                const cell = group?.pallets.find((p) => p.pallet === palletNum) || 
+                                                  warehouseCells.find(c => c.cluster === cluster && c.lorong === lorongNum && c.baris === barisNum && c.pallet === palletNum) || 
+                                                  {id: `${cluster}-L${lorongNum}-B${barisNum}-P${palletNum}`, cluster, lorong: lorongNum, baris: barisNum, pallet: palletNum, colorCode: "empty"} as WarehouseCell;
+                                                
+                                                return (
+                                                  <PalletComponent key={palletNum} cell={cell} />
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
                                         );
                                       })}
                                     </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ))}
+                                  );
+                                })}
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
-                      
-                      {/* Info untuk cluster ini */}
-                      <div className="mt-4 pt-4 border-t border-slate-200">
-                        <div className="flex flex-wrap gap-4 text-xs text-slate-600">
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded bg-green-500" />
-                            <span>Release (Expired dekat)</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded bg-yellow-400" />
-                            <span>Hold (Expired jauh)</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded bg-blue-500" />
-                            <span>Receh (Ada sisa)</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded bg-red-500" />
-                            <span>Salah Cluster</span>
-                          </div>
+                    
+                    {/* Info untuk cluster ini */}
+                    <div className="mt-4 pt-4 border-t border-slate-200">
+                      <div className="flex flex-wrap gap-4 text-xs text-slate-600">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-green-500" />
+                          <span>Release (Expired dekat)</span>
                         </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-yellow-400" />
+                          <span>Hold (Expired jauh)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-blue-500" />
+                          <span>Receh (Ada sisa)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-red-500" />
+                          <span>Salah Cluster</span>
+                        </div>
+                        {getInTransitRange(cluster) && (
+                          <div className="flex items-center gap-2">
+                            <div className="w-3 h-3 rounded bg-red-100 border border-red-400" />
+                            <span className="font-semibold text-red-700">In Transit (Buffer/Overflow Area)</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
+                </div>
                 )}
               </div>
             );

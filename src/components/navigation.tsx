@@ -71,6 +71,12 @@ export function Navigation() {
       icon: "🗄️",
       roles: ["superadmin"],
     },
+    {
+      label: "Cluster Config",
+      path: "/cluster-config",
+      icon: "⚙️",
+      roles: ["superadmin"],
+    },
   ];
 
   const filteredMenuItems = menuItems.filter((item) =>

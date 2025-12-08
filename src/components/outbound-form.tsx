@@ -8,11 +8,12 @@ import { productMasterData, getProductByCode } from "@/lib/mock/product-master";
 // --- END: Perubahan Import ---
 import { stockListData } from "@/lib/mock/stocklistmock";
 import { TruckIcon, MapPin } from "lucide-react";
+import { useToast, ToastContainer } from "./toast";
 
 interface FEFOLocation {
   stockId: string;
   location: string;
-  bbPallet: string;
+  bbPallet: string | string[];
   expiredDate: string;
   availableQtyPallet: number;
   allocatedQtyPallet: number;
@@ -36,6 +37,7 @@ const initialState: OutboundFormState = {
 export function OutboundForm() {
   const [form, setForm] = useState<OutboundFormState>(initialState);
   const [fefoLocations, setFefoLocations] = useState<FEFOLocation[]>([]);
+  const { showToast, toasts, removeToast } = useToast();
 
   // Get selected product data
   const selectedProduct = form.productCode ? getProductByCode(form.productCode) : null;
@@ -53,7 +55,7 @@ export function OutboundForm() {
   // Calculate FEFO locations
   const calculateFEFO = () => {
     if (!form.productCode || !form.qtyPallet || Number(form.qtyPallet) <= 0) {
-      alert("Mohon isi produk dan quantity pallet!");
+      showToast("Mohon isi produk dan quantity pallet!", "error");
       return;
     }
 
@@ -103,14 +105,19 @@ export function OutboundForm() {
 
     // Check if we have enough stock
     if (remainingQtyPallet > 0) {
-      alert(
-        `Stok tidak cukup untuk ${selectedProduct?.productName}!\nKurang ${remainingQtyPallet} pallet.\nTersedia: ${qtyPalletNeeded - remainingQtyPallet} pallet dari ${qtyPalletNeeded} yang diminta.`
+      showToast(
+        `Stok tidak cukup! Kurang ${remainingQtyPallet} pallet. Tersedia: ${qtyPalletNeeded - remainingQtyPallet} dari ${qtyPalletNeeded} pallet yang diminta.`,
+        "error"
       );
       setFefoLocations([]);
       return;
     }
 
     setFefoLocations(locations);
+    showToast(
+      `✓ Berhasil! Ditemukan ${locations.length} lokasi pengambilan berdasarkan FEFO.`,
+      "success"
+    );
   };
 
   // Handle reset
@@ -128,6 +135,7 @@ export function OutboundForm() {
 
   return (
     <div className="min-h-screen bg-linear-to-br from-orange-50 to-red-100 p-4 md:p-8">
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
       <div className="max-w-5xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8">
           {/* Header */}
@@ -302,7 +310,9 @@ export function OutboundForm() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-700">
-                          {loc.bbPallet}
+                          {Array.isArray(loc.bbPallet) 
+                            ? loc.bbPallet.join(", ") 
+                            : loc.bbPallet}
                         </td>
                         <td className="px-4 py-3">
                           <div className="text-sm font-bold text-orange-700">

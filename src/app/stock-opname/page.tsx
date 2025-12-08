@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { stockListData, type StockItem } from "@/lib/mock/stocklistmock";
+import { useToast, ToastContainer } from "@/components/toast";
 
 type OpnameItem = {
   id: string;
@@ -14,6 +15,7 @@ type OpnameItem = {
 };
 
 export default function StockOpnamePage() {
+  const { showToast, toasts, removeToast } = useToast();
   const today = useMemo(
     () => new Date().toISOString().slice(0, 10),
     []
@@ -102,15 +104,15 @@ export default function StockOpnamePage() {
 
     console.log("Mock payload stock opname:", payload);
 
-    alert(
-      "Stock opname (mock) tersimpan.\n\n" +
-        "Nanti di versi database, data ini akan masuk ke tabel stock_opname_sessions dan stock_opname_items, " +
-        "lalu otomatis menyesuaikan tabel stocks sesuai Physical Qty."
+    showToast(
+      "✓ Stock opname berhasil disimpan! Data akan otomatis menyesuaikan tabel stocks sesuai Physical Qty.",
+      "success"
     );
   };
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
       <header className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
         <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
           Stock Opname

@@ -9,8 +9,16 @@ import {
   ekspedisiMaster 
 } from "@/lib/mock/product-master";
 import { stockListData, StockItem } from "@/lib/mock/stocklistmock";
+import {
+  getClusterConfig,
+  getBarisCountForLorong,
+  getPalletCapacityForCell,
+  validateProductLocation,
+  getValidLocationsForProduct,
+} from "@/lib/mock/warehouse-config";
 import { QRScanner, QRData } from "./qr-scanner";
 import { CheckCircle, XCircle } from "lucide-react";
+import { useToast, ToastContainer } from "./toast";
 
 interface RecommendedLocation {
   cluster: string;
@@ -96,6 +104,7 @@ const parseBBProduk = (bb: string): { expiredDate: string, kdPlant: string, isVa
 };
 
 export function InboundForm() {
+  const { toasts, removeToast, success, error } = useToast();
   const [form, setForm] = useState<InboundFormState>(initialState);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [recommendedLocation, setRecommendedLocation] = useState<RecommendedLocation | null>(null);
@@ -136,11 +145,61 @@ export function InboundForm() {
   const totalPalletsNeeded = totalPallets + (isReceh ? 1 : 0); 
   // --- AKHIR LOGIKA QTY DINAMIS ---
 
-  // --- LOGIKA REKOMENDASI LOKASI MULTI-LOCATION ---
+  // --- DYNAMIC OPTIONS & LOCATION RECOMMENDATION (USING CLUSTER CONFIG & PRODUCT HOME) ---
   const _autoCluster = selectedProduct?.defaultCluster || ""; 
-  const lorongOptions = Array.from({ length: 11 }, (_, i) => `L${i + 1}`); 
-  const barisOptions = Array.from({ length: 9 }, (_, i) => `B${i + 1}`); 
-  const palletOptions = Array.from({ length: 3 }, (_, i) => `P${i + 1}`); 
+  
+  // Get valid locations for current product
+  const productValidLocations = form.productCode ? getValidLocationsForProduct(form.productCode) : null;
+  
+  // Generate dynamic lorong options
+  const lorongOptions = useMemo(() => {
+    if (!form.cluster) {
+      const config = getClusterConfig(form.cluster || _autoCluster);
+      if (!config) return Array.from({ length: 11 }, (_, i) => `L${i + 1}`);
+      return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
+    }
+    const config = getClusterConfig(form.cluster);
+    if (!config) return [];
+    
+    // If product has home assignment, limit to allowed lorong range
+    if (productValidLocations && productValidLocations.cluster === form.cluster) {
+      const [start, end] = productValidLocations.lorongRange;
+      return Array.from({ length: end - start + 1 }, (_, i) => `L${start + i}`);
+    }
+    
+    return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
+  }, [form.cluster, form.productCode, productValidLocations, _autoCluster]);
+  
+  // Generate dynamic baris options
+  const barisOptions = useMemo(() => {
+    if (!form.cluster || !form.lorong) return Array.from({ length: 9 }, (_, i) => `B${i + 1}`);
+    const lorongNum = parseInt(form.lorong.replace("L", ""));
+    const barisCount = getBarisCountForLorong(form.cluster, lorongNum);
+    
+    // If product has home assignment, limit to allowed baris range
+    if (productValidLocations && productValidLocations.cluster === form.cluster) {
+      const [start, end] = productValidLocations.barisRange;
+      const maxBaris = Math.min(end, barisCount);
+      return Array.from({ length: maxBaris - start + 1 }, (_, i) => `B${start + i}`);
+    }
+    
+    return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+  }, [form.cluster, form.lorong, form.productCode, productValidLocations]);
+  
+  // Generate dynamic pallet options
+  const palletOptions = useMemo(() => {
+    if (!form.cluster || !form.lorong || !form.baris) return Array.from({ length: 3 }, (_, i) => `P${i + 1}`);
+    const lorongNum = parseInt(form.lorong.replace("L", ""));
+    const barisNum = parseInt(form.baris.replace("B", ""));
+    const palletCapacity = getPalletCapacityForCell(form.cluster, lorongNum, barisNum);
+    
+    // If product has max pallet limit, use minimum
+    const maxPallet = productValidLocations 
+      ? Math.min(palletCapacity, productValidLocations.maxPalletPerLocation)
+      : palletCapacity;
+    
+    return Array.from({ length: maxPallet }, (_, i) => `P${i + 1}`);
+  }, [form.cluster, form.lorong, form.baris, form.productCode, productValidLocations]); 
 
   const findMultipleRecommendedLocations = (
     cluster: string,
@@ -149,43 +208,81 @@ export function InboundForm() {
     const locations: RecommendedLocation[] = [];
     let remainingPallets = palletsNeeded;
 
-    const lorongList = lorongOptions;
-    const barisList = barisOptions;
-    const levelList = palletOptions;
+    // Get cluster config untuk dynamic lorong/baris count
+    const clusterConfig = getClusterConfig(cluster);
+    if (!clusterConfig) {
+      return { locations: [], totalPalletsPlaced: 0, needsMultipleLocations: false };
+    }
+
+    // Get valid locations for product (if exists)
+    const validLocs = form.productCode ? getValidLocationsForProduct(form.productCode) : null;
     
-    for (const lorong of lorongList) {
+    // Determine lorong range
+    const lorongStart = validLocs && validLocs.cluster === cluster ? validLocs.lorongRange[0] : 1;
+    const lorongEnd = validLocs && validLocs.cluster === cluster 
+      ? validLocs.lorongRange[1] 
+      : clusterConfig.defaultLorongCount;
+    
+    for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
+      if (remainingPallets === 0) break;
+      
+      // Get baris count for this lorong (dynamic)
+      const maxBaris = getBarisCountForLorong(cluster, lorongNum);
+      
+      // Determine baris range
+      const barisStart = validLocs && validLocs.cluster === cluster ? validLocs.barisRange[0] : 1;
+      const barisEnd = validLocs && validLocs.cluster === cluster 
+        ? Math.min(validLocs.barisRange[1], maxBaris)
+        : maxBaris;
+      
+      for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
         if (remainingPallets === 0) break;
-        for (const baris of barisList) {
-            if (remainingPallets === 0) break;
-            
-            // Cari semua slot kosong di baris ini
-            const emptySlotsInBaris: RecommendedLocation[] = [];
-            for (const level of levelList) {
-                const locationExists = stockListData.some(
-                    (item: StockItem) =>
-                        item.location.cluster === cluster &&
-                        item.location.lorong === lorong &&
-                        item.location.baris === baris &&
-                        item.location.level === level
-                );
-                if (!locationExists) {
-                    emptySlotsInBaris.push({
-                        cluster,
-                        lorong,
-                        baris,
-                        level,
-                        palletsCanFit: 1,
-                    });
-                }
-            }
-            
-            // Alokasikan slot yang kosong (berurutan)
-            for(const slot of emptySlotsInBaris) {
-                if (remainingPallets === 0) break;
-                locations.push(slot);
-                remainingPallets--;
-            }
+        
+        // Get pallet capacity for this cell (dynamic)
+        const maxPallet = getPalletCapacityForCell(cluster, lorongNum, barisNum);
+        const productMaxPallet = validLocs ? validLocs.maxPalletPerLocation : 999;
+        const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
+        
+        // Find empty slots in this baris
+        const emptySlotsInBaris: RecommendedLocation[] = [];
+        for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
+          const lorong = `L${lorongNum}`;
+          const baris = `B${barisNum}`;
+          const level = `P${palletNum}`;
+          
+          // Validate product can be placed here
+          if (form.productCode) {
+            const validation = validateProductLocation(form.productCode, cluster, lorongNum, barisNum);
+            if (!validation.isValid) continue;
+          }
+          
+          // Check if location is empty
+          const locationExists = stockListData.some(
+            (item: StockItem) =>
+              item.location.cluster === cluster &&
+              item.location.lorong === lorong &&
+              item.location.baris === baris &&
+              item.location.level === level
+          );
+          
+          if (!locationExists) {
+            emptySlotsInBaris.push({
+              cluster,
+              lorong,
+              baris,
+              level,
+              palletsCanFit: 1,
+            });
+          }
         }
+        
+        // Allocate empty slots
+        for (const slot of emptySlotsInBaris) {
+          if (remainingPallets === 0) break;
+          locations.push(slot);
+          remainingPallets--;
+        }
+      }
     }
 
     return {
@@ -227,16 +324,25 @@ export function InboundForm() {
   }, [form.bbProduk]);
   
   const handleRecommend = () => {
-    if (!form.productCode) { alert("Mohon pilih Produk terlebih dahulu."); return; }
-    if (totalPalletsNeeded === 0) { alert("Total Pallet yang dibutuhkan adalah nol."); return; }
+    if (!form.productCode) { 
+      error("Mohon pilih Produk terlebih dahulu."); 
+      return; 
+    }
+    if (totalPalletsNeeded === 0) { 
+      error("Total Pallet yang dibutuhkan adalah nol."); 
+      return; 
+    }
 
     const cluster = selectedProduct?.defaultCluster || "";
-    if (!cluster) { alert("Produk ini tidak memiliki Cluster Default."); return; }
+    if (!cluster) { 
+      error("Produk ini tidak memiliki Cluster Default."); 
+      return; 
+    }
     
     const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded);
     
     if (multiRec.locations.length < totalPalletsNeeded) {
-        alert(`Gudang penuh! Hanya ditemukan ${multiRec.locations.length} dari ${totalPalletsNeeded} lokasi yang dibutuhkan.`);
+        error(`Gudang penuh! Hanya ditemukan ${multiRec.locations.length} dari ${totalPalletsNeeded} lokasi yang dibutuhkan.`, 5000);
         setMultiLocationRec(null);
         setRecommendedLocation(null);
         return;
@@ -253,6 +359,13 @@ export function InboundForm() {
         baris: firstLoc.baris,
         pallet: firstLoc.level,
     }));
+    
+    // Show success toast
+    if (multiRec.locations.length === 1) {
+      success(`Rekomendasi ditemukan!\nLokasi: ${firstLoc.cluster}-${firstLoc.lorong}-${firstLoc.baris}-${firstLoc.level}`, 4000);
+    } else {
+      success(`${multiRec.locations.length} lokasi berhasil ditemukan untuk ${totalPalletsNeeded} pallet!`, 4000);
+    }
   };
 
   const handleChange = (field: keyof InboundFormState, value: string) => {
@@ -280,8 +393,7 @@ export function InboundForm() {
     const selectedProd = getProductByCode(data.produkCode);
     
     if (!selectedProd) {
-      setErrorMessages([`Produk dengan kode "${data.produkCode}" tidak ditemukan di database.`]);
-      setShowErrorModal(true);
+      error(`Produk dengan kode "${data.produkCode}" tidak ditemukan di database.`, 5000);
       return;
     }
 
@@ -289,8 +401,7 @@ export function InboundForm() {
     const { expiredDate: parsedExpDate, kdPlant: parsedKdPlant, isValid } = parseBBProduk(data.bbProduk);
     
     if (!isValid) {
-      setErrorMessages([`BB Produk "${data.bbProduk}" tidak valid. Format harus YYMMDDXXXX dengan tanggal valid.`]);
-      setShowErrorModal(true);
+      error(`BB Produk "${data.bbProduk}" tidak valid. Format harus YYMMDDXXXX dengan tanggal valid.`, 5000);
       return;
     }
 
@@ -317,7 +428,7 @@ export function InboundForm() {
     setErrors({});
     
     // Show success notification
-    alert(`✅ QR Scan Berhasil!\n\nData telah diisi:\n- Ekspedisi: ${data.ekspedisi}\n- Produk: ${selectedProd.productName}\n- Qty: ${data.qtyPallet} Pallet + ${data.qtyCarton} Karton\n- BB: ${data.bbProduk}`);
+    success(`QR Scan Berhasil!\n\nData telah diisi:\n- Ekspedisi: ${data.ekspedisi}\n- Produk: ${selectedProd.productName}\n- Qty: ${data.qtyPallet} Pallet + ${data.qtyCarton} Karton\n- BB: ${data.bbProduk}`, 6000);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -426,6 +537,8 @@ export function InboundForm() {
 
   return (
     <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-100 p-4 md:p-8">
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
+      
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8">
           {/* Header with QR Scanner Button */}
@@ -441,9 +554,8 @@ export function InboundForm() {
             <div>
               <QRScanner 
                 onScanSuccess={handleQRScanSuccess}
-                onScanError={(error) => {
-                  setErrorMessages([error]);
-                  setShowErrorModal(true);
+                onScanError={(errorMsg) => {
+                  error(errorMsg, 5000);
                 }}
               />
             </div>
