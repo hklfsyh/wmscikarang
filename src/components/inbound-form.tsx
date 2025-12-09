@@ -15,6 +15,8 @@ import {
   getPalletCapacityForCell,
   validateProductLocation,
   getValidLocationsForProduct,
+  getInTransitRange,
+  isInTransitLocation,
 } from "@/lib/mock/warehouse-config";
 import { QRScanner, QRData } from "./qr-scanner";
 import { CheckCircle, XCircle } from "lucide-react";
@@ -37,6 +39,9 @@ interface MultiLocationRecommendation {
 type InboundFormState = {
   ekspedisi: string;
   tanggal: string;
+  namaPengemudi: string;
+  noDN: string;
+  nomorPolisi: string;
   productCode: string;
   bbProduk: string;
   kdPlant: string;
@@ -63,9 +68,16 @@ interface FinalSubmission {
 
 const today = new Date().toISOString().slice(0, 10);
 
+// --- CONSTANTS FOR RECEH LOGIC ---
+const RECEH_THRESHOLD = 5; // If remaining cartons <= 5, attach to last full pallet instead of creating new pallet
+// --- END CONSTANTS ---
+
 const initialState: InboundFormState = {
   ekspedisi: "",
   tanggal: today,
+  namaPengemudi: "",
+  noDN: "",
+  nomorPolisi: "",
   productCode: "",
   bbProduk: "", 
   kdPlant: "",
@@ -115,11 +127,45 @@ export function InboundForm() {
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
   const [autoRecommend, setAutoRecommend] = useState(true);
 
+  // --- INPUT HISTORY/AUTOCOMPLETE STATE ---
+  const [driverHistory, setDriverHistory] = useState<string[]>([]);
+  const [dnHistory, setDnHistory] = useState<string[]>([]);
+  const [policeNoHistory, setPoliceNoHistory] = useState<string[]>([]);
+  const [showDriverSuggestions, setShowDriverSuggestions] = useState(false);
+  const [showDnSuggestions, setShowDnSuggestions] = useState(false);
+  const [showPoliceNoSuggestions, setShowPoliceNoSuggestions] = useState(false);
+
+  // Load history from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedDrivers = localStorage.getItem('wms_driver_history');
+      const savedDNs = localStorage.getItem('wms_dn_history');
+      const savedPoliceNos = localStorage.getItem('wms_police_no_history');
+      
+      if (savedDrivers) setDriverHistory(JSON.parse(savedDrivers));
+      if (savedDNs) setDnHistory(JSON.parse(savedDNs));
+      if (savedPoliceNos) setPoliceNoHistory(JSON.parse(savedPoliceNos));
+    }
+  }, []);
+
+  // Save to history helper
+  const saveToHistory = (key: string, value: string, currentHistory: string[], setHistory: (val: string[]) => void) => {
+    if (!value.trim()) return;
+    
+    const updated = [value, ...currentHistory.filter(v => v !== value)].slice(0, 10); // Keep last 10
+    setHistory(updated);
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(key, JSON.stringify(updated));
+    }
+  };
+  // --- AKHIR INPUT HISTORY ---
+
   // --- LOGIKA QTY DINAMIS (CALCULATED VALUES) ---
   const selectedProduct = form.productCode ? getProductByCode(form.productCode) : null;
   const qtyPerPalletStd = selectedProduct?.qtyPerPallet || 0; 
   
-  const { totalPallets, remainingCartons, totalCartons } = useMemo(() => {
+  const { totalPallets, remainingCartons, totalCartons, shouldAttachReceh } = useMemo(() => {
     const palletInput = Number(form.qtyPalletInput) || 0;
     const cartonInput = Number(form.qtyCartonInput) || 0;
     
@@ -127,22 +173,28 @@ export function InboundForm() {
     const totalCartons = (palletInput * qtyPerPalletStd) + cartonInput;
     
     if (qtyPerPalletStd === 0) {
-      return { totalPallets: 0, remainingCartons: cartonInput, totalCartons: cartonInput };
+      return { totalPallets: 0, remainingCartons: cartonInput, totalCartons: cartonInput, shouldAttachReceh: false };
     }
 
     const calculatedPallets = Math.floor(totalCartons / qtyPerPalletStd);
     const remaining = totalCartons % qtyPerPalletStd;
     
+    // SMART RECEH LOGIC: If remaining ≤ RECEH_THRESHOLD, attach to last pallet
+    const shouldAttach = remaining > 0 && remaining <= RECEH_THRESHOLD && calculatedPallets > 0;
+    
     return {
       totalPallets: calculatedPallets,
       remainingCartons: remaining,
       totalCartons: totalCartons,
+      shouldAttachReceh: shouldAttach,
     };
   }, [form.qtyPalletInput, form.qtyCartonInput, qtyPerPalletStd]);
   
   const isReceh = remainingCartons > 0;
-  // Total Lokasi Dibutuhkan = Pallet Utuh + (1 untuk Pallet Receh jika ada sisa)
-  const totalPalletsNeeded = totalPallets + (isReceh ? 1 : 0); 
+  // Total Lokasi Dibutuhkan: 
+  // - If shouldAttachReceh (≤5 cartons), keep same pallet count (attach to last pallet)
+  // - Otherwise, add 1 extra pallet for receh
+  const totalPalletsNeeded = shouldAttachReceh ? totalPallets : (totalPallets + (isReceh ? 1 : 0)); 
   // --- AKHIR LOGIKA QTY DINAMIS ---
 
   // --- DYNAMIC OPTIONS & LOCATION RECOMMENDATION (USING CLUSTER CONFIG & PRODUCT HOME) ---
@@ -217,7 +269,7 @@ export function InboundForm() {
     // Get valid locations for product (if exists)
     const validLocs = form.productCode ? getValidLocationsForProduct(form.productCode) : null;
     
-    // Determine lorong range
+    // PHASE 1: Try to fill primary product home locations
     const lorongStart = validLocs && validLocs.cluster === cluster ? validLocs.lorongRange[0] : 1;
     const lorongEnd = validLocs && validLocs.cluster === cluster 
       ? validLocs.lorongRange[1] 
@@ -225,6 +277,9 @@ export function InboundForm() {
     
     for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
       if (remainingPallets === 0) break;
+      
+      // Skip In Transit area in primary phase
+      if (isInTransitLocation(cluster, lorongNum)) continue;
       
       // Get baris count for this lorong (dynamic)
       const maxBaris = getBarisCountForLorong(cluster, lorongNum);
@@ -281,6 +336,106 @@ export function InboundForm() {
           if (remainingPallets === 0) break;
           locations.push(slot);
           remainingPallets--;
+        }
+      }
+    }
+
+    // PHASE 2: If still have remaining pallets, use In Transit area (overflow)
+    // CROSS-CLUSTER IN TRANSIT: Search Cluster C In Transit for ALL products (global overflow buffer)
+    if (remainingPallets > 0) {
+      // First, try In Transit in the same cluster (if exists)
+      const inTransitRange = getInTransitRange(cluster);
+      
+      if (inTransitRange) {
+        const [transitStart, transitEnd] = inTransitRange;
+        
+        for (let lorongNum = transitStart; lorongNum <= transitEnd; lorongNum++) {
+          if (remainingPallets === 0) break;
+          
+          const maxBaris = getBarisCountForLorong(cluster, lorongNum);
+          
+          for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
+            if (remainingPallets === 0) break;
+            
+            const maxPallet = getPalletCapacityForCell(cluster, lorongNum, barisNum);
+            
+            for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
+              if (remainingPallets === 0) break;
+              
+              const lorong = `L${lorongNum}`;
+              const baris = `B${barisNum}`;
+              const level = `P${palletNum}`;
+              
+              // Check if location is empty
+              const locationExists = stockListData.some(
+                (item: StockItem) =>
+                  item.location.cluster === cluster &&
+                  item.location.lorong === lorong &&
+                  item.location.baris === baris &&
+                  item.location.level === level
+              );
+              
+              if (!locationExists) {
+                locations.push({
+                  cluster,
+                  lorong,
+                  baris,
+                  level,
+                  palletsCanFit: 1,
+                });
+                remainingPallets--;
+              }
+            }
+          }
+        }
+      }
+      
+      // PHASE 2B: If still have remaining pallets AND home cluster is NOT C, search Cluster C In Transit (cross-cluster overflow)
+      if (remainingPallets > 0 && cluster !== "C") {
+        const clusterCInTransitRange = getInTransitRange("C");
+        
+        if (clusterCInTransitRange) {
+          const [transitStart, transitEnd] = clusterCInTransitRange;
+          
+          for (let lorongNum = transitStart; lorongNum <= transitEnd; lorongNum++) {
+            if (remainingPallets === 0) break;
+            
+            const maxBaris = getBarisCountForLorong("C", lorongNum);
+            
+            for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
+              if (remainingPallets === 0) break;
+              
+              const maxPallet = getPalletCapacityForCell("C", lorongNum, barisNum);
+              
+              for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
+                if (remainingPallets === 0) break;
+                
+                const lorong = `L${lorongNum}`;
+                const baris = `B${barisNum}`;
+                const level = `P${palletNum}`;
+                
+                // Check if location is empty in Cluster C In Transit
+                const locationExists = stockListData.some(
+                  (item: StockItem) =>
+                    item.location.cluster === "C" &&
+                    item.location.lorong === lorong &&
+                    item.location.baris === baris &&
+                    item.location.level === level
+                );
+                
+                if (!locationExists) {
+                  locations.push({
+                    cluster: "C", // Cross-cluster overflow to Cluster C
+                    lorong,
+                    baris,
+                    level,
+                    palletsCanFit: 1,
+                  });
+                  remainingPallets--;
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -360,11 +515,33 @@ export function InboundForm() {
         pallet: firstLoc.level,
     }));
     
-    // Show success toast
+    // Check if any location is in In Transit area
+    const hasInTransit = multiRec.locations.some(loc => 
+      isInTransitLocation(loc.cluster, parseInt(loc.lorong.replace("L", "")))
+    );
+    
+    // Check if cross-cluster In Transit (overflow from other cluster to Cluster C)
+    const hasCrossClusterInTransit = multiRec.locations.some(loc => 
+      loc.cluster !== cluster && isInTransitLocation(loc.cluster, parseInt(loc.lorong.replace("L", "")))
+    );
+    
+    // Show success toast with In Transit info if applicable
     if (multiRec.locations.length === 1) {
-      success(`Rekomendasi ditemukan!\nLokasi: ${firstLoc.cluster}-${firstLoc.lorong}-${firstLoc.baris}-${firstLoc.level}`, 4000);
+      const isTransit = isInTransitLocation(firstLoc.cluster, parseInt(firstLoc.lorong.replace("L", "")));
+      const isCrossCluster = firstLoc.cluster !== cluster;
+      const transitMsg = isTransit ? (isCrossCluster ? " (In Transit Cluster C - Cross-Cluster Overflow)" : " (In Transit - Overflow)") : "";
+      success(`Rekomendasi ditemukan!\nLokasi: ${firstLoc.cluster}-${firstLoc.lorong}-${firstLoc.baris}-${firstLoc.level}${transitMsg}`, 4000);
     } else {
-      success(`${multiRec.locations.length} lokasi berhasil ditemukan untuk ${totalPalletsNeeded} pallet!`, 4000);
+      let transitInfo = "";
+      if (hasCrossClusterInTransit) {
+        const inTransitCount = multiRec.locations.filter(loc => 
+          loc.cluster !== cluster && isInTransitLocation(loc.cluster, parseInt(loc.lorong.replace("L", "")))
+        ).length;
+        transitInfo = `\n⚠️ ${inTransitCount} pallet ditempatkan di Cluster C In Transit (cross-cluster overflow)`;
+      } else if (hasInTransit) {
+        transitInfo = " (Termasuk area In Transit untuk overflow)";
+      }
+      success(`${multiRec.locations.length} lokasi berhasil ditemukan untuk ${totalPalletsNeeded} pallet!${transitInfo}`, 5000);
     }
   };
 
@@ -408,7 +585,10 @@ export function InboundForm() {
     // Set form dengan data dari QR
     const newForm: InboundFormState = {
         ekspedisi: data.ekspedisi, 
-        tanggal: today, 
+        tanggal: today,
+        namaPengemudi: form.namaPengemudi,
+        noDN: form.noDN,
+        nomorPolisi: form.nomorPolisi,
         productCode: data.produkCode, 
         bbProduk: data.bbProduk, 
         kdPlant: parsedKdPlant, 
@@ -439,6 +619,9 @@ export function InboundForm() {
     
     if (!form.ekspedisi) { newErrors.ekspedisi = "Ekspedisi harus diisi"; errorList.push("Ekspedisi harus diisi"); }
     if (!validateTanggal(form.tanggal)) { newErrors.tanggal = "Tanggal harus hari ini"; errorList.push("Tanggal harus hari ini"); }
+    if (!form.namaPengemudi.trim()) { newErrors.namaPengemudi = "Nama Pengemudi harus diisi"; errorList.push("Nama Pengemudi harus diisi"); }
+    if (!form.noDN.trim()) { newErrors.noDN = "No DN/Surat Jalan harus diisi"; errorList.push("No DN/Surat Jalan harus diisi"); }
+    if (!form.nomorPolisi.trim()) { newErrors.nomorPolisi = "Nomor Polisi harus diisi"; errorList.push("Nomor Polisi harus diisi"); }
     if (!form.productCode) { newErrors.productCode = "Produk harus dipilih"; errorList.push("Produk harus dipilih"); }
 
     if (!form.bbProduk || form.bbProduk.length !== 10 || errors.bbProduk) {
@@ -503,15 +686,25 @@ export function InboundForm() {
     
     locationsToSubmit.forEach((loc, index) => {
         const isLastPallet = index === locationsToSubmit.length - 1;
-        const isFinalReceh = isLastPallet && isReceh;
         
+        // SMART RECEH LOGIC:
+        // If shouldAttachReceh (≤5 cartons) AND this is the last pallet, attach receh to this pallet
         let qtyToRecord = standardCartons;
-        let bbToRecord: string | string[] = form.bbProduk; // Default BB Produk Tunggal
+        let bbToRecord: string | string[] = form.bbProduk;
+        let isRecehPallet = false;
 
-        if (isFinalReceh) {
-            qtyToRecord = remainingCartons;
-            // Jika user mengisi BB Receh (Multiple BB), gunakan itu. Jika tidak, gunakan BB Produk Tunggal.
+        if (isLastPallet && isReceh) {
+          if (shouldAttachReceh) {
+            // Attach small receh (≤5) to last full pallet
+            qtyToRecord = standardCartons + remainingCartons;
             bbToRecord = form.bbReceh.length > 0 ? form.bbReceh : form.bbProduk;
+            isRecehPallet = true; // Mark as receh because it contains mixed qty
+          } else {
+            // Create separate receh pallet for larger remainders (>5)
+            qtyToRecord = remainingCartons;
+            bbToRecord = form.bbReceh.length > 0 ? form.bbReceh : form.bbProduk;
+            isRecehPallet = true;
+          }
         }
 
         finalSubmissions.push({
@@ -520,12 +713,17 @@ export function InboundForm() {
             qtyPallet: 1, // Selalu 1 pallet stack per lokasi
             qtyCarton: qtyToRecord,
             bbPallet: bbToRecord,
-            isReceh: isFinalReceh,
+            isReceh: isRecehPallet,
         });
     });
 
     setFinalSubmissionData(finalSubmissions);
     console.log("FINAL INBOUND BATCH SUBMISSION:", finalSubmissions);
+
+    // Save input history to localStorage
+    saveToHistory('wms_driver_history', form.namaPengemudi, driverHistory, setDriverHistory);
+    saveToHistory('wms_dn_history', form.noDN, dnHistory, setDnHistory);
+    saveToHistory('wms_police_no_history', form.nomorPolisi, policeNoHistory, setPoliceNoHistory);
 
     // Show success modal
     setShowSuccess(true);
@@ -616,6 +814,20 @@ export function InboundForm() {
                   </div>
                 </div>
                 <div className="p-6">
+                  <div className="mb-4 space-y-2 text-sm">
+                    <div className="flex justify-between border-b pb-2">
+                      <span className="text-gray-600">Pengemudi:</span>
+                      <span className="font-semibold text-gray-800">{form.namaPengemudi}</span>
+                    </div>
+                    <div className="flex justify-between border-b pb-2">
+                      <span className="text-gray-600">No DN/Surat Jalan:</span>
+                      <span className="font-semibold text-gray-800">{form.noDN}</span>
+                    </div>
+                    <div className="flex justify-between border-b pb-2">
+                      <span className="text-gray-600">Nomor Polisi:</span>
+                      <span className="font-semibold text-gray-800">{form.nomorPolisi}</span>
+                    </div>
+                  </div>
                   <p className="text-sm text-gray-700 font-semibold mb-3">
                     Detail Lokasi Penempatan:
                   </p>
@@ -692,6 +904,141 @@ export function InboundForm() {
                 />
                 {errors.tanggal && (
                   <p className="text-red-500 text-xs mt-1">{errors.tanggal}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Nama Pengemudi, No DN, Nomor Polisi */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Nama Pengemudi */}
+              <div className="relative">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Nama Pengemudi <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.namaPengemudi}
+                  onChange={(e) => {
+                    handleChange("namaPengemudi", e.target.value);
+                    setShowDriverSuggestions(true);
+                  }}
+                  onFocus={() => setShowDriverSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowDriverSuggestions(false), 200)}
+                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                    errors.namaPengemudi ? "border-red-500" : "border-gray-200"
+                  }`}
+                  placeholder="Nama lengkap pengemudi"
+                />
+                {errors.namaPengemudi && (
+                  <p className="text-red-500 text-xs mt-1">{errors.namaPengemudi}</p>
+                )}
+                {/* Autocomplete Suggestions */}
+                {showDriverSuggestions && driverHistory.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {driverHistory
+                      .filter(h => h.toLowerCase().includes(form.namaPengemudi.toLowerCase()))
+                      .map((suggestion, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            handleChange("namaPengemudi", suggestion);
+                            setShowDriverSuggestions(false);
+                          }}
+                          className="w-full text-left px-4 py-2 hover:bg-blue-50 transition-colors text-sm"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              {/* No DN/Surat Jalan */}
+              <div className="relative">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  No DN/Surat Jalan <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.noDN}
+                  onChange={(e) => {
+                    handleChange("noDN", e.target.value.toUpperCase());
+                    setShowDnSuggestions(true);
+                  }}
+                  onFocus={() => setShowDnSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowDnSuggestions(false), 200)}
+                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                    errors.noDN ? "border-red-500" : "border-gray-200"
+                  }`}
+                  placeholder="Nomor DN/Surat Jalan"
+                />
+                {errors.noDN && (
+                  <p className="text-red-500 text-xs mt-1">{errors.noDN}</p>
+                )}
+                {/* Autocomplete Suggestions */}
+                {showDnSuggestions && dnHistory.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {dnHistory
+                      .filter(h => h.toLowerCase().includes(form.noDN.toLowerCase()))
+                      .map((suggestion, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            handleChange("noDN", suggestion);
+                            setShowDnSuggestions(false);
+                          }}
+                          className="w-full text-left px-4 py-2 hover:bg-blue-50 transition-colors text-sm"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Nomor Polisi */}
+              <div className="relative">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Nomor Polisi <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.nomorPolisi}
+                  onChange={(e) => {
+                    handleChange("nomorPolisi", e.target.value.toUpperCase());
+                    setShowPoliceNoSuggestions(true);
+                  }}
+                  onFocus={() => setShowPoliceNoSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowPoliceNoSuggestions(false), 200)}
+                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                    errors.nomorPolisi ? "border-red-500" : "border-gray-200"
+                  }`}
+                  placeholder="B 1234 ABC"
+                />
+                {errors.nomorPolisi && (
+                  <p className="text-red-500 text-xs mt-1">{errors.nomorPolisi}</p>
+                )}
+                {/* Autocomplete Suggestions */}
+                {showPoliceNoSuggestions && policeNoHistory.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {policeNoHistory
+                      .filter(h => h.toLowerCase().includes(form.nomorPolisi.toLowerCase()))
+                      .map((suggestion, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            handleChange("nomorPolisi", suggestion);
+                            setShowPoliceNoSuggestions(false);
+                          }}
+                          className="w-full text-left px-4 py-2 hover:bg-blue-50 transition-colors text-sm"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                  </div>
                 )}
               </div>
             </div>
@@ -958,12 +1305,20 @@ export function InboundForm() {
                     {totalPallets.toLocaleString()} Pallet Utuh {remainingCartons > 0 ? `+ ${remainingCartons.toLocaleString()} Karton Sisa` : ''}
                 </p>
                 <p className="text-xs mt-1">
-                    Total Pallet Dibutuhkan: **{totalPalletsNeeded} Lokasi**
+                    Total Pallet Dibutuhkan: <span className="font-bold">{totalPalletsNeeded} Lokasi</span>
                 </p>
                 {isReceh && (
-                    <p className="text-xs mt-1 font-semibold text-blue-700">
-                        Pallet terakhir akan ditandai **RECEH** (Warna Biru).
-                    </p>
+                  <div className="mt-2 space-y-1">
+                    {shouldAttachReceh ? (
+                      <p className="text-xs font-semibold text-green-700 bg-green-100 p-2 rounded-lg">
+                        💡 Smart Receh: {remainingCartons} karton sisa (≤5) akan <span className="underline">dititipkan</span> ke pallet utuh terakhir untuk efisiensi ruang!
+                      </p>
+                    ) : (
+                      <p className="text-xs font-semibold text-blue-700">
+                        📦 Pallet terakhir akan ditandai <span className="font-bold">RECEH</span> (Warna Biru) karena sisa {remainingCartons} karton.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -1056,14 +1411,23 @@ export function InboundForm() {
                             Diperlukan {totalPalletsNeeded} lokasi. Tersedia {multiLocationRec.locations.length} lokasi.
                         </p>
                         <div className="grid grid-cols-2 gap-2">
-                            {multiLocationRec.locations.map((loc, idx) => (
-                                <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg ${idx === 0 ? 'bg-green-600 text-white' : 'bg-green-100 text-green-800'}`}>
-                                    <span className="text-xs font-bold">#{idx + 1}</span>
-                                    <span className="font-bold text-sm">
-                                        {loc.cluster}-{loc.lorong}-{loc.baris}-{loc.level}
-                                    </span>
-                                </div>
-                            ))}
+                            {multiLocationRec.locations.map((loc, idx) => {
+                                const lorongNum = parseInt(loc.lorong.replace("L", ""));
+                                const isTransit = isInTransitLocation(form.cluster, lorongNum);
+                                return (
+                                  <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg ${idx === 0 ? 'bg-green-600 text-white' : isTransit ? 'bg-red-100 text-red-800 border-2 border-red-300' : 'bg-green-100 text-green-800'}`}>
+                                      <span className="text-xs font-bold">#{idx + 1}</span>
+                                      <span className="font-bold text-sm">
+                                          {loc.cluster}-{loc.lorong}-{loc.baris}-{loc.level}
+                                      </span>
+                                      {isTransit && (
+                                        <span className="text-xs bg-red-600 text-white px-2 py-0.5 rounded-full font-bold">
+                                          Transit
+                                        </span>
+                                      )}
+                                  </div>
+                                );
+                            })}
                         </div>
                     </div>
                 ) : (

@@ -200,14 +200,14 @@ export const productMasterData: ProductMaster[] = [
   { id: "PM025", productCode: "MIZ-COCO", productName: "500ML MIZONE COCO BOOST 1X12", qtyPerCarton: 12, qtyPerPallet: 84, defaultCluster: "C" },
   { id: "PM026", productCode: "MIZ-MOOD", productName: "500ML MIZONE MOOD UP CRANBERRY 1X12", qtyPerCarton: 12, qtyPerPallet: 84, defaultCluster: "C" },
   { id: "PM027", productCode: "AQ-600ML", productName: "600ML AQUA LOCAL 1X24", qtyPerCarton: 24, qtyPerPallet: 40 },
-  // 5 Gallon
-  { id: "PM028", productCode: "AQ-5GAL", productName: "5 GALLON AQUA LOCAL", qtyPerCarton: 1, qtyPerPallet: 48 },
-  { id: "PM029", productCode: "AQ-5GAL-RETUR", productName: "5 GALLON AQUA LOCAL RETUR", qtyPerCarton: 1, qtyPerPallet: 48 },
-  { id: "PM030", productCode: "VIT-5GAL", productName: "5 GALLON VIT LOCAL", qtyPerCarton: 1, qtyPerPallet: 48 },
-  { id: "PM031", productCode: "VIT-5GAL-RETUR", productName: "5 GALLON VIT LOCAL RETUR", qtyPerCarton: 1, qtyPerPallet: 48 },
-  // Empty Bottles
-  { id: "PM032", productCode: "AQ-EMPTY-5GAL", productName: "EMPTY BOTTLE AQUA 5 GALLON", qtyPerCarton: 1, qtyPerPallet: 48 },
-  { id: "PM033", productCode: "VIT-EMPTY-5GAL", productName: "EMPTY BOTTLE VIT 5 GALLON", qtyPerCarton: 1, qtyPerPallet: 48 },
+  // 5 Gallon - Cluster D (AQUA)
+  { id: "PM028", productCode: "AQ-5GAL", productName: "5 GALLON AQUA LOCAL", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "D" },
+  { id: "PM029", productCode: "AQ-5GAL-RETUR", productName: "5 GALLON AQUA LOCAL RETUR", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "D" },
+  { id: "PM032", productCode: "AQ-EMPTY-5GAL", productName: "EMPTY BOTTLE AQUA 5 GALLON", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "D" },
+  // 5 Gallon - Cluster E (VIT)
+  { id: "PM030", productCode: "VIT-5GAL", productName: "5 GALLON VIT LOCAL", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "E" },
+  { id: "PM031", productCode: "VIT-5GAL-RETUR", productName: "5 GALLON VIT LOCAL RETUR", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "E" },
+  { id: "PM033", productCode: "VIT-EMPTY-5GAL", productName: "EMPTY BOTTLE VIT 5 GALLON", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "E" },
 ];
 
 // Helper function untuk mendapatkan produk by code

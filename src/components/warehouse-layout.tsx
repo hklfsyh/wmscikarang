@@ -332,9 +332,11 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
 export function WarehouseLayout() {
   const [selectedCell, setSelectedCell] = useState<WarehouseCell | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, _setStatusFilter] = useState<"ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER">("ALL");
-  const [clusterFilter, _setClusterFilter] = useState<"ALL" | "A" | "B" | "C" | "D" | "E">("ALL");
-  const [productFilter, _setProductFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER">("ALL");
+  const [clusterFilter, setClusterFilter] = useState<"ALL" | "A" | "B" | "C" | "D" | "E">("ALL");
+  const [productFilter, setProductFilter] = useState<string>("ALL");
+  const [lorongFilter, setLorongFilter] = useState<string>("ALL");
+  const [barisFilter, setBarisFilter] = useState<string>("ALL");
   const [openClusters, setOpenClusters] = useState<Set<string>>(new Set());
   
   const toggleCluster = (cluster: string) => {
@@ -354,7 +356,7 @@ export function WarehouseLayout() {
   const warehouseCells = useMemo(() => generateWarehouseCells(), []);
 
   // Get unique products for filter
-  const _uniqueProducts = useMemo(() => {
+  const uniqueProducts = useMemo(() => {
     const products = new Set<string>();
     stockListData.forEach((stock: StockItem) => {
       if (stock.productName) products.add(stock.productName);
@@ -362,11 +364,44 @@ export function WarehouseLayout() {
     return Array.from(products).sort();
   }, []);
 
-  // Filter cells based on search query and status filter
+  // Get unique lorongs for filter (based on selected cluster)
+  const uniqueLorongs = useMemo(() => {
+    const lorongs = new Set<number>();
+    warehouseCells.forEach((cell) => {
+      if (clusterFilter === "ALL" || cell.cluster === clusterFilter) {
+        lorongs.add(cell.lorong);
+      }
+    });
+    return Array.from(lorongs).sort((a, b) => a - b);
+  }, [warehouseCells, clusterFilter]);
+
+  // Get unique baris for filter (based on selected cluster and lorong)
+  const uniqueBaris = useMemo(() => {
+    const baris = new Set<number>();
+    warehouseCells.forEach((cell) => {
+      if ((clusterFilter === "ALL" || cell.cluster === clusterFilter) &&
+          (lorongFilter === "ALL" || cell.lorong === parseInt(lorongFilter))) {
+        baris.add(cell.baris);
+      }
+    });
+    return Array.from(baris).sort((a, b) => a - b);
+  }, [warehouseCells, clusterFilter, lorongFilter]);
+
+  // Filter cells based on all filters
   const filteredCells = useMemo(() => {
     return warehouseCells.filter((cell) => {
       // Filter by cluster
       if (clusterFilter !== "ALL" && cell.cluster !== clusterFilter) {
+        return false;
+      }
+      
+      // Filter by lorong
+      if (lorongFilter !== "ALL" && cell.lorong !== parseInt(lorongFilter)) {
+        return false;
+      }
+      
+      // Filter by baris
+      if (barisFilter !== "ALL" && cell.baris !== parseInt(barisFilter)) {
         return false;
       }
       
@@ -380,12 +415,21 @@ export function WarehouseLayout() {
         return false;
       }
       
-      // Filter by search query (product name or BB pallet)
+      // Filter by search query (product name, product code, BB pallet, or location)
       if (searchQuery.trim() !== "") {
         const query = searchQuery.toLowerCase();
+        
+        // Search in product name
         const productMatch = cell.product?.toLowerCase().includes(query);
         
-        // Handle bbPallet as both string and array
+        // Search in product code (need to get product detail)
+        let productCodeMatch = false;
+        if (cell.product) {
+          const productDetail = getProductByCode(cell.product);
+          productCodeMatch = productDetail?.productCode.toLowerCase().includes(query) || false;
+        }
+        
+        // Search in BB pallet
         let bbPalletMatch = false;
         if (cell.bbPallet) {
           if (Array.isArray(cell.bbPallet)) {
@@ -395,12 +439,17 @@ export function WarehouseLayout() {
           }
         }
         
-        return productMatch || bbPalletMatch;
+        // Search in location (e.g., "A-L1-B2-P3" or "A L1 B2 P3")
+        const locationString = `${cell.cluster} L${cell.lorong} B${cell.baris} P${cell.pallet}`.toLowerCase();
+        const locationMatch = locationString.includes(query) || 
+                             locationString.replace(/ /g, '-').includes(query);
+        
+        return productMatch || productCodeMatch || bbPalletMatch || locationMatch;
       }
       
       return true;
     });
-  }, [warehouseCells, searchQuery, statusFilter, clusterFilter, productFilter]);
+  }, [warehouseCells, clusterFilter, lorongFilter, barisFilter, productFilter, statusFilter, searchQuery]);
 
   // Group cells by cluster, lorong, and baris
   const cellsByCluster = useMemo(() => {
@@ -530,47 +579,173 @@ export function WarehouseLayout() {
         </div>
 
         {/* Quick Filter & Search */}
-        <div className="bg-white rounded-xl shadow-xl p-8 mb-8 mt-6">
-            <h1 className="text-2xl font-bold text-gray-800">Warehouse Layout Visualization</h1>
-            <p className="text-gray-500 mt-1">Visualisasi status lokasi gudang berdasarkan Master Data & Stok</p>
+        <div className="bg-white rounded-xl shadow-xl p-6 mb-6 mt-6">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">🔍 Pencarian & Filter</h2>
+            <p className="text-gray-500 text-sm mb-4">Filter layout gudang berdasarkan cluster, lorong, baris, produk, atau status</p>
 
-            <div className="mt-4 flex items-center gap-4">
+            {/* Search Bar */}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Pencarian Global
+              </label>
+              <div className="flex items-center gap-3">
                 <input
                     type="text"
-                    placeholder="Cari Lokasi, Produk (Code/Name), atau BB Pallet..."
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                    placeholder="Cari Lokasi (A-L1-B2-P3), Produk (Code/Name), atau BB Pallet..."
+                    className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                 />
-                <button
-                    onClick={() => setSearchQuery("")}
-                    className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors"
+                {searchQuery && (
+                  <button
+                      onClick={() => setSearchQuery("")}
+                      className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors flex items-center gap-2"
+                  >
+                      <X size={18} />
+                      <span className="hidden sm:inline">Clear</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Advanced Filters */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* Cluster Filter */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Cluster
+                </label>
+                <select
+                  value={clusterFilter}
+                  onChange={(e) => {
+                    setClusterFilter(e.target.value as "ALL" | "A" | "B" | "C" | "D" | "E");
+                    setLorongFilter("ALL"); // Reset lorong when cluster changes
+                    setBarisFilter("ALL"); // Reset baris when cluster changes
+                  }}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
                 >
-                    <X size={20} /> Reset
-                </button>
+                  <option value="ALL">Semua Cluster</option>
+                  {clusterConfigs.filter(c => c.isActive).map(c => (
+                    <option key={c.cluster} value={c.cluster}>Cluster {c.cluster}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Lorong Filter */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Lorong
+                </label>
+                <select
+                  value={lorongFilter}
+                  onChange={(e) => {
+                    setLorongFilter(e.target.value);
+                    setBarisFilter("ALL"); // Reset baris when lorong changes
+                  }}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                >
+                  <option value="ALL">Semua Lorong</option>
+                  {uniqueLorongs.map(l => (
+                    <option key={l} value={l}>Lorong {l}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Baris Filter */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Baris
+                </label>
+                <select
+                  value={barisFilter}
+                  onChange={(e) => setBarisFilter(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                >
+                  <option value="ALL">Semua Baris</option>
+                  {uniqueBaris.map(b => (
+                    <option key={b} value={b}>Baris {b}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Product Filter */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Produk
+                </label>
+                <select
+                  value={productFilter}
+                  onChange={(e) => setProductFilter(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                >
+                  <option value="ALL">Semua Produk</option>
+                  {uniqueProducts.map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Status
+                </label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as "ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER")}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                >
+                  <option value="ALL">Semua Status</option>
+                  <option value="RELEASE">RELEASE (Green)</option>
+                  <option value="HOLD">HOLD (Yellow)</option>
+                  <option value="RECEH">RECEH (Blue)</option>
+                  <option value="WRONG_CLUSTER">WRONG CLUSTER (Red)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Reset All Filters Button */}
+            <div className="mt-4 flex justify-between items-center">
+              <p className="text-sm text-gray-600">
+                {filteredCells.length} dari {warehouseCells.length} lokasi ditampilkan
+              </p>
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setClusterFilter("ALL");
+                  setLorongFilter("ALL");
+                  setBarisFilter("ALL");
+                  setProductFilter("ALL");
+                  setStatusFilter("ALL");
+                }}
+                className="px-6 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-semibold flex items-center gap-2"
+              >
+                <X size={18} />
+                Reset Semua Filter
+              </button>
             </div>
         </div>
-
 
         {/* Warehouse View Sesuai Template Lama */}
         <div className="space-y-6">
           {clusterConfigs.filter(c => c.isActive).map((clusterConfig) => {
             const cluster = clusterConfig.cluster;
-            const isOpen = openClusters.has(cluster);
             const clusterCells = cellsByCluster[cluster] || [];
+            
+            // FILTER: Skip cluster jika tidak ada cell yang cocok dengan filter
+            if (clusterCells.length === 0) {
+              return null;
+            }
+            
+            const isOpen = openClusters.has(cluster);
             const filledCount = clusterCells.reduce((sum, group) => {
               return sum + group.pallets.filter(p => p.product).length;
             }, 0);
             
-            // DYNAMIC: Calculate total slots for this cluster
-            let totalCount = 0;
-            for (let lorong = 1; lorong <= clusterConfig.defaultLorongCount; lorong++) {
-              const barisCount = getBarisCountForLorong(cluster, lorong);
-              for (let baris = 1; baris <= barisCount; baris++) {
-                const palletCapacity = getPalletCapacityForCell(cluster, lorong, baris);
-                totalCount += palletCapacity;
-              }
-            }
+            // DYNAMIC: Calculate total slots for this cluster (only filtered cells)
+            const totalCount = clusterCells.reduce((sum, group) => {
+              return sum + group.pallets.length;
+            }, 0);
             
             return (
               <div key={cluster} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -608,18 +783,34 @@ export function WarehouseLayout() {
                       <div className="overflow-x-auto">
                         <div className="inline-block min-w-full">
                           {(() => {
-                            // DYNAMIC: Get max baris for this cluster (across all lorong)
-                            const maxBaris = Math.max(
-                              ...Array.from({ length: clusterConfig.defaultLorongCount }, (_, i) => i + 1)
-                                .map(lorong => getBarisCountForLorong(cluster, lorong))
-                            );
+                            // FILTER: Get unique lorong and baris that have matching cells
+                            const matchingLorongs = new Set<number>();
+                            const matchingBaris = new Set<number>();
+                            
+                            clusterCells.forEach((group) => {
+                              matchingLorongs.add(group.lorong);
+                              matchingBaris.add(group.baris);
+                            });
+                            
+                            // Sort lorong and baris
+                            const sortedLorongs = Array.from(matchingLorongs).sort((a, b) => a - b);
+                            const sortedBaris = Array.from(matchingBaris).sort((a, b) => a - b);
+                            
+                            // If no matching cells, show message
+                            if (sortedLorongs.length === 0 || sortedBaris.length === 0) {
+                              return (
+                                <div className="text-center py-8 text-gray-500">
+                                  Tidak ada lokasi yang cocok dengan filter di cluster ini
+                                </div>
+                              );
+                            }
                             
                             return (
                               <>
-                                {/* Header Baris (DYNAMIC) */}
+                                {/* Header Baris (FILTERED) */}
                                 <div className="flex mb-2">
                                   <div className="w-16 sm:w-20 shrink-0" /> 
-                                  {Array.from({ length: maxBaris }, (_, i) => i + 1).map((barisNum) => (
+                                  {sortedBaris.map((barisNum) => (
                                     <div key={barisNum} className="w-20 sm:w-24 text-center shrink-0">
                                       <div className="text-xs font-semibold text-slate-600 bg-slate-100 rounded px-2 py-1">
                                         B{barisNum}
@@ -628,9 +819,8 @@ export function WarehouseLayout() {
                                   ))}
                                 </div>
                                 
-                                {/* Lorong Rows (DYNAMIC based on cluster config) */}
-                                {Array.from({ length: clusterConfig.defaultLorongCount }, (_, i) => i + 1).map((lorongNum) => {
-                                  const barisCountForThisLorong = getBarisCountForLorong(cluster, lorongNum);
+                                {/* Lorong Rows (FILTERED - only show lorong with matching cells) */}
+                                {sortedLorongs.map((lorongNum) => {
                                   const isInTransitLorong = isInTransitLocation(cluster, lorongNum);
                                   
                                   return (
@@ -649,10 +839,14 @@ export function WarehouseLayout() {
                                         </div>
                                       </div>
                                       
-                                      {/* Baris Cells (DYNAMIC for each lorong) */}
-                                      {Array.from({ length: maxBaris }, (_, i) => i + 1).map((barisNum) => {
-                                        // If this baris doesn't exist for this lorong, render empty spacer
-                                        if (barisNum > barisCountForThisLorong) {
+                                      {/* Baris Cells (FILTERED - only show cells that match filter) */}
+                                      {sortedBaris.map((barisNum) => {
+                                        const group = clusterCells.find(
+                                          (g) => g.lorong === lorongNum && g.baris === barisNum
+                                        );
+                                        
+                                        // If no group for this lorong-baris combination, render empty spacer
+                                        if (!group) {
                                           return (
                                             <div key={barisNum} className="w-20 sm:w-24 shrink-0 px-1">
                                               <div className="flex gap-0.5 h-12 sm:h-14 items-center justify-center">
@@ -662,23 +856,22 @@ export function WarehouseLayout() {
                                           );
                                         }
                                         
-                                        const group = cellsByCluster[cluster]?.find(
-                                          (g) => g.lorong === lorongNum && g.baris === barisNum
-                                        );
-                                        
-                                        // DYNAMIC: Get actual pallet capacity for this cell
+                                        // Get pallet capacity for this cell
                                         const palletCapacity = getPalletCapacityForCell(cluster, lorongNum, barisNum);
                                         const palletNumbers = Array.from({ length: palletCapacity }, (_, i) => palletCapacity - i); // Reverse order: P3, P2, P1
                                         
                                         return (
                                           <div key={barisNum} className="w-20 sm:w-24 shrink-0 px-1">
                                             <div className="flex gap-0.5">
-                                              {/* DYNAMIC Pallets (quantity based on config) */}
+                                              {/* FILTERED Pallets - only render if in filtered cells */}
                                               {palletNumbers.map((palletNum) => {
-                                                // Cari cell di filteredCells
-                                                const cell = group?.pallets.find((p) => p.pallet === palletNum) || 
-                                                  warehouseCells.find(c => c.cluster === cluster && c.lorong === lorongNum && c.baris === barisNum && c.pallet === palletNum) || 
-                                                  {id: `${cluster}-L${lorongNum}-B${barisNum}-P${palletNum}`, cluster, lorong: lorongNum, baris: barisNum, pallet: palletNum, colorCode: "empty"} as WarehouseCell;
+                                                // Cari cell di filteredCells (hanya cell yang cocok dengan filter)
+                                                const cell = group.pallets.find((p) => p.pallet === palletNum);
+                                                
+                                                // Skip rendering if cell not in filtered results
+                                                if (!cell) {
+                                                  return null;
+                                                }
                                                 
                                                 return (
                                                   <PalletComponent key={palletNum} cell={cell} />

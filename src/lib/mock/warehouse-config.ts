@@ -155,10 +155,21 @@ export const clusterConfigs: ClusterConfig[] = [
   {
     id: "cluster-d",
     cluster: "D",
-    clusterName: "Cluster D - Quarantine",
-    defaultLorongCount: 5,
-    defaultBarisCount: 6,
-    defaultPalletPerSel: 2,
+    clusterName: "Cluster D - Galon AQUA 5 Liter",
+    defaultLorongCount: 3, // L1-L3
+    defaultBarisCount: 5, // All lorongs have 5 baris
+    defaultPalletPerSel: 1, // 1 pallet per baris
+    customLorongConfig: [],
+    customCellConfig: [],
+    isActive: true,
+  },
+  {
+    id: "cluster-e",
+    cluster: "E",
+    clusterName: "Cluster E - Galon VIT 5 Liter",
+    defaultLorongCount: 3, // L1-L3 (each cluster has independent lorong numbering)
+    defaultBarisCount: 5, // All lorongs have 5 baris
+    defaultPalletPerSel: 1, // 1 pallet per baris
     customLorongConfig: [],
     customCellConfig: [],
     isActive: true,
@@ -378,15 +389,66 @@ export const productHomes: ProductHome[] = [
     maxPalletPerLocation: 3,
     isActive: true,
   },
-  // Cluster D products
+  // Cluster D products (Galon AQUA 5 Liter)
   {
     id: "ph-022",
-    productCode: "TEH-350-BTL-12",
-    productName: "350ML TEH BOTOL SOSRO 1X12",
+    productCode: "AQ-5GAL",
+    productName: "5 GALLON AQUA LOCAL",
     homeCluster: "D",
-    allowedLorongRange: [1, 5],
-    allowedBarisRange: [1, 6],
-    maxPalletPerLocation: 2,
+    allowedLorongRange: [1, 1], // Strict: 1 lorong per product
+    allowedBarisRange: [1, 5],
+    maxPalletPerLocation: 1, // 1 pallet per baris
+    isActive: true,
+  },
+  {
+    id: "ph-023",
+    productCode: "AQ-5GAL-RETUR",
+    productName: "5 GALLON AQUA LOCAL RETUR",
+    homeCluster: "D",
+    allowedLorongRange: [2, 2], // Strict: 1 lorong per product
+    allowedBarisRange: [1, 5],
+    maxPalletPerLocation: 1,
+    isActive: true,
+  },
+  {
+    id: "ph-024",
+    productCode: "AQ-EMPTY-5GAL",
+    productName: "EMPTY BOTTLE AQUA 5 GALLON",
+    homeCluster: "D",
+    allowedLorongRange: [3, 3], // Strict: 1 lorong per product
+    allowedBarisRange: [1, 5],
+    maxPalletPerLocation: 1,
+    isActive: true,
+  },
+  // Cluster E products (Galon VIT 5 Liter)
+  {
+    id: "ph-025",
+    productCode: "VIT-5GAL",
+    productName: "5 GALLON VIT LOCAL",
+    homeCluster: "E",
+    allowedLorongRange: [1, 1], // Strict: 1 lorong per product
+    allowedBarisRange: [1, 5],
+    maxPalletPerLocation: 1,
+    isActive: true,
+  },
+  {
+    id: "ph-026",
+    productCode: "VIT-5GAL-RETUR",
+    productName: "5 GALLON VIT LOCAL RETUR",
+    homeCluster: "E",
+    allowedLorongRange: [2, 2], // Strict: 1 lorong per product
+    allowedBarisRange: [1, 5],
+    maxPalletPerLocation: 1,
+    isActive: true,
+  },
+  {
+    id: "ph-027",
+    productCode: "VIT-EMPTY-5GAL",
+    productName: "EMPTY BOTTLE VIT 5 GALLON",
+    homeCluster: "E",
+    allowedLorongRange: [3, 3], // Strict: 1 lorong per product
+    allowedBarisRange: [1, 5],
+    maxPalletPerLocation: 1,
     isActive: true,
   },
 ];

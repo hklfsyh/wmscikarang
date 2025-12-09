@@ -192,6 +192,13 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                   </span>
                 </div>
               )}
+              {cluster.inTransitLorongRange && cluster.inTransitLorongRange[0] > 0 && (
+                <div>
+                  <span className="text-xs font-semibold text-orange-600">
+                    🚚 In Transit: L{cluster.inTransitLorongRange[0]}-L{cluster.inTransitLorongRange[1]}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2">
@@ -846,6 +853,79 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                     </p>
                   )}
                 </div>
+              </div>
+
+              {/* In Transit Area Configuration */}
+              <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
+                <div className="flex justify-between items-center mb-4">
+                  <h4 className="font-semibold text-orange-900">
+                    In Transit Area Configuration (Opsional)
+                  </h4>
+                </div>
+                <p className="text-xs text-orange-700 mb-3">
+                  Area In Transit adalah zona buffer/overflow untuk produk yang tidak muat di lokasi home-nya. 
+                  Area ini akan ditandai merah dan bisa menerima produk dari cluster manapun.
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Lorong Start (In Transit)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.inTransitLorongRange?.[0] || ""}
+                      placeholder="Kosongkan jika tidak ada"
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        if (isNaN(val) || val === 0) {
+                          const { inTransitLorongRange: _inTransitLorongRange, ...rest } = formData;
+                          setFormData(rest);
+                        } else {
+                          setFormData({
+                            ...formData,
+                            inTransitLorongRange: [val, formData.inTransitLorongRange?.[1] || val] as [number, number],
+                          });
+                        }
+                      }}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Lorong End (In Transit)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.inTransitLorongRange?.[1] || ""}
+                      placeholder="Kosongkan jika tidak ada"
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        if (isNaN(val) || val === 0) {
+                          const { inTransitLorongRange: _inTransitLorongRange, ...rest } = formData;
+                          setFormData(rest);
+                        } else {
+                          setFormData({
+                            ...formData,
+                            inTransitLorongRange: [formData.inTransitLorongRange?.[0] || val, val] as [number, number],
+                          });
+                        }
+                      }}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500"
+                    />
+                  </div>
+                </div>
+                {formData.inTransitLorongRange && formData.inTransitLorongRange[0] > 0 && (
+                  <div className="mt-3 p-3 bg-orange-100 border border-orange-300 rounded-lg">
+                    <p className="text-sm font-semibold text-orange-900">
+                      ✅ In Transit Area: Lorong {formData.inTransitLorongRange[0]} - {formData.inTransitLorongRange[1]}
+                    </p>
+                    <p className="text-xs text-orange-700 mt-1">
+                      Area ini akan selalu ditampilkan dengan warna merah dan dapat menerima overflow dari produk manapun.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 

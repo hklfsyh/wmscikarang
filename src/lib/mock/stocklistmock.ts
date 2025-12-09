@@ -365,23 +365,55 @@ for (let lorong = 10; lorong <= 16; lorong++) {
   }
 }
 
-// === CLUSTER D: Simple single product ===
-const otherClusters = [
-  { cluster: "D", productCode: "TEH-350-BTL-12", lorongCount: 5, barisCount: 6, palletCount: 2 },
-];
-
-otherClusters.forEach(({ cluster, productCode, lorongCount, barisCount, palletCount }) => {
-  for (let lorong = 1; lorong <= lorongCount; lorong++) {
-    for (let baris = 1; baris <= barisCount; baris++) {
-      for (let pallet = 1; pallet <= palletCount; pallet++) {
-        // 60% filled untuk test
-        if (Math.random() < 0.6) {
-          addStockItem(cluster, lorong, baris, pallet, productCode, 30, 300);
-        }
-      }
-    }
+// === CLUSTER D: Galon AQUA 5 Liter ===
+// Lorong 1: 5 GALLON AQUA LOCAL (5 baris, 1 pallet per baris)
+for (let baris = 1; baris <= 5; baris++) {
+  // 80% filled
+  if (Math.random() < 0.8) {
+    addStockItem("D", 1, baris, 1, "AQ-5GAL", 60, 200);
   }
-});
+}
+
+// Lorong 2: 5 GALLON AQUA LOCAL RETUR (5 baris, 1 pallet per baris)
+for (let baris = 1; baris <= 5; baris++) {
+  // 80% filled
+  if (Math.random() < 0.8) {
+    addStockItem("D", 2, baris, 1, "AQ-5GAL-RETUR", 60, 200);
+  }
+}
+
+// Lorong 3: EMPTY BOTTLE AQUA 5 GALLON (5 baris, 1 pallet per baris)
+for (let baris = 1; baris <= 5; baris++) {
+  // 80% filled
+  if (Math.random() < 0.8) {
+    addStockItem("D", 3, baris, 1, "AQ-EMPTY-5GAL", 60, 200);
+  }
+}
+
+// === CLUSTER E: Galon VIT 5 Liter ===
+// Lorong 1: 5 GALLON VIT LOCAL (5 baris, 1 pallet per baris)
+for (let baris = 1; baris <= 5; baris++) {
+  // 80% filled
+  if (Math.random() < 0.8) {
+    addStockItem("E", 1, baris, 1, "VIT-5GAL", 60, 200);
+  }
+}
+
+// Lorong 2: 5 GALLON VIT LOCAL RETUR (5 baris, 1 pallet per baris)
+for (let baris = 1; baris <= 5; baris++) {
+  // 80% filled
+  if (Math.random() < 0.8) {
+    addStockItem("E", 2, baris, 1, "VIT-5GAL-RETUR", 60, 200);
+  }
+}
+
+// Lorong 3: EMPTY BOTTLE VIT 5 GALLON (5 baris, 1 pallet per baris)
+for (let baris = 1; baris <= 5; baris++) {
+  // 80% filled
+  if (Math.random() < 0.8) {
+    addStockItem("E", 3, baris, 1, "VIT-EMPTY-5GAL", 60, 200);
+  }
+}
 
 
 // --- START: Manual Receh Data dengan Multiple BB ---
