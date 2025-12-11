@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { stockListData } from "@/lib/mock/stocklistmock";
 
 export default function StockListPage() {
@@ -9,6 +9,8 @@ export default function StockListPage() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [sortBy, setSortBy] = useState<"expiredDate" | "inboundDate" | "productName">("expiredDate");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Filter & Sort Logic
   const filteredAndSortedData = useMemo(() => {
@@ -18,14 +20,21 @@ export default function StockListPage() {
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
       filtered = filtered.filter(
-        (item) =>
-          item.productName.toLowerCase().includes(search) ||
-          item.productCode.toLowerCase().includes(search) ||
-          item.batchNumber.toLowerCase().includes(search) ||
-          item.lotNumber.toLowerCase().includes(search) ||
-          `${item.location.cluster}-${item.location.lorong}-${item.location.baris}-${item.location.level}`
-            .toLowerCase()
-            .includes(search)
+        (item) => {
+          // Convert bbPallet to string for searching (handle array and string)
+          const bbPalletString = Array.isArray(item.bbPallet) 
+            ? item.bbPallet.join(' ').toLowerCase() 
+            : item.bbPallet.toLowerCase();
+          
+          return item.productName.toLowerCase().includes(search) ||
+            item.productCode.toLowerCase().includes(search) ||
+            item.batchNumber.toLowerCase().includes(search) ||
+            item.lotNumber.toLowerCase().includes(search) ||
+            bbPalletString.includes(search) ||
+            `${item.location.cluster}-${item.location.lorong}-${item.location.baris}-${item.location.level}`
+              .toLowerCase()
+              .includes(search);
+        }
       );
     }
 
@@ -57,15 +66,31 @@ export default function StockListPage() {
     return filtered;
   }, [searchTerm, filterCluster, filterStatus, sortBy, sortOrder]);
 
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterCluster, filterStatus]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredAndSortedData.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentData = filteredAndSortedData.slice(startIndex, endIndex);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Statistics
   const stats = useMemo(() => {
     const totalItems = stockListData.length;
-    const totalAvailable = stockListData.filter((item) => item.status === "available").length;
-    const totalReserved = stockListData.filter((item) => item.status === "reserved").length;
-    const totalQuarantine = stockListData.filter((item) => item.status === "quarantine").length;
+    const totalHold = stockListData.filter((item) => item.status === "hold").length;
+    const totalRelease = stockListData.filter((item) => item.status === "release").length;
+    const totalReceh = stockListData.filter((item) => item.status === "receh").length;
+    const totalSalahCluster = stockListData.filter((item) => item.status === "salah-cluster").length;
 
     const totalQtyCarton = stockListData.reduce((sum, item) => sum + item.qtyCarton, 0);
-    const totalQtyPcs = stockListData.reduce((sum, item) => sum + item.qtyPcs, 0);
 
     // Expired soon (< 180 days)
     const now = new Date();
@@ -78,11 +103,11 @@ export default function StockListPage() {
 
     return {
       totalItems,
-      totalAvailable,
-      totalReserved,
-      totalQuarantine,
+      totalHold,
+      totalRelease,
+      totalReceh,
+      totalSalahCluster,
       totalQtyCarton,
-      totalQtyPcs,
       expiringSoon,
     };
   }, []);
@@ -90,22 +115,28 @@ export default function StockListPage() {
   // Status Badge
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case "available":
-        return (
-          <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
-            Available
-          </span>
-        );
-      case "reserved":
+      case "hold":
         return (
           <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-semibold">
-            Reserved
+            Hold
           </span>
         );
-      case "quarantine":
+      case "release":
+        return (
+          <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">
+            Release
+          </span>
+        );
+      case "receh":
+        return (
+          <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">
+            Receh
+          </span>
+        );
+      case "salah-cluster":
         return (
           <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-semibold">
-            Quarantine
+            Salah Cluster
           </span>
         );
       default:
@@ -156,30 +187,30 @@ export default function StockListPage() {
           </div>
 
           {/* Statistics Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mt-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 mt-6">
             <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
               <p className="text-blue-600 text-sm font-semibold">Total Items</p>
               <p className="text-blue-900 text-2xl font-bold">{stats.totalItems}</p>
             </div>
             <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
-              <p className="text-green-600 text-sm font-semibold">Available</p>
-              <p className="text-green-900 text-2xl font-bold">{stats.totalAvailable}</p>
+              <p className="text-green-600 text-sm font-semibold">Release</p>
+              <p className="text-green-900 text-2xl font-bold">{stats.totalRelease}</p>
             </div>
             <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
-              <p className="text-yellow-600 text-sm font-semibold">Reserved</p>
-              <p className="text-yellow-900 text-2xl font-bold">{stats.totalReserved}</p>
-            </div>
-            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
-              <p className="text-red-600 text-sm font-semibold">Quarantine</p>
-              <p className="text-red-900 text-2xl font-bold">{stats.totalQuarantine}</p>
+              <p className="text-yellow-600 text-sm font-semibold">Hold</p>
+              <p className="text-yellow-900 text-2xl font-bold">{stats.totalHold}</p>
             </div>
             <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-              <p className="text-purple-600 text-sm font-semibold">Total Carton</p>
-              <p className="text-purple-900 text-2xl font-bold">{stats.totalQtyCarton}</p>
+              <p className="text-purple-600 text-sm font-semibold">Receh</p>
+              <p className="text-purple-900 text-2xl font-bold">{stats.totalReceh}</p>
+            </div>
+            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
+              <p className="text-red-600 text-sm font-semibold">Salah Cluster</p>
+              <p className="text-red-900 text-2xl font-bold">{stats.totalSalahCluster}</p>
             </div>
             <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4">
-              <p className="text-indigo-600 text-sm font-semibold">Total Pcs</p>
-              <p className="text-indigo-900 text-2xl font-bold">{stats.totalQtyPcs.toLocaleString()}</p>
+              <p className="text-indigo-600 text-sm font-semibold">Total Carton</p>
+              <p className="text-indigo-900 text-2xl font-bold">{stats.totalQtyCarton}</p>
             </div>
             <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
               <p className="text-orange-600 text-sm font-semibold">Expiring Soon</p>
@@ -234,9 +265,10 @@ export default function StockListPage() {
                 className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all"
               >
                 <option value="all">All Status</option>
-                <option value="available">Available</option>
-                <option value="reserved">Reserved</option>
-                <option value="quarantine">Quarantine</option>
+                <option value="release">Release (Exp ≤90 hari)</option>
+                <option value="hold">Hold (Exp &gt;90 hari)</option>
+                <option value="receh">Receh (Partial)</option>
+                <option value="salah-cluster">Salah Cluster</option>
               </select>
             </div>
 
@@ -267,8 +299,11 @@ export default function StockListPage() {
 
           {/* Result Count */}
           <div className="mt-4 text-gray-600">
-            Showing <span className="font-bold text-gray-800">{filteredAndSortedData.length}</span> of{" "}
-            <span className="font-bold text-gray-800">{stats.totalItems}</span> items
+            Showing <span className="font-bold text-gray-800">{startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)}</span> of{" "}
+            <span className="font-bold text-gray-800">{filteredAndSortedData.length}</span> items
+            {filteredAndSortedData.length !== stats.totalItems && (
+              <span> (filtered from {stats.totalItems} total)</span>
+            )}
           </div>
         </div>
 
@@ -280,7 +315,7 @@ export default function StockListPage() {
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-bold">No</th>
                   <th className="px-6 py-4 text-left text-sm font-bold">Product</th>
-                  <th className="px-6 py-4 text-left text-sm font-bold">Batch / Lot</th>
+                  <th className="px-6 py-4 text-left text-sm font-bold">BB Pallet</th>
                   <th className="px-6 py-4 text-left text-sm font-bold">Location</th>
                   <th className="px-6 py-4 text-left text-sm font-bold">Quantity</th>
                   <th className="px-6 py-4 text-left text-sm font-bold">Expired Date</th>
@@ -289,19 +324,20 @@ export default function StockListPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredAndSortedData.map((item, index) => (
+                {currentData.map((item, index) => (
                   <tr
                     key={item.id}
                     className="border-b border-gray-100 hover:bg-blue-50 transition-colors"
                   >
-                    <td className="px-6 py-4 text-sm text-gray-600">{index + 1}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{startIndex + index + 1}</td>
                     <td className="px-6 py-4">
                       <div className="font-semibold text-gray-800">{item.productName}</div>
                       <div className="text-xs text-gray-500">{item.productCode}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-gray-700">{item.batchNumber}</div>
-                      <div className="text-xs text-gray-500">{item.lotNumber}</div>
+                      <div className="text-sm font-medium text-gray-700">
+                        {Array.isArray(item.bbPallet) ? item.bbPallet.join(', ') : item.bbPallet}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-semibold">
@@ -314,7 +350,6 @@ export default function StockListPage() {
                         {item.qtyPallet} pallet
                       </div>
                       <div className="text-sm text-gray-600">{item.qtyCarton} carton</div>
-                      <div className="text-xs text-gray-500">{item.qtyPcs} pcs</div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm font-medium text-gray-700">{item.expiredDate}</div>
@@ -327,6 +362,55 @@ export default function StockListPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 p-6 border-t border-gray-200">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              >
+                ← Prev
+              </button>
+              
+              <div className="flex items-center gap-2">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                  // Show first page, last page, current page, and pages around current
+                  if (
+                    page === 1 ||
+                    page === totalPages ||
+                    (page >= currentPage - 1 && page <= currentPage + 1)
+                  ) {
+                    return (
+                      <button
+                        key={page}
+                        onClick={() => handlePageChange(page)}
+                        className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                          currentPage === page
+                            ? "bg-blue-500 text-white"
+                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    );
+                  } else if (page === currentPage - 2 || page === currentPage + 2) {
+                    return <span key={page} className="text-gray-400">...</span>;
+                  }
+                  return null;
+                })}
+              </div>
+              
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              >
+                Next →
+              </button>
+            </div>
+          )}
 
           {filteredAndSortedData.length === 0 && (
             <div className="text-center py-12">

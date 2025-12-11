@@ -1,14 +1,11 @@
-// File: src/components/outbound-form.tsx (UPDATED)
-
 "use client";
 
-import { useState } from "react";
-// --- START: Perubahan Import ---
+import { useState, useMemo, useEffect } from "react";
 import { productMasterData, getProductByCode } from "@/lib/mock/product-master";
-// --- END: Perubahan Import ---
 import { stockListData } from "@/lib/mock/stocklistmock";
-import { TruckIcon, MapPin } from "lucide-react";
+import { TruckIcon, MapPin, XCircle } from "lucide-react";
 import { useToast, ToastContainer } from "./toast";
+import { QRCodeSVG } from "qrcode.react";
 
 interface FEFOLocation {
   stockId: string;
@@ -22,25 +19,100 @@ interface FEFOLocation {
 
 type OutboundFormState = {
   tanggal: string;
+  namaPengemudi: string;
+  nomorPolisi: string;
   productCode: string;
-  qtyPallet: string;
+  qtyPalletInput: string;
+  qtyCartonInput: string;
 };
 
 const today = new Date().toISOString().slice(0, 10);
 
 const initialState: OutboundFormState = {
   tanggal: today,
+  namaPengemudi: "",
+  nomorPolisi: "",
   productCode: "",
-  qtyPallet: "",
+  qtyPalletInput: "",
+  qtyCartonInput: "",
 };
 
 export function OutboundForm() {
   const [form, setForm] = useState<OutboundFormState>(initialState);
   const [fefoLocations, setFefoLocations] = useState<FEFOLocation[]>([]);
-  const { showToast, toasts, removeToast } = useToast();
+  const { toasts, removeToast, success, error } = useToast();
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showBarcodeInfoModal, setShowBarcodeInfoModal] = useState(false);
+  const [scannedBarcodeData, setScannedBarcodeData] = useState<{location: string; bbPallet: string} | null>(null);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessages, setErrorMessages] = useState<string[]>([]);
+
+  // --- INPUT HISTORY/AUTOCOMPLETE STATE ---
+  const [driverHistory, setDriverHistory] = useState<string[]>([]);
+  const [policeNoHistory, setPoliceNoHistory] = useState<string[]>([]);
+  const [showDriverSuggestions, setShowDriverSuggestions] = useState(false);
+  const [showPoliceNoSuggestions, setShowPoliceNoSuggestions] = useState(false);
+
+  // Load history from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedDrivers = localStorage.getItem('wms_driver_history');
+      const savedPoliceNos = localStorage.getItem('wms_police_no_history');
+      
+      if (savedDrivers) setDriverHistory(JSON.parse(savedDrivers));
+      if (savedPoliceNos) setPoliceNoHistory(JSON.parse(savedPoliceNos));
+    }
+  }, []);
+
+  // Save to history helper
+  const saveToHistory = (key: string, value: string, currentHistory: string[], setHistory: (val: string[]) => void) => {
+    if (!value.trim()) return;
+    
+    const updated = [value, ...currentHistory.filter(v => v !== value)].slice(0, 10); // Keep last 10
+    setHistory(updated);
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(key, JSON.stringify(updated));
+    }
+  };
+  // --- AKHIR INPUT HISTORY ---
 
   // Get selected product data
   const selectedProduct = form.productCode ? getProductByCode(form.productCode) : null;
+
+  // --- LOGIKA QTY DINAMIS (CALCULATED VALUES) ---
+  const qtyPerPalletStd = selectedProduct?.qtyPerPallet || 0;
+  
+  const { totalPallets, remainingCartons, totalCartons } = useMemo(() => {
+    const palletInput = Number(form.qtyPalletInput) || 0;
+    const cartonInput = Number(form.qtyCartonInput) || 0;
+    
+    // Total Karton = (Input Pallet Utuh * Std Qty/Pallet) + Input Karton Sisa
+    const totalCartons = (palletInput * qtyPerPalletStd) + cartonInput;
+    
+    if (qtyPerPalletStd === 0) {
+      return { totalPallets: 0, remainingCartons: cartonInput, totalCartons: cartonInput };
+    }
+
+    const calculatedPallets = Math.floor(totalCartons / qtyPerPalletStd);
+    const remaining = totalCartons % qtyPerPalletStd;
+    
+    return {
+      totalPallets: calculatedPallets,
+      remainingCartons: remaining,
+      totalCartons: totalCartons,
+    };
+  }, [form.qtyPalletInput, form.qtyCartonInput, qtyPerPalletStd]);
+  
+  const isReceh = remainingCartons > 0;
+  const totalPalletsNeeded = totalPallets + (isReceh ? 1 : 0);
+  
+  // Total Pcs
+  const totalPcs = selectedProduct && totalCartons
+    ? totalCartons * selectedProduct.qtyPerCarton
+    : 0;
+  // --- AKHIR LOGIKA QTY DINAMIS ---
 
   // Handle field change
   const handleChange = (field: keyof OutboundFormState, value: string) => {
@@ -50,23 +122,81 @@ export function OutboundForm() {
     if (field === "productCode") {
       setFefoLocations([]);
     }
+    
+    // Close suggestions when field changes
+    if (field === "namaPengemudi") {
+      setShowDriverSuggestions(false);
+    }
+    if (field === "nomorPolisi") {
+      setShowPoliceNoSuggestions(false);
+    }
+  };
+
+  // Handle submit
+  const handleSubmit = () => {
+    // Validation
+    const errors: string[] = [];
+    
+    if (!form.namaPengemudi.trim()) {
+      errors.push("Nama Pengemudi harus diisi!");
+    }
+    if (!form.nomorPolisi.trim()) {
+      errors.push("Nomor Polisi harus diisi!");
+    }
+    if (!form.productCode) {
+      errors.push("Produk harus dipilih!");
+    }
+    if (totalPalletsNeeded <= 0) {
+      errors.push("Qty (Pallet/Karton) harus diisi!");
+    }
+    if (fefoLocations.length === 0) {
+      errors.push("Mohon hitung lokasi FEFO terlebih dahulu!");
+    }
+    
+    if (errors.length > 0) {
+      setErrorMessages(errors);
+      setShowErrorModal(true);
+      return;
+    }
+    
+    setShowConfirmModal(true);
+  };
+
+  // Confirm outbound
+  const confirmOutbound = () => {
+    // Save to history
+    saveToHistory('wms_driver_history', form.namaPengemudi, driverHistory, setDriverHistory);
+    saveToHistory('wms_police_no_history', form.nomorPolisi, policeNoHistory, setPoliceNoHistory);
+    
+    // Close confirmation modal
+    setShowConfirmModal(false);
+    
+    // Show success modal
+    setShowSuccessModal(true);
+    
+    // Reset form after delay
+    setTimeout(() => {
+      setShowSuccessModal(false);
+      handleReset();
+    }, 3000);
   };
 
   // Calculate FEFO locations
   const calculateFEFO = () => {
-    if (!form.productCode || !form.qtyPallet || Number(form.qtyPallet) <= 0) {
-      showToast("Mohon isi produk dan quantity pallet!", "error");
+    if (!form.productCode || totalPalletsNeeded <= 0) {
+      error("Mohon isi produk dan quantity!");
       return;
     }
 
-    const qtyPalletNeeded = Number(form.qtyPallet);
+    const qtyPalletNeeded = totalPalletsNeeded;
     
     // Get available stocks for this product, sorted by expired date (FEFO)
+    // Available means: release, hold, or receh (excluding salah-cluster)
     const availableStocks = stockListData
       .filter(
         (stock) =>
           stock.productCode === form.productCode && 
-          stock.status === "available"
+          (stock.status === "release" || stock.status === "hold" || stock.status === "receh")
       )
       .sort((a, b) => new Date(a.expiredDate).getTime() - new Date(b.expiredDate).getTime());
 
@@ -105,18 +235,16 @@ export function OutboundForm() {
 
     // Check if we have enough stock
     if (remainingQtyPallet > 0) {
-      showToast(
-        `Stok tidak cukup! Kurang ${remainingQtyPallet} pallet. Tersedia: ${qtyPalletNeeded - remainingQtyPallet} dari ${qtyPalletNeeded} pallet yang diminta.`,
-        "error"
+      error(
+        `Stok tidak cukup! Kurang ${remainingQtyPallet} pallet. Tersedia: ${qtyPalletNeeded - remainingQtyPallet} dari ${qtyPalletNeeded} pallet yang diminta.`
       );
       setFefoLocations([]);
       return;
     }
 
     setFefoLocations(locations);
-    showToast(
-      `✓ Berhasil! Ditemukan ${locations.length} lokasi pengambilan berdasarkan FEFO.`,
-      "success"
+    success(
+      `✓ Berhasil! Ditemukan ${locations.length} lokasi pengambilan berdasarkan FEFO.`
     );
   };
 
@@ -124,13 +252,7 @@ export function OutboundForm() {
   const handleReset = () => {
     setForm(initialState);
     setFefoLocations([]);
-  };
-
-  // --- START: Kalkulasi Total Pcs Baru ---
-  const totalPcs = selectedProduct && form.qtyPallet
-    ? Number(form.qtyPallet) * selectedProduct.qtyPerPallet 
-    : 0;
-  // --- END: Kalkulasi Total Pcs Baru ---
+  }
 
 
   return (
@@ -151,6 +273,87 @@ export function OutboundForm() {
 
           {/* Form */}
           <div className="space-y-6 mb-8">
+            {/* Nama Driver & Nomor Polisi */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Nama Driver */}
+              <div className="relative">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  👤 Nama Pengemudi
+                </label>
+                <input
+                  type="text"
+                  value={form.namaPengemudi}
+                  onChange={(e) => handleChange("namaPengemudi", e.target.value)}
+                  onFocus={() => {
+                    if (driverHistory.length > 0) {
+                      setShowDriverSuggestions(true);
+                    }
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setShowDriverSuggestions(false), 300);
+                  }}
+                  placeholder="Nama pengemudi"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                />
+                {showDriverSuggestions && driverHistory.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {driverHistory.map((name, idx) => (
+                      <div
+                        key={idx}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleChange("namaPengemudi", name);
+                          setShowDriverSuggestions(false);
+                        }}
+                        className="px-4 py-2 hover:bg-orange-50 cursor-pointer text-sm"
+                      >
+                        {name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Nomor Polisi */}
+              <div className="relative">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  🚚 Nomor Polisi
+                </label>
+                <input
+                  type="text"
+                  value={form.nomorPolisi}
+                  onChange={(e) => handleChange("nomorPolisi", e.target.value.toUpperCase())}
+                  onFocus={() => {
+                    if (policeNoHistory.length > 0) {
+                      setShowPoliceNoSuggestions(true);
+                    }
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setShowPoliceNoSuggestions(false), 300);
+                  }}
+                  placeholder="B 1234 XYZ"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all uppercase"
+                />
+                {showPoliceNoSuggestions && policeNoHistory.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {policeNoHistory.map((policeNo, idx) => (
+                      <div
+                        key={idx}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleChange("nomorPolisi", policeNo);
+                          setShowPoliceNoSuggestions(false);
+                        }}
+                        className="px-4 py-2 hover:bg-orange-50 cursor-pointer text-sm font-mono"
+                      >
+                        {policeNo}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Tanggal & Produk */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Tanggal */}
@@ -188,19 +391,47 @@ export function OutboundForm() {
               </div>
             </div>
 
-            {/* Qty Pallet */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                📊 Qty yang Diambil (Pallet)
-              </label>
-              <input
-                type="number"
-                value={form.qtyPallet}
-                onChange={(e) => handleChange("qtyPallet", e.target.value)}
-                min="1"
-                placeholder="Jumlah pallet"
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all"
-              />
+            {/* Qty Input */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Qty Pallet Utuh */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  📊 Qty Pallet Utuh
+                </label>
+                <input
+                  type="number"
+                  value={form.qtyPalletInput}
+                  onChange={(e) => handleChange("qtyPalletInput", e.target.value)}
+                  min="0"
+                  placeholder="Jumlah pallet utuh"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                />
+                {selectedProduct && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    {qtyPerPalletStd} karton per pallet
+                  </p>
+                )}
+              </div>
+
+              {/* Qty Karton Sisa */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  📦 Qty Karton Sisa
+                </label>
+                <input
+                  type="number"
+                  value={form.qtyCartonInput}
+                  onChange={(e) => handleChange("qtyCartonInput", e.target.value)}
+                  min="0"
+                  placeholder="Jumlah karton sisa"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                />
+                {selectedProduct && form.qtyCartonInput && Number(form.qtyCartonInput) > 0 && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    ⚠️ Karton sisa akan diambil dari pallet receh
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -222,7 +453,7 @@ export function OutboundForm() {
           </div>
 
           {/* Ringkasan */}
-          {form.productCode && (
+          {form.productCode && (totalCartons > 0) && (
             <div className="bg-slate-50 border-2 border-slate-300 rounded-xl p-4 mb-6">
               <h3 className="font-semibold text-slate-900 mb-3">📋 Ringkasan:</h3>
               <div className="space-y-2 text-sm">
@@ -233,23 +464,53 @@ export function OutboundForm() {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-600">Qty Pallet Diminta:</span>
+                  <span className="text-slate-600">Input Pallet Utuh:</span>
                   <span className="font-semibold text-slate-900">
-                    {form.qtyPallet || "-"}
+                    {form.qtyPalletInput || "0"} pallet
                   </span>
                 </div>
-                {/* --- START: Menampilkan Total Pcs Baru --- */}
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Input Karton Sisa:</span>
+                  <span className="font-semibold text-slate-900">
+                    {form.qtyCartonInput || "0"} karton
+                  </span>
+                </div>
+                <div className="flex justify-between pt-2 border-t border-slate-300">
+                  <span className="text-slate-600">Total Karton:</span>
+                  <span className="font-bold text-slate-900">
+                    {totalCartons} karton
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Pallet Penuh:</span>
+                  <span className="font-bold text-slate-900">
+                    {totalPallets} pallet
+                  </span>
+                </div>
+                {isReceh && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Pallet Receh:</span>
+                    <span className="font-bold text-amber-600">
+                      1 pallet ({remainingCartons} karton)
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-2 border-t border-slate-300">
+                  <span className="text-slate-600">Total Lokasi Dibutuhkan:</span>
+                  <span className="font-bold text-orange-600 text-lg">
+                    {totalPalletsNeeded} lokasi
+                  </span>
+                </div>
                 <div className="flex justify-between pt-2 border-t border-slate-300">
                   <span className="text-slate-600">Total Pcs Diambil:</span>
                   <span className="font-bold text-slate-900 text-lg">
                     {totalPcs.toLocaleString()} pcs
                   </span>
                 </div>
-                {/* --- END: Menampilkan Total Pcs Baru --- */}
               </div>
               <div className="mt-3 pt-3 border-t border-slate-300">
                 <p className="text-xs text-blue-700 font-medium">
-                  ℹ️ Catatan: Sistem hanya menampilkan rekomendasi lokasi berdasarkan FEFO.
+                  ℹ️ Catatan: Sistem akan mencari {totalPalletsNeeded} lokasi berdasarkan FEFO.
                 </p>
               </div>
             </div>
@@ -263,6 +524,13 @@ export function OutboundForm() {
               className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold hover:bg-blue-600 transition-colors shadow-lg flex items-center justify-center gap-2"
             >
               🔍 Hitung Lokasi FEFO
+            </button>
+            <button
+              onClick={handleSubmit}
+              type="button"
+              className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors shadow-lg flex items-center justify-center gap-2"
+            >
+              ✓ Submit Outbound
             </button>
             <button
               onClick={handleReset}
@@ -289,6 +557,7 @@ export function OutboundForm() {
                       <th className="px-4 py-3 text-left text-sm font-bold">BB Pallet</th>
                       <th className="px-4 py-3 text-left text-sm font-bold">Qty Ambil (Pallet)</th>
                       <th className="px-4 py-3 text-left text-sm font-bold">Expired Date</th>
+                      <th className="px-4 py-3 text-center text-sm font-bold">QR Code</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -338,6 +607,29 @@ export function OutboundForm() {
                             {loc.daysToExpire} days
                           </div>
                         </td>
+                        <td className="px-4 py-3">
+                          <div 
+                            className="flex flex-col items-center justify-center bg-white p-2 rounded-lg border-2 border-gray-300 cursor-pointer hover:bg-blue-50 hover:border-blue-400 transition-all shadow-sm"
+                            onClick={() => {
+                              const bbData = Array.isArray(loc.bbPallet) ? loc.bbPallet.join(', ') : loc.bbPallet;
+                              setScannedBarcodeData({
+                                location: loc.location,
+                                bbPallet: bbData
+                              });
+                              setShowBarcodeInfoModal(true);
+                            }}
+                          >
+                            <QRCodeSVG
+                              value={`CLUSTER ${loc.location.split('-')[0]}, LORONG ${loc.location.split('-')[1]}, BARIS ${loc.location.split('-')[2]}, BB ${Array.isArray(loc.bbPallet) ? loc.bbPallet.join(',') : loc.bbPallet}`}
+                              size={80}
+                              level="H"
+                              includeMargin={false}
+                            />
+                            <p className="text-xs text-blue-600 mt-1 font-semibold">
+                              🔍 Klik untuk info
+                            </p>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -356,6 +648,271 @@ export function OutboundForm() {
           )}
         </div>
       </div>
+
+      {/* Error Modal */}
+      {showErrorModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="bg-linear-to-r from-red-500 to-pink-600 p-6">
+              <div className="flex flex-col items-center text-center">
+                <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
+                  <XCircle className="h-10 w-10 text-white" />
+                </div>
+                <h3 className="text-2xl font-bold text-white mb-1">
+                  Validasi Gagal
+                </h3>
+                <p className="text-red-100 text-sm">
+                  Periksa kembali data yang Anda masukkan
+                </p>
+              </div>
+            </div>
+            <div className="p-6">
+              <ul className="space-y-2 mb-4">
+                {errorMessages.map((msg, idx) => (
+                  <li key={idx} className="flex items-start gap-2 text-sm text-red-700">
+                    <span className="text-red-500 font-bold">•</span>
+                    <span>{msg}</span>
+                  </li>
+                ))}
+              </ul>
+              <button
+                onClick={() => setShowErrorModal(false)}
+                className="w-full bg-linear-to-r from-red-500 to-pink-600 text-white py-3 rounded-xl font-semibold hover:from-red-600 hover:to-pink-700 transition-all shadow-lg"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h2 className="text-2xl font-bold text-gray-800 mb-4">
+                Konfirmasi Pengambilan Barang
+              </h2>
+              
+              <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mb-6">
+                <p className="text-amber-800 font-medium">
+                  ⚠️ Pastikan Anda akan mengambil barang dari lokasi-lokasi berikut sesuai urutan FEFO:
+                </p>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-600">Pengemudi:</p>
+                    <p className="font-semibold text-gray-900">{form.namaPengemudi}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Nomor Polisi:</p>
+                    <p className="font-semibold text-gray-900">{form.nomorPolisi}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Produk:</p>
+                    <p className="font-semibold text-gray-900">{selectedProduct?.productName}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Total Qty:</p>
+                    <p className="font-semibold text-gray-900">{totalCartons} karton / {totalPcs.toLocaleString()} pcs</p>
+                  </div>
+                </div>
+
+                <div className="border-t-2 border-gray-200 pt-4">
+                  <h3 className="font-semibold text-gray-800 mb-3">Daftar Lokasi Pengambilan:</h3>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {fefoLocations.map((loc, index) => (
+                      <div key={index} className="bg-gray-50 rounded-lg p-3 flex justify-between items-center">
+                        <div>
+                          <p className="font-semibold text-gray-900">{index + 1}. {loc.location}</p>
+                          <p className="text-sm text-gray-600">
+                            BB: {Array.isArray(loc.bbPallet) ? loc.bbPallet.join(", ") : loc.bbPallet}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Exp: {loc.expiredDate} ({loc.daysToExpire} hari)
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-orange-600">{loc.allocatedQtyPallet} pallet</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowConfirmModal(false)}
+                  className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={confirmOutbound}
+                  className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors"
+                >
+                  Ya, Konfirmasi Pengambilan
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="bg-linear-to-r from-orange-500 to-red-600 p-6">
+              <div className="flex flex-col items-center text-center">
+                <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
+                  <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <h3 className="text-2xl font-bold text-white mb-1">
+                  Outbound Berhasil!
+                </h3>
+                <p className="text-orange-100 text-sm">
+                  Data pengambilan barang telah dicatat
+                </p>
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="mb-4 space-y-2 text-sm">
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-gray-600">Pengemudi:</span>
+                  <span className="font-semibold text-gray-800">{form.namaPengemudi}</span>
+                </div>
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-gray-600">Nomor Polisi:</span>
+                  <span className="font-semibold text-gray-800">{form.nomorPolisi}</span>
+                </div>
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-gray-600">Produk:</span>
+                  <span className="font-semibold text-gray-800">{selectedProduct?.productName}</span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-700 font-semibold mb-3">
+                Lokasi Pengambilan (FEFO):
+              </p>
+              <div className="mb-4 space-y-2 max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
+                {fefoLocations.map((loc, idx) => (
+                  <div key={idx} className="flex justify-between rounded-md p-2 bg-orange-100">
+                    <span className="font-semibold text-gray-800">
+                      {loc.location}
+                    </span>
+                    <span className="text-sm font-bold text-orange-700">
+                      {loc.allocatedQtyPallet} Pallet
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-center text-sm text-gray-500 mt-4">
+                Menutup otomatis dalam 3 detik...
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Barcode Info Modal */}
+      {showBarcodeInfoModal && scannedBarcodeData && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={() => {
+            setShowBarcodeInfoModal(false);
+            setScannedBarcodeData(null);
+          }}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">
+                📦 Informasi Lokasi
+              </h2>
+              <p className="text-sm text-gray-500">
+                Hasil scan QR Code
+              </p>
+            </div>
+
+            {/* QR Code Section - Dipindahkan ke konten */}
+            <div className="flex justify-center mb-4">
+              <QRCodeSVG 
+                value={`CLUSTER ${scannedBarcodeData.location.split('-')[0]}, LORONG ${scannedBarcodeData.location.split('-')[1]}, BARIS ${scannedBarcodeData.location.split('-')[2]}, BB ${scannedBarcodeData.bbPallet}`}
+                size={150} 
+                level="H"
+              />
+            </div>
+
+            <div className="space-y-4">
+              {/* Parse location */}
+              {(() => {
+                const [cluster, lorong, baris, level] = scannedBarcodeData.location.split('-');
+                return (
+                  <>
+                    <div className="bg-linear-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border-2 border-blue-200">
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Lokasi Detail:</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-white rounded-lg p-3 shadow-sm">
+                          <p className="text-xs text-gray-500 mb-1">Cluster</p>
+                          <p className="text-2xl font-bold text-blue-600">{cluster}</p>
+                        </div>
+                        <div className="bg-white rounded-lg p-3 shadow-sm">
+                          <p className="text-xs text-gray-500 mb-1">Lorong</p>
+                          <p className="text-2xl font-bold text-blue-600">{lorong}</p>
+                        </div>
+                        <div className="bg-white rounded-lg p-3 shadow-sm">
+                          <p className="text-xs text-gray-500 mb-1">Baris</p>
+                          <p className="text-2xl font-bold text-blue-600">{baris}</p>
+                        </div>
+                        <div className="bg-white rounded-lg p-3 shadow-sm">
+                          <p className="text-xs text-gray-500 mb-1">Level</p>
+                          <p className="text-2xl font-bold text-blue-600">{level}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-linear-to-r from-amber-50 to-orange-50 rounded-xl p-4 border-2 border-amber-200">
+                      <h3 className="text-sm font-semibold text-gray-700 mb-2">BB Pallet:</h3>
+                      <p className="text-lg font-bold text-amber-700 font-mono bg-white rounded-lg p-3 text-center">
+                        {scannedBarcodeData.bbPallet}
+                      </p>
+                    </div>
+
+                    <div className="bg-green-50 rounded-xl p-3 border border-green-200">
+                      <p className="text-sm text-green-700 text-center">
+                        ✓ Lokasi telah teridentifikasi
+                      </p>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            <button
+              onClick={() => {
+                setShowBarcodeInfoModal(false);
+                setScannedBarcodeData(null);
+              }}
+              className="w-full mt-6 bg-blue-500 text-white py-3 rounded-xl font-semibold hover:bg-blue-600 transition-colors"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

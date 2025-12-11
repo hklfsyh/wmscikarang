@@ -382,7 +382,69 @@ export default function StockListMasterPage() {
         )}
 
         {activeTab === "cluster" && (
-          <ClusterConfigEditor clusters={clusters} onUpdate={setClusters} />
+          <div className="space-y-6">
+            <ClusterConfigEditor clusters={clusters} onUpdate={setClusters} />
+            
+            {/* Informasi Konfigurasi */}
+            <div className="bg-gradient-to-r from-blue-50 to-slate-50 border-2 border-blue-200 rounded-xl p-6">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="text-3xl">📚</div>
+                <div>
+                  <h3 className="text-xl font-bold text-slate-800 mb-1">Panduan Konfigurasi Cluster</h3>
+                  <p className="text-sm text-slate-600">Penjelasan mengenai jenis-jenis konfigurasi yang tersedia</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Default Configuration */}
+                <div className="bg-white rounded-lg p-4 border border-blue-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">⚙️</span>
+                    <h4 className="font-semibold text-blue-900">Default Configuration</h4>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Pengaturan standar untuk semua lorong dan baris di cluster. Menentukan jumlah lorong, baris, dan kapasitas pallet per sel secara default.
+                  </p>
+                </div>
+
+                {/* Custom Lorong Config */}
+                <div className="bg-white rounded-lg p-4 border border-purple-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🔧</span>
+                    <h4 className="font-semibold text-purple-900">Custom Lorong Config</h4>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Untuk lorong tertentu yang memiliki jumlah baris berbeda dari default. 
+                    <span className="block mt-1 text-purple-700 font-medium">Contoh: Lorong 1-3 punya 15 baris, sedangkan default 10 baris.</span>
+                  </p>
+                </div>
+
+                {/* Custom Cell Config */}
+                <div className="bg-white rounded-lg p-4 border border-green-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🎯</span>
+                    <h4 className="font-semibold text-green-900">Custom Cell Config</h4>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Untuk sel spesifik yang kapasitas palletnya berbeda dari default.
+                    <span className="block mt-1 text-green-700 font-medium">Contoh: Lorong 5 Baris 1-3 hanya muat 2 pallet, padahal default 3 pallet.</span>
+                  </p>
+                </div>
+
+                {/* In Transit Area */}
+                <div className="bg-white rounded-lg p-4 border border-orange-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🚚</span>
+                    <h4 className="font-semibold text-orange-900">In Transit Area</h4>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Area khusus untuk menampung overflow produk yang tidak muat di lokasi home-nya. Bersifat fleksibel dan bisa menerima produk dari cluster manapun.
+                    <span className="block mt-1 text-orange-700 font-medium">Contoh: Lorong 11-12 dijadikan In Transit untuk semua cluster.</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {activeTab === "product-home" && (

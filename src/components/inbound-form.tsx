@@ -124,6 +124,7 @@ export function InboundForm() {
   const [finalSubmissionData, setFinalSubmissionData] = useState<FinalSubmission[] | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
   const [autoRecommend, setAutoRecommend] = useState(true);
 
@@ -611,6 +612,29 @@ export function InboundForm() {
     success(`QR Scan Berhasil!\n\nData telah diisi:\n- Ekspedisi: ${data.ekspedisi}\n- Produk: ${selectedProd.productName}\n- Qty: ${data.qtyPallet} Pallet + ${data.qtyCarton} Karton\n- BB: ${data.bbProduk}`, 6000);
   };
 
+  // Confirm submit after validation
+  const confirmSubmit = () => {
+    // Save input history to localStorage
+    saveToHistory('wms_driver_history', form.namaPengemudi, driverHistory, setDriverHistory);
+    saveToHistory('wms_dn_history', form.noDN, dnHistory, setDnHistory);
+    saveToHistory('wms_police_no_history', form.nomorPolisi, policeNoHistory, setPoliceNoHistory);
+
+    // Close confirmation modal
+    setShowConfirmModal(false);
+    
+    // Show success modal
+    setShowSuccess(true);
+    
+    // Reset form after delay
+    setTimeout(() => {
+      setShowSuccess(false);
+      setForm(initialState);
+      setMultiLocationRec(null);
+      setRecommendedLocation(null);
+      setFinalSubmissionData(null);
+    }, 3000);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -720,13 +744,8 @@ export function InboundForm() {
     setFinalSubmissionData(finalSubmissions);
     console.log("FINAL INBOUND BATCH SUBMISSION:", finalSubmissions);
 
-    // Save input history to localStorage
-    saveToHistory('wms_driver_history', form.namaPengemudi, driverHistory, setDriverHistory);
-    saveToHistory('wms_dn_history', form.noDN, dnHistory, setDnHistory);
-    saveToHistory('wms_police_no_history', form.nomorPolisi, policeNoHistory, setPoliceNoHistory);
-
-    // Show success modal
-    setShowSuccess(true);
+    // Show confirmation modal first
+    setShowConfirmModal(true);
     
     // TIDAK AUTO CLOSE - User harus klik tombol "Tutup"
   };
@@ -796,6 +815,97 @@ export function InboundForm() {
             </div>
           )}
           
+          {/* Confirmation Modal */}
+          {showConfirmModal && finalSubmissionData && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <div className="p-6">
+                  <h2 className="text-2xl font-bold text-gray-800 mb-4">
+                    Konfirmasi Penerimaan Barang
+                  </h2>
+                  
+                  <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mb-6">
+                    <p className="text-amber-800 font-medium">
+                      ⚠️ Pastikan data berikut sudah benar sebelum menyimpan ke sistem:
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 mb-6">
+                    <div className="bg-gray-50 rounded-xl p-4">
+                      <h3 className="font-semibold text-gray-800 mb-3">Informasi Pengiriman:</h3>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Ekspedisi:</span>
+                          <span className="font-semibold text-gray-800">{form.ekspedisi}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Nama Pengemudi:</span>
+                          <span className="font-semibold text-gray-800">{form.namaPengemudi}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">No DN:</span>
+                          <span className="font-semibold text-gray-800">{form.noDN}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Nomor Polisi:</span>
+                          <span className="font-semibold text-gray-800">{form.nomorPolisi}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-blue-50 rounded-xl p-4">
+                      <h3 className="font-semibold text-gray-800 mb-3">Detail Barang & Lokasi:</h3>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Produk:</span>
+                          <span className="font-semibold text-gray-800">{selectedProduct?.productName}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">BB Produk:</span>
+                          <span className="font-semibold text-gray-800">{form.bbProduk}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Total Lokasi:</span>
+                          <span className="font-semibold text-gray-800">{finalSubmissionData.length} lokasi</span>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-blue-200">
+                        <p className="text-xs text-gray-600 mb-2">Lokasi Penempatan:</p>
+                        <div className="space-y-1">
+                          {finalSubmissionData.map((item, idx) => (
+                            <div key={idx} className={`flex justify-between text-sm p-2 rounded ${item.isReceh ? 'bg-blue-100' : 'bg-green-100'}`}>
+                              <span className="font-semibold">{item.location}</span>
+                              <span className={item.isReceh ? 'text-blue-700' : 'text-green-700'}>
+                                {item.qtyCarton} Karton {item.isReceh ? '(RECEH)' : ''}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowConfirmModal(false)}
+                      type="button"
+                      className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      onClick={confirmSubmit}
+                      type="button"
+                      className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors shadow-lg"
+                    >
+                      ✓ Konfirmasi & Simpan
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Success Modal (Updated to display multi-submission) */}
           {showSuccess && finalSubmissionData && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -843,19 +953,9 @@ export function InboundForm() {
                       </div>
                     ))}
                   </div>
-                  <button
-                    onClick={() => {
-                      setShowSuccess(false);
-                      setForm(initialState);
-                      setMultiLocationRec(null);
-                      setRecommendedLocation(null);
-                      setFinalSubmissionData(null);
-                      setErrors({});
-                    }}
-                    className="w-full bg-linear-to-r from-green-500 to-emerald-600 text-white py-3 rounded-xl font-semibold hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg"
-                  >
-                    Tutup
-                  </button>
+                  <p className="text-center text-sm text-gray-500 mt-4">
+                    Menutup otomatis dalam 3 detik...
+                  </p>
                 </div>
               </div>
             </div>
