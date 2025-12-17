@@ -17,6 +17,7 @@ import {
   getValidLocationsForProduct,
   getInTransitRange,
   isInTransitLocation,
+  clusterConfigs,
 } from "@/lib/mock/warehouse-config";
 import { inboundHistoryData } from "@/lib/mock/transaction-history";
 import { QRScanner, QRData } from "./qr-scanner";
@@ -73,6 +74,29 @@ const today = new Date().toISOString().slice(0, 10);
 const RECEH_THRESHOLD = 5; // If remaining cartons <= 5, attach to last full pallet instead of creating new pallet
 // --- END CONSTANTS ---
 
+// Interface untuk manual location input (multi-location)
+interface ManualLocationInput {
+  cluster: string;
+  lorong: string;
+  baris: string;
+  pallet: string;
+}
+
+interface ManualLocationRange {
+  cluster: string;
+  lorong: string;
+  barisStart: string;
+  barisEnd: string;
+  palletStart: string;
+  palletEnd: string;
+}
+
+interface LocationAvailability {
+  location: string;
+  isOccupied: boolean;
+  occupiedBy?: string;
+}
+
 const initialState: InboundFormState = {
   ekspedisi: "",
   tanggal: today,
@@ -117,7 +141,27 @@ const parseBBProduk = (bb: string): { expiredDate: string, kdPlant: string, isVa
 };
 
 export function InboundForm() {
-  const { toasts, removeToast, success, error } = useToast();
+  const { toasts, removeToast } = useToast();
+  
+  // Modal notification helpers (pengganti toast)
+  const showNotification = (title: string, message: string, type: 'success' | 'error' | 'warning') => {
+    setNotificationTitle(title);
+    setNotificationMessage(message);
+    setNotificationType(type);
+    setShowNotificationModal(true);
+  };
+  
+  const success = (message: string) => {
+    showNotification('✅ Berhasil', message, 'success');
+  };
+  
+  const error = (message: string) => {
+    showNotification('❌ Error', message, 'error');
+  };
+  
+  const warning = (message: string) => {
+    showNotification('⚠️ Peringatan', message, 'warning');
+  };
   const [form, setForm] = useState<InboundFormState>(initialState);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [recommendedLocation, setRecommendedLocation] = useState<RecommendedLocation | null>(null);
@@ -140,6 +184,27 @@ export function InboundForm() {
   // --- HISTORY DETAIL MODAL STATE ---
   const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(false);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<typeof inboundHistoryData[0] | null>(null);
+
+  // --- MANUAL MULTI-LOCATION INPUT STATE ---
+  const [manualLocations, setManualLocations] = useState<ManualLocationInput[]>([]);
+  const [manualRange, setManualRange] = useState<ManualLocationRange>({
+    cluster: '',
+    lorong: '',
+    barisStart: '',
+    barisEnd: '',
+    palletStart: '',
+    palletEnd: ''
+  });
+  const [expandedLocations, setExpandedLocations] = useState<ManualLocationInput[]>([]);
+  const [locationAvailability, setLocationAvailability] = useState<LocationAvailability[]>([]);
+  const [showAvailabilityModal, setShowAvailabilityModal] = useState(false);
+  const [occupiedLocations, setOccupiedLocations] = useState<LocationAvailability[]>([]);
+  
+  // --- NOTIFICATION MODAL STATE (Pengganti Toast) ---
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [notificationTitle, setNotificationTitle] = useState('');
+  const [notificationMessage, setNotificationMessage] = useState('');
+  const [notificationType, setNotificationType] = useState<'success' | 'error' | 'warning'>('success');
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -201,6 +266,29 @@ export function InboundForm() {
   // - If shouldAttachReceh (≤5 cartons), keep same pallet count (attach to last pallet)
   // - Otherwise, add 1 extra pallet for receh
   const totalPalletsNeeded = shouldAttachReceh ? totalPallets : (totalPallets + (isReceh ? 1 : 0)); 
+  
+  // Initialize manual locations array when totalPalletsNeeded changes and auto recommend is OFF
+  useEffect(() => {
+    if (!autoRecommend && totalPalletsNeeded > 0) {
+      const currentLength = manualLocations.length;
+      
+      if (currentLength !== totalPalletsNeeded) {
+        const newLocations: ManualLocationInput[] = [];
+        
+        for (let i = 0; i < totalPalletsNeeded; i++) {
+          if (i < currentLength) {
+            // Keep existing values
+            newLocations.push(manualLocations[i]);
+          } else {
+            // Add new empty location
+            newLocations.push({ cluster: "", lorong: "", baris: "", pallet: "" });
+          }
+        }
+        
+        setManualLocations(newLocations);
+      }
+    }
+  }, [totalPalletsNeeded, autoRecommend]);
   // --- AKHIR LOGIKA QTY DINAMIS ---
 
   // --- DYNAMIC OPTIONS & LOCATION RECOMMENDATION (USING CLUSTER CONFIG & PRODUCT HOME) ---
@@ -208,6 +296,11 @@ export function InboundForm() {
   
   // Get valid locations for current product
   const productValidLocations = form.productCode ? getValidLocationsForProduct(form.productCode) : null;
+  
+  // Cluster options - ambil dari clusterConfigs yang aktif
+  const clusterOptions = useMemo(() => {
+    return clusterConfigs.filter(c => c.isActive).map(c => c.cluster);
+  }, []);
   
   // Generate dynamic lorong options
   const lorongOptions = useMemo(() => {
@@ -219,14 +312,19 @@ export function InboundForm() {
     const config = getClusterConfig(form.cluster);
     if (!config) return [];
     
-    // If product has home assignment, limit to allowed lorong range
+    // MANUAL MODE: User bebas pilih semua lorong tanpa batasan product home
+    if (!autoRecommend) {
+      return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
+    }
+    
+    // AUTO MODE: If product has home assignment, limit to allowed lorong range
     if (productValidLocations && productValidLocations.cluster === form.cluster) {
       const [start, end] = productValidLocations.lorongRange;
       return Array.from({ length: end - start + 1 }, (_, i) => `L${start + i}`);
     }
     
     return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
-  }, [form.cluster, form.productCode, productValidLocations, _autoCluster]);
+  }, [form.cluster, form.productCode, productValidLocations, _autoCluster, autoRecommend]);
   
   // Generate dynamic baris options
   const barisOptions = useMemo(() => {
@@ -234,7 +332,12 @@ export function InboundForm() {
     const lorongNum = parseInt(form.lorong.replace("L", ""));
     const barisCount = getBarisCountForLorong(form.cluster, lorongNum);
     
-    // If product has home assignment, limit to allowed baris range
+    // MANUAL MODE: User bebas pilih semua baris tanpa batasan product home
+    if (!autoRecommend) {
+      return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+    }
+    
+    // AUTO MODE: If product has home assignment, limit to allowed baris range
     if (productValidLocations && productValidLocations.cluster === form.cluster) {
       const [start, end] = productValidLocations.barisRange;
       const maxBaris = Math.min(end, barisCount);
@@ -242,7 +345,7 @@ export function InboundForm() {
     }
     
     return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
-  }, [form.cluster, form.lorong, form.productCode, productValidLocations]);
+  }, [form.cluster, form.lorong, form.productCode, productValidLocations, autoRecommend]);
   
   // Generate dynamic pallet options
   const palletOptions = useMemo(() => {
@@ -251,13 +354,18 @@ export function InboundForm() {
     const barisNum = parseInt(form.baris.replace("B", ""));
     const palletCapacity = getPalletCapacityForCell(form.cluster, lorongNum, barisNum);
     
-    // If product has max pallet limit, use minimum
+    // MANUAL MODE: User bebas pilih semua pallet level tanpa batasan product max pallet
+    if (!autoRecommend) {
+      return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+    }
+    
+    // AUTO MODE: If product has max pallet limit, use minimum
     const maxPallet = productValidLocations 
       ? Math.min(palletCapacity, productValidLocations.maxPalletPerLocation)
       : palletCapacity;
     
     return Array.from({ length: maxPallet }, (_, i) => `P${i + 1}`);
-  }, [form.cluster, form.lorong, form.baris, form.productCode, productValidLocations]); 
+  }, [form.cluster, form.lorong, form.baris, form.productCode, productValidLocations, autoRecommend]); 
 
   const findMultipleRecommendedLocations = (
     cluster: string,
@@ -564,6 +672,126 @@ export function InboundForm() {
     }
   };
 
+  // Function to expand range into individual locations
+  const expandRangeToLocations = () => {
+    const { cluster, lorong, barisStart, barisEnd, palletStart, palletEnd } = manualRange;
+    
+    if (!cluster || !lorong || !barisStart || !barisEnd || !palletStart || !palletEnd) {
+      error('Semua field range harus diisi!', 3000);
+      return;
+    }
+
+    // Extract numbers from baris (e.g., "B1" -> 1)
+    const barisStartNum = parseInt(barisStart.replace(/[^0-9]/g, ''));
+    const barisEndNum = parseInt(barisEnd.replace(/[^0-9]/g, ''));
+    const palletStartNum = parseInt(palletStart.replace(/[^0-9]/g, ''));
+    const palletEndNum = parseInt(palletEnd.replace(/[^0-9]/g, ''));
+
+    if (isNaN(barisStartNum) || isNaN(barisEndNum) || isNaN(palletStartNum) || isNaN(palletEndNum)) {
+      error('Format baris/pallet tidak valid! Contoh: B1, P1', 3000);
+      return;
+    }
+
+    if (barisStartNum > barisEndNum || palletStartNum > palletEndNum) {
+      error('Range tidak valid! Start harus ≤ End', 3000);
+      return;
+    }
+
+    // Generate all locations from range
+    const locations: ManualLocationInput[] = [];
+    for (let b = barisStartNum; b <= barisEndNum; b++) {
+      for (let p = palletStartNum; p <= palletEndNum; p++) {
+        locations.push({
+          cluster,
+          lorong,
+          baris: `B${b}`,
+          pallet: `P${p}`
+        });
+      }
+    }
+
+    if (locations.length < totalPalletsNeeded) {
+      error(`Range hanya menghasilkan ${locations.length} lokasi, tetapi butuh ${totalPalletsNeeded} lokasi!`, 4000);
+      return;
+    }
+
+    // SMART SELECTION: Jika range > kebutuhan, ambil sebagian saja (sesuai kebutuhan)
+    const locationsToUse = locations.length > totalPalletsNeeded 
+      ? locations.slice(0, totalPalletsNeeded)
+      : locations;
+    
+    if (locations.length > totalPalletsNeeded) {
+      warning(`Range menghasilkan ${locations.length} lokasi. Sistem akan menggunakan ${totalPalletsNeeded} lokasi pertama (${locationsToUse[0].cluster}-${locationsToUse[0].lorong}-${locationsToUse[0].baris}-${locationsToUse[0].pallet} s/d ${locationsToUse[locationsToUse.length-1].cluster}-${locationsToUse[locationsToUse.length-1].lorong}-${locationsToUse[locationsToUse.length-1].baris}-${locationsToUse[locationsToUse.length-1].pallet}).`, 5000);
+    }
+
+    // Check availability for selected locations
+    checkLocationsAvailability(locationsToUse);
+  };
+
+  // Check if locations are available
+  const checkLocationsAvailability = (locations: ManualLocationInput[]) => {
+    const availability: LocationAvailability[] = [];
+    const occupied: LocationAvailability[] = [];
+
+    locations.forEach(loc => {
+      const locationKey = `${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
+      // FIXED: Gunakan struktur data yang sama seperti di handleSubmit
+      const existingStock = stockListData.find(
+        s => s.location.cluster === loc.cluster && 
+             s.location.lorong === loc.lorong && 
+             s.location.baris === loc.baris && 
+             s.location.level === loc.pallet
+      );
+
+      const isOccupied = !!existingStock;
+      const availabilityInfo: LocationAvailability = {
+        location: locationKey,
+        isOccupied,
+        occupiedBy: existingStock ? `${existingStock.productName} (${existingStock.qtyCarton} karton)` : undefined
+      };
+
+      availability.push(availabilityInfo);
+      if (isOccupied) {
+        occupied.push(availabilityInfo);
+      }
+    });
+
+    setLocationAvailability(availability);
+    setOccupiedLocations(occupied);
+    setExpandedLocations(locations);
+
+    if (occupied.length > 0) {
+      // Show confirmation modal with detailed grouping
+      setShowAvailabilityModal(true);
+    } else {
+      // All locations available, proceed
+      setManualLocations(locations);
+      success(`${locations.length} lokasi tersedia dan siap digunakan!`, 3000);
+    }
+  };
+
+  // Confirm override occupied locations
+  const confirmOverrideLocations = () => {
+    setManualLocations(expandedLocations);
+    setShowAvailabilityModal(false);
+    success(`⚠️ ${expandedLocations.length} lokasi dipilih (termasuk ${occupiedLocations.length} yang sudah terisi)`, 4000);
+  };
+
+  // Reset manual range
+  const resetManualRange = () => {
+    setManualRange({
+      cluster: '',
+      lorong: '',
+      barisStart: '',
+      barisEnd: '',
+      palletStart: '',
+      palletEnd: ''
+    });
+    setExpandedLocations([]);
+    setLocationAvailability([]);
+    setManualLocations([]);
+  };
+
   const validateTanggal = (tanggal: string): boolean => {
     const today = new Date().toISOString().slice(0, 10);
     return tanggal === today;
@@ -669,16 +897,90 @@ export function InboundForm() {
     // --- VALIDASI LOKASI FINAL SEBELUM SUBMISSION ---
     let locationsToSubmit: RecommendedLocation[] = [];
     
-    // Case 1: Multi-pallet (Cek apakah rekomendasi sudah dijalankan dan cukup)
-    if (totalPalletsNeeded > 1) {
+    // Case 1: Multi-pallet dengan auto recommend ON
+    if (totalPalletsNeeded > 1 && autoRecommend) {
         if (!multiLocationRec || multiLocationRec.locations.length < totalPalletsNeeded) {
             newErrors.pallet = `Diperlukan ${totalPalletsNeeded} lokasi. Mohon klik tombol Rekomendasi Lokasi.`;
             errorList.push(newErrors.pallet);
         } else {
-            locationsToSubmit = multiLocationRec.locations;
+            // Validasi ketersediaan lokasi yang direkomendasikan
+            const occupiedRecommendedLocs: string[] = [];
+            multiLocationRec.locations.forEach(loc => {
+              const existingStock = stockListData.find(
+                s => s.cluster === loc.cluster && 
+                     s.lorong === loc.lorong && 
+                     s.baris === loc.baris && 
+                     s.pallet === loc.level
+              );
+              if (existingStock) {
+                occupiedRecommendedLocs.push(`${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.level} (${existingStock.productName})`);
+              }
+            });
+            
+            if (occupiedRecommendedLocs.length > 0) {
+              newErrors.pallet = `Lokasi rekomendasi sudah terisi`;
+              errorList.push(`Lokasi rekomendasi sudah terisi: ${occupiedRecommendedLocs.join(', ')}. Silakan klik 'Rekomendasi Lokasi' lagi untuk mendapat lokasi baru.`);
+            } else {
+              locationsToSubmit = multiLocationRec.locations;
+            }
         }
     } 
-    // Case 2: Single pallet (Cek input manual)
+    // Case 2: Multi-pallet dengan auto recommend OFF (manual input)
+    else if (totalPalletsNeeded > 1 && !autoRecommend) {
+        // Validasi semua manual locations harus diisi
+        const locationSet = new Set<string>();
+        let hasEmptyLocation = false;
+        
+        manualLocations.forEach((loc, index) => {
+            if (!loc.cluster || !loc.lorong || !loc.baris || !loc.pallet) {
+                hasEmptyLocation = true;
+                newErrors[`manualLoc${index}`] = `Lokasi ${index + 1} belum lengkap`;
+                errorList.push(`Lokasi ${index + 1} belum lengkap`);
+                return;
+            }
+            
+            const locationKey = `${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
+            
+            // Check duplikat
+            if (locationSet.has(locationKey)) {
+                newErrors[`manualLoc${index}`] = `Lokasi ${index + 1} duplikat`;
+                errorList.push(`Lokasi ${index + 1} duplikat dengan lokasi sebelumnya`);
+                return;
+            }
+            
+            // Check apakah lokasi sudah terisi di stockList
+            const locationIsOccupied = stockListData.some(
+              (item) =>
+                item.location.cluster === loc.cluster &&
+                item.location.lorong === loc.lorong &&
+                item.location.baris === loc.baris &&
+                item.location.level === loc.pallet
+            );
+            
+            if (locationIsOccupied) {
+                newErrors[`manualLoc${index}`] = `Lokasi ${locationKey} sudah terisi`;
+                errorList.push(`Lokasi ${index + 1} (${locationKey}) sudah terisi`);
+                return;
+            }
+            
+            locationSet.add(locationKey);
+            locationsToSubmit.push({
+                cluster: loc.cluster,
+                lorong: loc.lorong,
+                baris: loc.baris,
+                level: loc.pallet,
+                palletsCanFit: 1,
+            });
+        });
+        
+        if (hasEmptyLocation || locationsToSubmit.length !== totalPalletsNeeded) {
+            if (!hasEmptyLocation && locationsToSubmit.length === 0) {
+                newErrors.pallet = `Mohon isi semua ${totalPalletsNeeded} lokasi penyimpanan`;
+                errorList.push(`Mohon isi semua ${totalPalletsNeeded} lokasi penyimpanan`);
+            }
+        }
+    }
+    // Case 3: Single pallet (auto recommend ON atau OFF)
     else if (totalPalletsNeeded === 1) {
         const currentLoc = { cluster: form.cluster, lorong: form.lorong, baris: form.baris, level: form.pallet, palletsCanFit: 1 };
         
@@ -785,8 +1087,14 @@ export function InboundForm() {
 
           {/* Error Modal */}
           {showErrorModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-              <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div 
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+              onClick={() => setShowErrorModal(false)}
+            >
+              <div 
+                className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[80vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="bg-linear-to-r from-red-500 to-pink-600 p-6">
                   <div className="flex flex-col items-center text-center">
                     <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
@@ -822,8 +1130,14 @@ export function InboundForm() {
           
           {/* Confirmation Modal */}
           {showConfirmModal && finalSubmissionData && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div 
+              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+              onClick={() => setShowConfirmModal(false)}
+            >
+              <div 
+                className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="p-6">
                   <h2 className="text-2xl font-bold text-gray-800 mb-4">
                     Konfirmasi Penerimaan Barang
@@ -965,6 +1279,186 @@ export function InboundForm() {
               </div>
             </div>
           )}
+          
+          {/* Notification Modal (Pengganti Toast) */}
+          {showNotificationModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+                <div className={`p-6 ${
+                  notificationType === 'success' ? 'bg-linear-to-r from-green-500 to-emerald-600' :
+                  notificationType === 'error' ? 'bg-linear-to-r from-red-500 to-pink-600' :
+                  'bg-linear-to-r from-orange-500 to-amber-600'
+                }`}>
+                  <div className="flex flex-col items-center text-center">
+                    <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
+                      {notificationType === 'success' ? (
+                        <CheckCircle className="h-10 w-10 text-white" />
+                      ) : (
+                        <XCircle className="h-10 w-10 text-white" />
+                      )}
+                    </div>
+                    <h3 className="text-2xl font-bold text-white mb-1">
+                      {notificationTitle}
+                    </h3>
+                  </div>
+                </div>
+                <div className="p-6">
+                  <p className="text-gray-700 whitespace-pre-line text-center mb-6">
+                    {notificationMessage}
+                  </p>
+                  <button
+                    onClick={() => setShowNotificationModal(false)}
+                    className={`w-full py-3 rounded-xl font-semibold transition-all shadow-lg ${
+                      notificationType === 'success' ? 'bg-green-500 hover:bg-green-600 text-white' :
+                      notificationType === 'error' ? 'bg-red-500 hover:bg-red-600 text-white' :
+                      'bg-orange-500 hover:bg-orange-600 text-white'
+                    }`}
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Availability Confirmation Modal */}
+          {showAvailabilityModal && (() => {
+            // Group occupied locations by product
+            const productGroups = occupiedLocations.reduce((acc, loc) => {
+              const productName = loc.occupiedBy?.split(' (')[0] || 'Unknown';
+              if (!acc[productName]) {
+                acc[productName] = [];
+              }
+              acc[productName].push(loc);
+              return acc;
+            }, {} as Record<string, LocationAvailability[]>);
+            
+            // Create range summary per product
+            const productSummaries = Object.entries(productGroups).map(([product, locs]) => {
+              // Extract baris numbers and create ranges
+              const barisList = locs.map(l => {
+                const parts = l.location.split('-');
+                return { baris: parts[2], pallet: parts[3], full: l.location };
+              }).sort((a, b) => {
+                const aNum = parseInt(a.baris.replace('B', ''));
+                const bNum = parseInt(b.baris.replace('B', ''));
+                return aNum - bNum;
+              });
+              
+              // Group consecutive baris
+              const ranges: string[] = [];
+              let rangeStart = barisList[0];
+              let rangeEnd = barisList[0];
+              
+              for (let i = 1; i < barisList.length; i++) {
+                const curr = parseInt(barisList[i].baris.replace('B', ''));
+                const prev = parseInt(rangeEnd.baris.replace('B', ''));
+                
+                if (curr === prev + 1 && barisList[i].pallet === rangeEnd.pallet) {
+                  rangeEnd = barisList[i];
+                } else {
+                  ranges.push(rangeStart.baris === rangeEnd.baris 
+                    ? `${rangeStart.full}` 
+                    : `${rangeStart.baris}-${rangeEnd.baris} (Pallet ${rangeStart.pallet})`);
+                  rangeStart = barisList[i];
+                  rangeEnd = barisList[i];
+                }
+              }
+              ranges.push(rangeStart.baris === rangeEnd.baris 
+                ? `${rangeStart.full}` 
+                : `${rangeStart.baris}-${rangeEnd.baris} (Pallet ${rangeStart.pallet})`);
+              
+              return { product, ranges, count: locs.length, qty: locs[0].occupiedBy?.match(/\((\d+) karton\)/)?.[1] || '?' };
+            });
+            
+            return (
+            <div 
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+              onClick={() => setShowAvailabilityModal(false)}
+            >
+              <div 
+                className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[80vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="bg-linear-to-r from-orange-500 to-red-600 p-6">
+                  <div className="flex flex-col items-center text-center">
+                    <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
+                      <XCircle className="h-10 w-10 text-white" />
+                    </div>
+                    <h3 className="text-2xl font-bold text-white mb-1">
+                      ⚠️ Lokasi Sudah Terisi!
+                    </h3>
+                    <p className="text-orange-100 text-sm">
+                      {occupiedLocations.length} dari {expandedLocations.length} lokasi sudah terisi oleh {Object.keys(productGroups).length} produk berbeda
+                    </p>
+                  </div>
+                </div>
+                <div className="p-6">
+                  <div className="mb-4 bg-red-50 border-2 border-red-200 rounded-xl p-4">
+                    <h4 className="font-semibold text-red-900 mb-3">
+                      📦 Detail Produk di Lokasi Range:
+                    </h4>
+                    <div className="space-y-3 max-h-64 overflow-y-auto">
+                      {productSummaries.map((summary, idx) => (
+                        <div key={idx} className="bg-white p-4 rounded-lg border-2 border-red-300">
+                          <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <h5 className="font-bold text-red-700 text-lg">{summary.product}</h5>
+                              <p className="text-xs text-red-600">{summary.count} lokasi terisi</p>
+                            </div>
+                            <span className="text-xs bg-red-500 text-white px-3 py-1 rounded-full font-bold">
+                              {summary.qty} karton/lokasi
+                            </span>
+                          </div>
+                          <div className="mt-2 space-y-1">
+                            <p className="text-xs font-semibold text-gray-700">Baris yang terisi:</p>
+                            {summary.ranges.map((range, rIdx) => (
+                              <div key={rIdx} className="text-xs bg-red-100 px-2 py-1 rounded font-mono text-red-800">
+                                {range}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-4 bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
+                    <p className="text-yellow-800 text-sm">
+                      <strong>⚠️ Peringatan:</strong> Jika Anda melanjutkan, lokasi yang sudah terisi akan <strong className="text-red-600">DITIMPA</strong> dengan data baru. 
+                      Pastikan ini adalah tindakan yang benar!
+                    </p>
+                  </div>
+
+                  <p className="text-sm text-gray-700 mb-4">
+                    Apakah Anda yakin ingin menggunakan lokasi ini?
+                  </p>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setShowAvailabilityModal(false);
+                        setExpandedLocations([]);
+                        setLocationAvailability([]);
+                      }}
+                      type="button"
+                      className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                    >
+                      ❌ Batal - Pilih Lokasi Lain
+                    </button>
+                    <button
+                      onClick={confirmOverrideLocations}
+                      type="button"
+                      className="flex-1 bg-red-500 text-white py-3 rounded-xl font-semibold hover:bg-red-600 transition-colors shadow-lg"
+                    >
+                      ⚠️ Lanjutkan & Timpa
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            );
+          })()}
           
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -1300,30 +1794,33 @@ export function InboundForm() {
               </label>
             </div>
 
-            {/* Location Fields (Tetap) */}
-            <div className="border-2 border-gray-200 rounded-xl p-4">
-              <h3 className="font-semibold text-gray-800 mb-4">📍 Lokasi Penyimpanan</h3>
-              
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {/* Cluster */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Cluster <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.cluster}
-                    onChange={(e) => handleChange("cluster", e.target.value.toUpperCase())}
-                    className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
-                      errors.cluster ? "border-red-500" : "border-gray-200"
-                    } ${autoRecommend ? "bg-gray-100" : ""}`}
-                    maxLength={1}
-                    disabled={autoRecommend}
-                  />
-                  {errors.cluster && (
-                    <p className="text-red-500 text-xs mt-1">{errors.cluster}</p>
-                  )}
-                </div>
+            {/* Location Fields - Conditional rendering based on autoRecommend and totalPalletsNeeded */}
+            {autoRecommend ? (
+              /* AUTO RECOMMEND MODE - Single location input (original) */
+              <div className="border-2 border-gray-200 rounded-xl p-4">
+                <h3 className="font-semibold text-gray-800 mb-4">📍 Lokasi Penyimpanan</h3>
+                
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {/* Cluster */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Cluster <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={form.cluster}
+                      onChange={(e) => handleChange("cluster", e.target.value)}
+                      className="w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-gray-100 border-gray-200"
+                      disabled={autoRecommend}
+                    >
+                      <option value="">-- Pilih --</option>
+                      {clusterOptions.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    {errors.cluster && (
+                      <p className="text-red-500 text-xs mt-1">{errors.cluster}</p>
+                    )}
+                  </div>
 
                 {/* Lorong, Baris, Pallet... (Tetap) */}
                 <div>
@@ -1336,7 +1833,7 @@ export function InboundForm() {
                     className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                       errors.lorong ? "border-red-500" : "border-gray-200"
                     } ${autoRecommend ? "bg-gray-100" : ""}`}
-                    disabled={autoRecommend}
+                    disabled={autoRecommend || !form.cluster}
                   >
                     <option value="">-- Pilih --</option>
                     {lorongOptions.map((lorong) => (
@@ -1360,7 +1857,7 @@ export function InboundForm() {
                     className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                       errors.baris ? "border-red-500" : "border-gray-200"
                     } ${autoRecommend ? "bg-gray-100" : ""}`}
-                    disabled={autoRecommend}
+                    disabled={autoRecommend || !form.cluster || !form.lorong}
                   >
                     <option value="">-- Pilih --</option>
                     {barisOptions.map((baris) => (
@@ -1384,7 +1881,7 @@ export function InboundForm() {
                     className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                       errors.pallet ? "border-red-500" : "border-gray-200"
                     } ${autoRecommend ? "bg-gray-100" : ""}`}
-                    disabled={autoRecommend}
+                    disabled={autoRecommend || !form.cluster || !form.lorong || !form.baris}
                   >
                     <option value="">-- Pilih --</option>
                     {palletOptions.map((pallet) => (
@@ -1399,6 +1896,325 @@ export function InboundForm() {
                 </div>
               </div>
             </div>
+            ) : (
+              /* MANUAL MODE - Multiple location inputs if totalPalletsNeeded > 1 */
+              <div className="border-2 border-orange-300 bg-orange-50 rounded-xl p-4">
+                <h3 className="font-semibold text-orange-900 mb-2 flex items-center gap-2">
+                  ✍️ Input Lokasi Manual 
+                  {totalPalletsNeeded > 1 && (
+                    <span className="text-xs bg-orange-200 px-2 py-1 rounded-full">
+                      {totalPalletsNeeded} lokasi diperlukan
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-orange-700 mb-4">
+                  {totalPalletsNeeded > 1 
+                    ? `Mohon isi ${totalPalletsNeeded} lokasi berbeda untuk ${totalPalletsNeeded} pallet.`
+                    : "Masukkan lokasi penyimpanan secara manual."}
+                </p>
+
+                {totalPalletsNeeded === 1 ? (
+                  /* Single location input for manual mode */
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Cluster <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={form.cluster}
+                        onChange={(e) => handleChange("cluster", e.target.value)}
+                        className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                          errors.cluster ? "border-red-500" : "border-gray-200"
+                        }`}
+                      >
+                        <option value="">-- Pilih --</option>
+                        {clusterOptions.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      {errors.cluster && (
+                        <p className="text-red-500 text-xs mt-1">{errors.cluster}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Lorong <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={form.lorong}
+                        onChange={(e) => handleChange("lorong", e.target.value)}
+                        className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                          errors.lorong ? "border-red-500" : "border-gray-200"
+                        }`}
+                        disabled={!form.cluster}
+                      >
+                        <option value="">-- Pilih --</option>
+                        {lorongOptions.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      {errors.lorong && (
+                        <p className="text-red-500 text-xs mt-1">{errors.lorong}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Baris <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={form.baris}
+                        onChange={(e) => handleChange("baris", e.target.value)}
+                        className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                          errors.baris ? "border-red-500" : "border-gray-200"
+                        }`}
+                        disabled={!form.cluster || !form.lorong}
+                      >
+                        <option value="">-- Pilih --</option>
+                        {barisOptions.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      {errors.baris && (
+                        <p className="text-red-500 text-xs mt-1">{errors.baris}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Pallet <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={form.pallet}
+                        onChange={(e) => handleChange("pallet", e.target.value)}
+                        className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                          errors.pallet ? "border-red-500" : "border-gray-200"
+                        }`}
+                        disabled={!form.cluster || !form.lorong || !form.baris}
+                      >
+                        <option value="">-- Pilih --</option>
+                        {palletOptions.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      {errors.pallet && (
+                        <p className="text-red-500 text-xs mt-1">{errors.pallet}</p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* Range-based location input for manual mode */
+                  <div className="space-y-4">
+                    {/* Range Input Form */}
+                    <div className="bg-white border-2 border-gray-200 rounded-xl p-4">
+                      <h4 className="font-semibold text-gray-800 mb-3">
+                        📏 Input Range Lokasi
+                      </h4>
+                      <p className="text-xs text-gray-600 mb-4">
+                        Masukkan range lokasi yang akan digunakan. Contoh: Baris B1-B5, Pallet P1-P2 akan menghasilkan 10 lokasi.
+                      </p>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                        {/* Cluster & Lorong */}
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Cluster <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={manualRange.cluster}
+                            onChange={(e) => setManualRange(prev => ({ ...prev, cluster: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                          >
+                            <option value="">-- Pilih --</option>
+                            {clusterOptions.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Lorong <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={manualRange.lorong}
+                            onChange={(e) => setManualRange(prev => ({ ...prev, lorong: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                            disabled={!manualRange.cluster}
+                          >
+                            <option value="">-- Pilih --</option>
+                            {manualRange.cluster && (() => {
+                              const config = getClusterConfig(manualRange.cluster);
+                              if (!config) return null;
+                              const options = Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
+                              return options.map((opt) => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
+
+                        <div className="col-span-2 md:col-span-1">
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            &nbsp;
+                          </label>
+                          <button
+                            type="button"
+                            onClick={resetManualRange}
+                            className="w-full px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                          >
+                            🔄 Reset
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Baris Range */}
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Baris Start <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={manualRange.barisStart}
+                            onChange={(e) => setManualRange(prev => ({ ...prev, barisStart: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                            disabled={!manualRange.cluster || !manualRange.lorong}
+                          >
+                            <option value="">-- Pilih --</option>
+                            {manualRange.cluster && manualRange.lorong && (() => {
+                              const lorongNum = parseInt(manualRange.lorong.replace('L', ''));
+                              const barisCount = getBarisCountForLorong(manualRange.cluster, lorongNum);
+                              const options = Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+                              return options.map((opt) => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Baris End <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={manualRange.barisEnd}
+                            onChange={(e) => setManualRange(prev => ({ ...prev, barisEnd: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                            disabled={!manualRange.cluster || !manualRange.lorong}
+                          >
+                            <option value="">-- Pilih --</option>
+                            {manualRange.cluster && manualRange.lorong && (() => {
+                              const lorongNum = parseInt(manualRange.lorong.replace('L', ''));
+                              const barisCount = getBarisCountForLorong(manualRange.cluster, lorongNum);
+                              const options = Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+                              return options.map((opt) => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Pallet Range */}
+                      <div className="grid grid-cols-2 gap-3 mb-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Pallet Start <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={manualRange.palletStart}
+                            onChange={(e) => setManualRange(prev => ({ ...prev, palletStart: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                            disabled={!manualRange.cluster || !manualRange.lorong || !manualRange.barisStart}
+                          >
+                            <option value="">-- Pilih --</option>
+                            {manualRange.cluster && manualRange.lorong && manualRange.barisStart && (() => {
+                              const lorongNum = parseInt(manualRange.lorong.replace('L', ''));
+                              const barisNum = parseInt(manualRange.barisStart.replace('B', ''));
+                              const palletCapacity = getPalletCapacityForCell(manualRange.cluster, lorongNum, barisNum);
+                              const options = Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+                              return options.map((opt) => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Pallet End <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={manualRange.palletEnd}
+                            onChange={(e) => setManualRange(prev => ({ ...prev, palletEnd: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                            disabled={!manualRange.cluster || !manualRange.lorong || !manualRange.barisStart}
+                          >
+                            <option value="">-- Pilih --</option>
+                            {manualRange.cluster && manualRange.lorong && manualRange.barisStart && (() => {
+                              const lorongNum = parseInt(manualRange.lorong.replace('L', ''));
+                              const barisNum = parseInt(manualRange.barisStart.replace('B', ''));
+                              const palletCapacity = getPalletCapacityForCell(manualRange.cluster, lorongNum, barisNum);
+                              const options = Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+                              return options.map((opt) => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={expandRangeToLocations}
+                        className="w-full bg-orange-500 text-white py-3 rounded-lg font-semibold hover:bg-orange-600 transition-colors shadow-md"
+                      >
+                        🔍 Generate & Cek Ketersediaan Lokasi
+                      </button>
+                    </div>
+
+                    {/* Preview Generated Locations */}
+                    {manualLocations.length > 0 && (
+                      <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-semibold text-green-900">
+                            ✅ {manualLocations.length} Lokasi Siap Digunakan
+                          </h4>
+                          {occupiedLocations.length > 0 && (
+                            <span className="text-xs bg-red-500 text-white px-3 py-1 rounded-full font-bold">
+                              ⚠️ {occupiedLocations.length} Terisi
+                            </span>
+                          )}
+                        </div>
+                        <div className="max-h-48 overflow-y-auto space-y-1">
+                          {manualLocations.map((loc, idx) => {
+                            const locationKey = `${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
+                            const availInfo = locationAvailability.find(a => a.location === locationKey);
+                            return (
+                              <div key={idx} className={`flex items-center justify-between p-2 rounded-lg text-sm ${
+                                availInfo?.isOccupied ? 'bg-red-100 border border-red-300' : 'bg-white border border-green-200'
+                              }`}>
+                                <span className="font-semibold">
+                                  #{idx + 1}: {locationKey}
+                                </span>
+                                {availInfo?.isOccupied ? (
+                                  <span className="text-xs text-red-700">
+                                    ⚠️ Terisi: {availInfo.occupiedBy}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-green-700 font-semibold">
+                                    ✓ Kosong
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Calculated Qty & Logika Receh */}
             {totalCartons > 0 && selectedProduct && (
@@ -1493,16 +2309,18 @@ export function InboundForm() {
               </div>
             )}
 
-            {/* Recommended Location - Multi/Single Display */}
-            <div className="flex gap-3">
-                <button
-                    onClick={handleRecommend}
-                    type="button"
-                    className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors shadow-lg flex items-center justify-center gap-2"
-                >
-                    🔍 Rekomendasi Lokasi ({totalPalletsNeeded} Pallet)
-                </button>
-            </div>
+            {/* Recommended Location - Multi/Single Display (Hanya tampil jika autoRecommend ON) */}
+            {autoRecommend && (
+              <div className="flex gap-3">
+                  <button
+                      onClick={handleRecommend}
+                      type="button"
+                      className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors shadow-lg flex items-center justify-center gap-2"
+                  >
+                      🔍 Rekomendasi Lokasi ({totalPalletsNeeded} Pallet)
+                  </button>
+              </div>
+            )}
             
             {(multiLocationRec || recommendedLocation) && (
               <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
@@ -1632,8 +2450,14 @@ export function InboundForm() {
 
           {/* Modal Detail Transaksi */}
           {showHistoryDetailModal && selectedHistoryItem && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+            <div 
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+              onClick={() => setShowHistoryDetailModal(false)}
+            >
+              <div 
+                className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
                 {/* Header */}
                 <div className="sticky top-0 bg-linear-to-r from-blue-500 to-indigo-600 px-6 py-4 flex justify-between items-center">
                   <h2 className="text-xl font-bold text-white">📋 Detail Transaksi Inbound</h2>
@@ -1646,7 +2470,7 @@ export function InboundForm() {
                 </div>
 
                 {/* Content */}
-                <div className="overflow-y-auto max-h-[calc(90vh-140px)] p-6 space-y-6">
+                <div className="p-6 space-y-6">
                   {/* Informasi Pengiriman */}
                   <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
                     <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
