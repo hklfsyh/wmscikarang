@@ -907,10 +907,10 @@ export function InboundForm() {
             const occupiedRecommendedLocs: string[] = [];
             multiLocationRec.locations.forEach(loc => {
               const existingStock = stockListData.find(
-                s => s.cluster === loc.cluster && 
-                     s.lorong === loc.lorong && 
-                     s.baris === loc.baris && 
-                     s.pallet === loc.level
+                s => s.location.cluster === loc.cluster && 
+                     s.location.lorong === loc.lorong && 
+                     s.location.baris === loc.baris && 
+                     s.location.level === loc.level
               );
               if (existingStock) {
                 occupiedRecommendedLocs.push(`${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.level} (${existingStock.productName})`);
