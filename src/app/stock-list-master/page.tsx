@@ -261,7 +261,6 @@ export default function StockListMasterPage() {
                 <table className="w-full">
                   <thead className="bg-linear-to-r from-blue-500 to-indigo-600 text-white">
                     <tr>
-                      <th className="px-6 py-4 text-left text-sm font-bold">ID</th>
                       <th className="px-6 py-4 text-left text-sm font-bold">Kode Produk</th>
                       <th className="px-6 py-4 text-left text-sm font-bold">Nama Produk</th>
                       <th className="px-6 py-4 text-center text-sm font-bold">Qty/Carton</th>
@@ -273,14 +272,13 @@ export default function StockListMasterPage() {
                   <tbody className="divide-y divide-gray-200">
                     {filteredProducts.map((product) => (
                       <tr key={product.id} className="hover:bg-blue-50 transition-colors">
-                        <td className="px-6 py-4 text-sm text-gray-700">{product.id}</td>
                         <td className="px-6 py-4 text-sm font-mono text-gray-700">{product.productCode}</td>
                         <td className="px-6 py-4 text-sm font-semibold text-gray-800">{product.productName}</td>
                         <td className="px-6 py-4 text-center text-sm font-semibold text-blue-600">
                           {product.qtyPerCarton}
                         </td>
                         <td className="px-6 py-4 text-center text-sm font-semibold text-green-600">
-                          {product.qtyPerPallet}
+                          {product.qtyPerPallet === -1 ? "-" : product.qtyPerPallet}
                         </td>
                         <td className="px-6 py-4 text-center">
                           {product.defaultCluster ? (

@@ -25,10 +25,10 @@ export interface ProductMaster {
 
 // 3. Data Produk Baru
 export const productMasterData: ProductMaster[] = [
-  // Produk Cluster A (sesuai screenshot)
+  // Produk Cluster A
   {
     id: "PM001",
-    productCode: "AQ-220-CUBE-24",
+    productCode: "166126",
     productName: "220ML AQUA CUBE MINI BOTTLE LOCAL 1X24",
     qtyPerCarton: 24,
     qtyPerPallet: 108,
@@ -36,7 +36,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM002",
-    productCode: "AQ-200-LOC-48",
+    productCode: "204579",
     productName: "200ML AQUA LOCAL 1X48",
     qtyPerCarton: 48,
     qtyPerPallet: 48,
@@ -44,17 +44,17 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM003",
-    productCode: "AQ-600-LOC-24",
+    productCode: "74561",
     productName: "600ML AQUA LOCAL 1X24",
     qtyPerCarton: 24,
     qtyPerPallet: 40,
     defaultCluster: "A",
   },
   
-  // Produk Cluster B (sesuai screenshot)
+  // Produk Cluster B
   {
     id: "PM004",
-    productCode: "AQ-1500ML",
+    productCode: "74553",
     productName: "1500ML AQUA LOCAL 1X12",
     qtyPerCarton: 12,
     qtyPerPallet: 70,
@@ -62,7 +62,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM005",
-    productCode: "AQ-330ML",
+    productCode: "74556",
     productName: "330ML AQUA LOCAL 1X24",
     qtyPerCarton: 24,
     qtyPerPallet: 65,
@@ -70,7 +70,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM006",
-    productCode: "AQ-750ML",
+    productCode: "81681",
     productName: "750ML AQUA LOCAL 1X18",
     qtyPerCarton: 18,
     qtyPerPallet: 40,
@@ -78,7 +78,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM007",
-    productCode: "AQ-1100ML-BC",
+    productCode: "142009",
     productName: "1100ML AQUA LOCAL 1X12 BARCODE ON CAP",
     qtyPerCarton: 12,
     qtyPerPallet: 42,
@@ -86,7 +86,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM008",
-    productCode: "AQ-1500ML-MP",
+    productCode: "74589",
     productName: "1500ML AQUA LOCAL MULTIPACK 1X6",
     qtyPerCarton: 6,
     qtyPerPallet: 112,
@@ -94,7 +94,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM009",
-    productCode: "AQ-600ML-MP",
+    productCode: "124172",
     productName: "600ML AQUA LOCAL MULTIPACK 1X6",
     qtyPerCarton: 6,
     qtyPerPallet: 160,
@@ -102,7 +102,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM010",
-    productCode: "VIT-550ML",
+    productCode: "157095",
     productName: "550ML VIT LOCAL 1X24",
     qtyPerCarton: 24,
     qtyPerPallet: 40,
@@ -110,7 +110,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM011",
-    productCode: "VIT-330ML",
+    productCode: "112839",
     productName: "330ML VIT LOCAL 1X24",
     qtyPerCarton: 24,
     qtyPerPallet: 65,
@@ -118,7 +118,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM012",
-    productCode: "VIT-200ML",
+    productCode: "173022",
     productName: "200ML VIT LOCAL 1X48",
     qtyPerCarton: 48,
     qtyPerPallet: 48,
@@ -126,7 +126,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM013",
-    productCode: "VIT-1500ML",
+    productCode: "74565",
     productName: "1500ML VIT LOCAL 1X12",
     qtyPerCarton: 12,
     qtyPerPallet: 33,
@@ -134,7 +134,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM014",
-    productCode: "AQ-380-SPARK",
+    productCode: "80333",
     productName: "380ML AQUA REFLECTIONS SPARKLING 1X12",
     qtyPerCarton: 12,
     qtyPerPallet: 90,
@@ -142,7 +142,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM015",
-    productCode: "AQ-380-BAL",
+    productCode: "174139",
     productName: "380ML AQUA REFLECTIONS BAL 1X12",
     qtyPerCarton: 12,
     qtyPerPallet: 90,
@@ -150,7 +150,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM016",
-    productCode: "AQ-380-SBUX",
+    productCode: "186452",
     productName: "380ML AQUA REFLECTIONS SBUX BAL 1X12",
     qtyPerCarton: 12,
     qtyPerPallet: 90,
@@ -158,7 +158,7 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM017",
-    productCode: "AQ-750-SPARK-BAL",
+    productCode: "174136",
     productName: "750ML AQUA SPARKLING BAL 1X6",
     qtyPerCarton: 6,
     qtyPerPallet: 100,
@@ -166,48 +166,106 @@ export const productMasterData: ProductMaster[] = [
   },
   {
     id: "PM018",
-    productCode: "AQ-750-REF-BAL",
+    productCode: "174138",
     productName: "750ML AQUA REFLECTIONS BAL 1X6",
     qtyPerCarton: 6,
     qtyPerPallet: 100,
     defaultCluster: "B",
   },
   
-  // Produk Cluster C-E
+  // Produk Cluster C (Mizone)
   {
-    id: "PM018",
-    productCode: "VIT-330-CAN-24",
-    productName: "330ML VIT CAN 1X24",
-    qtyPerCarton: 24,
-    qtyPerPallet: 65,
+    id: "PM019",
+    productCode: "145141",
+    productName: "500ML MIZONE ACTIV LYCHEE LEMON 1X12",
+    qtyPerCarton: 12,
+    qtyPerPallet: 84,
     defaultCluster: "C",
   },
   {
-    id: "PM019",
-    productCode: "TEH-350-BTL-12",
-    productName: "350ML TEH BOTOL SOSRO 1X12",
+    id: "PM020",
+    productCode: "206774",
+    productName: "500ML MIZONE COCO BOOST 1X12",
     qtyPerCarton: 12,
     qtyPerPallet: 84,
+    defaultCluster: "C",
+  },
+  {
+    id: "PM021",
+    productCode: "145143",
+    productName: "500ML MIZONE MOOD UP CRANBERRY 1X12",
+    qtyPerCarton: 12,
+    qtyPerPallet: 84,
+    defaultCluster: "C",
+  },
+  
+  // 5 Gallon - Cluster D (AQUA)
+  {
+    id: "PM022",
+    productCode: "74559",
+    productName: "5 GALLON AQUA LOCAL",
+    qtyPerCarton: 1,
+    qtyPerPallet: 48,
+    defaultCluster: "D",
+  },
+  {
+    id: "PM023",
+    productCode: "10169933",
+    productName: "EMPTY BOTTLE AQUA 5 GALLON",
+    qtyPerCarton: 1,
+    qtyPerPallet: 48,
     defaultCluster: "D",
   },
   
-  // Produk tambahan
-  { id: "PM020", productCode: "AQ-RFL-380ML-BAL", productName: "380ML AQUA REFLECTIONS BAL 1X12", qtyPerCarton: 12, qtyPerPallet: 90 },
-  { id: "PM021", productCode: "AQ-RFL-SBUX", productName: "380ML AQUA REFLECTIONS SBUX BAL 1X12", qtyPerCarton: 12, qtyPerPallet: 90 },
-  { id: "PM022", productCode: "AQ-RFL-SPK", productName: "380ML AQUA REFLECTIONS SPARKLING 1X12", qtyPerCarton: 12, qtyPerPallet: 90 },
-  { id: "PM023", productCode: "AQ-SPK-380ML-BAL", productName: "380ML AQUA SPARKLING BAL 1X12", qtyPerCarton: 12, qtyPerPallet: 90 },
-  { id: "PM024", productCode: "MIZ-ACTIV", productName: "500ML MIZONE ACTIV LYCHEE LEMON 1X12", qtyPerCarton: 12, qtyPerPallet: 84, defaultCluster: "C" },
-  { id: "PM025", productCode: "MIZ-COCO", productName: "500ML MIZONE COCO BOOST 1X12", qtyPerCarton: 12, qtyPerPallet: 84, defaultCluster: "C" },
-  { id: "PM026", productCode: "MIZ-MOOD", productName: "500ML MIZONE MOOD UP CRANBERRY 1X12", qtyPerCarton: 12, qtyPerPallet: 84, defaultCluster: "C" },
-  { id: "PM027", productCode: "AQ-600ML", productName: "600ML AQUA LOCAL 1X24", qtyPerCarton: 24, qtyPerPallet: 40 },
-  // 5 Gallon - Cluster D (AQUA)
-  { id: "PM028", productCode: "AQ-5GAL", productName: "5 GALLON AQUA LOCAL", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "D" },
-  { id: "PM029", productCode: "AQ-5GAL-RETUR", productName: "5 GALLON AQUA LOCAL RETUR", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "D" },
-  { id: "PM032", productCode: "AQ-EMPTY-5GAL", productName: "EMPTY BOTTLE AQUA 5 GALLON", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "D" },
   // 5 Gallon - Cluster E (VIT)
-  { id: "PM030", productCode: "VIT-5GAL", productName: "5 GALLON VIT LOCAL", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "E" },
-  { id: "PM031", productCode: "VIT-5GAL-RETUR", productName: "5 GALLON VIT LOCAL RETUR", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "E" },
-  { id: "PM033", productCode: "VIT-EMPTY-5GAL", productName: "EMPTY BOTTLE VIT 5 GALLON", qtyPerCarton: 1, qtyPerPallet: 48, defaultCluster: "E" },
+  {
+    id: "PM024",
+    productCode: "74560",
+    productName: "5 GALLON VIT LOCAL",
+    qtyPerCarton: 1,
+    qtyPerPallet: 48,
+    defaultCluster: "E",
+  },
+  {
+    id: "PM025",
+    productCode: "10169932",
+    productName: "EMPTY BOTTLE VIT 5 GALLON",
+    qtyPerCarton: 1,
+    qtyPerPallet: 48,
+    defaultCluster: "E",
+  },
+  
+  // Produk Baru
+  {
+    id: "PM026",
+    productCode: "10481618",
+    productName: "TISSUE AQUA V.4",
+    qtyPerCarton: 1,
+    qtyPerPallet: 0,
+  },
+  {
+    id: "PM027",
+    productCode: "10516937",
+    productName: "JUG AQUA 19L PC 55 MM",
+    qtyPerCarton: 1,
+    qtyPerPallet: 48,
+  },
+  {
+    id: "PM028",
+    productCode: "10516939",
+    productName: "JUG VIT 19L PC 55 MM",
+    qtyPerCarton: 1,
+    qtyPerPallet: 48,
+  },
+  
+  // Produk duplikat yang digabung (174137 = sama dengan 174136 AQUA SPARKLING)
+  {
+    id: "PM029",
+    productCode: "174137",
+    productName: "380ML AQUA SPARKLING BAL 1X12",
+    qtyPerCarton: 12,
+    qtyPerPallet: 90,
+  },
 ];
 
 // Helper function untuk mendapatkan produk by code

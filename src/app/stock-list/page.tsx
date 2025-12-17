@@ -144,7 +144,7 @@ export default function StockListPage() {
     }
   };
 
-  // Days to Expired
+  // Days to Expired - dengan format bulan dan hari
   const getDaysToExpired = (expiredDate: string) => {
     const now = new Date();
     const expDate = new Date(expiredDate);
@@ -153,12 +153,27 @@ export default function StockListPage() {
     
     if (diffDays < 0) {
       return <span className="text-red-600 font-bold">Expired!</span>;
-    } else if (diffDays < 90) {
-      return <span className="text-orange-600 font-semibold">{diffDays} days</span>;
-    } else if (diffDays < 180) {
-      return <span className="text-yellow-600 font-semibold">{diffDays} days</span>;
+    }
+    
+    // Konversi ke bulan dan hari
+    const months = Math.floor(diffDays / 30);
+    const days = diffDays % 30;
+    
+    let displayText = "";
+    if (months > 0 && days > 0) {
+      displayText = `${months} bulan ${days} hari`;
+    } else if (months > 0) {
+      displayText = `${months} bulan`;
     } else {
-      return <span className="text-green-600">{diffDays} days</span>;
+      displayText = `${days} hari`;
+    }
+    
+    if (diffDays < 90) {
+      return <span className="text-orange-600 font-semibold">{displayText}</span>;
+    } else if (diffDays < 180) {
+      return <span className="text-yellow-600 font-semibold">{displayText}</span>;
+    } else {
+      return <span className="text-green-600">{displayText}</span>;
     }
   };
 
@@ -315,7 +330,7 @@ export default function StockListPage() {
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-bold">No</th>
                   <th className="px-6 py-4 text-left text-sm font-bold">Product</th>
-                  <th className="px-6 py-4 text-left text-sm font-bold">BB Pallet</th>
+                  <th className="px-6 py-4 text-left text-sm font-bold">BB Produk</th>
                   <th className="px-6 py-4 text-left text-sm font-bold">Location</th>
                   <th className="px-6 py-4 text-left text-sm font-bold">Quantity</th>
                   <th className="px-6 py-4 text-left text-sm font-bold">Expired Date</th>

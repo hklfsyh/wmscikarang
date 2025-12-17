@@ -18,6 +18,7 @@ import {
   getInTransitRange,
   isInTransitLocation,
 } from "@/lib/mock/warehouse-config";
+import { inboundHistoryData } from "@/lib/mock/transaction-history";
 import { QRScanner, QRData } from "./qr-scanner";
 import { CheckCircle, XCircle } from "lucide-react";
 import { useToast, ToastContainer } from "./toast";
@@ -135,6 +136,10 @@ export function InboundForm() {
   const [showDriverSuggestions, setShowDriverSuggestions] = useState(false);
   const [showDnSuggestions, setShowDnSuggestions] = useState(false);
   const [showPoliceNoSuggestions, setShowPoliceNoSuggestions] = useState(false);
+  
+  // --- HISTORY DETAIL MODAL STATE ---
+  const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(false);
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<typeof inboundHistoryData[0] | null>(null);
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -762,7 +767,7 @@ export function InboundForm() {
           <div className="mb-6 flex items-center justify-between">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-                📦 Form Inbound Barang
+                📦 Form Inbound Produk
               </h1>
               <p className="text-sm text-gray-600">
                 Lengkapi data inbound untuk pencatatan masuk barang
@@ -1548,6 +1553,240 @@ export function InboundForm() {
               🚀 Submit Inbound & Konfirmasi Lokasi
             </button>
           </form>
+
+          {/* Tabel Riwayat Transaksi Terakhir */}
+          {inboundHistoryData.length > 0 && (
+            <div className="mt-8">
+              <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-200">
+                <div className="bg-linear-to-r from-blue-500 to-indigo-600 px-6 py-4">
+                  <h3 className="text-xl font-bold text-white">📋 Transaksi Terakhir</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Tanggal</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Ekspedisi</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Pengemudi</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Produk</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Qty Pallet</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Qty Carton</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {(() => {
+                        const lastItem = inboundHistoryData[0];
+                        return (
+                          <tr key={lastItem.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3 text-sm text-gray-900">
+                              {new Date(lastItem.tanggal).toLocaleDateString("id-ID")}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{lastItem.ekspedisi}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{lastItem.namaPengemudi}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <div className="font-medium text-gray-900">{lastItem.productCode}</div>
+                              <div className="text-gray-600 text-xs">{lastItem.productName}</div>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-center font-medium text-gray-900">
+                              {lastItem.qtyPallet}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-center font-medium text-gray-900">
+                              {lastItem.qtyCarton}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full ${
+                                lastItem.status === "completed"
+                                  ? "bg-green-100 text-green-800"
+                                  : "bg-yellow-100 text-yellow-800"
+                              }`}>
+                                {lastItem.status === "completed" ? "Selesai" : "Partial"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <button
+                                onClick={() => {
+                                  setSelectedHistoryItem(lastItem);
+                                  setShowHistoryDetailModal(true);
+                                }}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white text-xs font-semibold rounded-lg hover:bg-blue-600 transition-colors"
+                              >
+                                📄 Detail
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="bg-gray-50 px-6 py-3 border-t border-gray-200">
+                  <p className="text-sm text-gray-600 text-center">
+                    Menampilkan 1 transaksi terakhir dari total {inboundHistoryData.length} transaksi
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Detail Transaksi */}
+          {showHistoryDetailModal && selectedHistoryItem && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+                {/* Header */}
+                <div className="sticky top-0 bg-linear-to-r from-blue-500 to-indigo-600 px-6 py-4 flex justify-between items-center">
+                  <h2 className="text-xl font-bold text-white">📋 Detail Transaksi Inbound</h2>
+                  <button
+                    onClick={() => setShowHistoryDetailModal(false)}
+                    className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Content */}
+                <div className="overflow-y-auto max-h-[calc(90vh-140px)] p-6 space-y-6">
+                  {/* Informasi Pengiriman */}
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+                    <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+                      <span className="text-lg">🚚</span> Informasi Pengiriman
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="text-gray-600">Tanggal:</span>
+                        <p className="font-semibold text-gray-900">
+                          {new Date(selectedHistoryItem.tanggal).toLocaleDateString("id-ID", {
+                            weekday: "long",
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                          })}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Ekspedisi:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.ekspedisi}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Nama Pengemudi:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.namaPengemudi}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">No. Polisi:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.nomorPolisi}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-gray-600">No. DN/Surat Jalan:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.noDN}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Informasi Produk */}
+                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
+                    <h3 className="font-bold text-green-900 mb-3 flex items-center gap-2">
+                      <span className="text-lg">📦</span> Informasi Produk
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="col-span-2">
+                        <span className="text-gray-600">Nama Produk:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.productName}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Kode Produk:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.productCode}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Total PCS:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.totalPcs.toLocaleString()} pcs</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Qty Pallet:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.qtyPallet} pallet</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Qty Carton:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.qtyCarton} carton</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Informasi Batch & Expired */}
+                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-200">
+                    <h3 className="font-bold text-amber-900 mb-3 flex items-center gap-2">
+                      <span className="text-lg">🏷️</span> Informasi Batch & Expired
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="text-gray-600">BB Produk:</span>
+                        <p className="font-semibold text-gray-900 font-mono">{selectedHistoryItem.bbProduk}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Expired Date:</span>
+                        <p className="font-semibold text-gray-900">
+                          {new Date(selectedHistoryItem.expiredDate).toLocaleDateString("id-ID")}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Lokasi Penyimpanan */}
+                  <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-200">
+                    <h3 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
+                      <span className="text-lg">📍</span> Lokasi Penyimpanan
+                    </h3>
+                    <div className="text-sm">
+                      <span className="text-gray-600">Lokasi:</span>
+                      <p className="font-semibold text-gray-900 text-lg">{selectedHistoryItem.location}</p>
+                    </div>
+                  </div>
+
+                  {/* Waktu Input */}
+                  <div className="bg-gradient-to-br from-gray-50 to-slate-50 rounded-xl p-4 border border-gray-200">
+                    <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                      <span className="text-lg">⏰</span> Waktu Input
+                    </h3>
+                    <div className="text-sm">
+                      <span className="text-gray-600">Dibuat pada:</span>
+                      <p className="font-semibold text-gray-900">
+                        {new Date(selectedHistoryItem.createdAt).toLocaleString("id-ID", {
+                          dateStyle: "full",
+                          timeStyle: "medium",
+                        })}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Status */}
+                  <div className="bg-gradient-to-br from-slate-50 to-gray-50 rounded-xl p-4 border border-slate-200">
+                    <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
+                      <span className="text-lg">✓</span> Status Transaksi
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex px-4 py-2 text-sm font-bold rounded-lg ${
+                        selectedHistoryItem.status === "completed"
+                          ? "bg-green-100 text-green-800"
+                          : "bg-yellow-100 text-yellow-800"
+                      }`}>
+                        {selectedHistoryItem.status === "completed" ? "✅ Selesai" : "⚠️ Partial"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="sticky bottom-0 bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-end">
+                  <button
+                    onClick={() => setShowHistoryDetailModal(false)}
+                    className="px-6 py-2.5 bg-blue-500 text-white font-semibold rounded-lg hover:bg-blue-600 transition-colors"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

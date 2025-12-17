@@ -32,8 +32,8 @@ export interface StockItem {
   notes?: string;
 }
 
-// Helper function untuk generate random date berdasarkan hari ini (10 Des 2025)
-const TODAY = new Date('2025-12-10'); // Anggap hari ini 10 Desember 2025
+// Helper function untuk generate random date berdasarkan hari ini (16 Des 2025)
+const TODAY = new Date('2025-12-16'); // Anggap hari ini 16 Desember 2025
 
 function getRandomDate(startDaysFromNow: number, endDaysFromNow: number): string {
   const start = new Date(TODAY);
@@ -172,14 +172,14 @@ const updateStockStatuses = () => {
 // Lorong 1: TERISI PENUH (8 baris, 2 pallet per sel) - untuk testing
 for (let baris = 1; baris <= 8; baris++) {
   for (let pallet = 1; pallet <= 2; pallet++) {
-    addStockItem("A", 1, baris, pallet, "AQ-220-CUBE-24", 30, 120);
+    addStockItem("A", 1, baris, pallet, "166126", 30, 120);
   }
 }
 
 // Lorong 2: SEBAGIAN TERISI (hanya baris 1-4 terisi, baris 5-8 kosong) - untuk testing inbound
 for (let baris = 1; baris <= 4; baris++) {
   for (let pallet = 1; pallet <= 2; pallet++) {
-    addStockItem("A", 2, baris, pallet, "AQ-220-CUBE-24", 45, 150);
+    addStockItem("A", 2, baris, pallet, "166126", 45, 150);
   }
 }
 // Baris 5-8 di lorong 2 KOSONG (untuk testing rekomendasi)
@@ -191,7 +191,7 @@ for (let baris = 1; baris <= 4; baris++) {
 // Lorong 4: SEBAGIAN TERISI (baris 1-6 terisi, baris 7-9 kosong)
 for (let baris = 1; baris <= 6; baris++) {
   for (let pallet = 1; pallet <= 2; pallet++) {
-    addStockItem("A", 4, baris, pallet, "AQ-200-LOC-48", 60, 200);
+    addStockItem("A", 4, baris, pallet, "204579", 60, 200);
   }
 }
 // Baris 7-9 di lorong 4 KOSONG
@@ -204,7 +204,7 @@ for (let baris = 1; baris <= 6; baris++) {
 for (let lorong = 6; lorong <= 7; lorong++) {
   for (let baris = 1; baris <= 9; baris++) {
     for (let pallet = 1; pallet <= 3; pallet++) {
-      addStockItem("A", lorong, baris, pallet, "AQ-600-LOC-24", 120, 300);
+      addStockItem("A", lorong, baris, pallet, "74561", 120, 300);
     }
   }
 }
@@ -212,7 +212,7 @@ for (let lorong = 6; lorong <= 7; lorong++) {
 // Lorong 8: SEBAGIAN TERISI (baris 1-5 terisi, baris 6-9 kosong)
 for (let baris = 1; baris <= 5; baris++) {
   for (let pallet = 1; pallet <= 3; pallet++) {
-    addStockItem("A", 8, baris, pallet, "AQ-600-LOC-24", 120, 300);
+    addStockItem("A", 8, baris, pallet, "74561", 120, 300);
   }
 }
 // Baris 6-9 di lorong 8 KOSONG
@@ -223,7 +223,7 @@ for (let baris = 1; baris <= 5; baris++) {
 // Lorong 11: SEBAGIAN TERISI (hanya baris 1-3 terisi, baris 4-9 kosong)
 for (let baris = 1; baris <= 3; baris++) {
   for (let pallet = 1; pallet <= 3; pallet++) {
-    addStockItem("A", 11, baris, pallet, "AQ-600-LOC-24", 120, 300);
+    addStockItem("A", 11, baris, pallet, "74561", 120, 300);
   }
 }
 // Baris 4-9 di lorong 11 KOSONG
@@ -235,7 +235,7 @@ for (let lorong = 1; lorong <= 6; lorong++) {
     for (let pallet = 1; pallet <= 2; pallet++) {
       // 80% filled
       if (Math.random() < 0.8) {
-        addStockItem("B", lorong, baris, pallet, "AQ-1500ML", 50, 180);
+        addStockItem("B", lorong, baris, pallet, "74553", 50, 180);
       }
     }
   }
@@ -247,7 +247,7 @@ for (let lorong = 6; lorong <= 12; lorong++) {
     for (let pallet = 1; pallet <= 3; pallet++) {
       // 85% filled untuk area ini (lebih penuh)
       if (Math.random() < 0.85) {
-        addStockItem("B", lorong, baris, pallet, "AQ-330ML", 120, 300);
+        addStockItem("B", lorong, baris, pallet, "74556", 120, 300);
       }
     }
   }
@@ -259,7 +259,7 @@ for (let lorong = 13; lorong <= 16; lorong++) {
     for (let pallet = 1; pallet <= 2; pallet++) {
       // 75% filled
       if (Math.random() < 0.75) {
-        addStockItem("B", lorong, baris, pallet, "AQ-750ML", 90, 270);
+        addStockItem("B", lorong, baris, pallet, "81681", 90, 270);
       }
     }
   }
@@ -271,7 +271,7 @@ for (let lorong = 17; lorong <= 18; lorong++) {
     for (let pallet = 1; pallet <= 2; pallet++) {
       // 70% filled
       if (Math.random() < 0.7) {
-        addStockItem("B", lorong, baris, pallet, "AQ-1100ML-BC", 90, 270);
+        addStockItem("B", lorong, baris, pallet, "142009", 90, 270);
       }
     }
   }
@@ -282,7 +282,7 @@ for (let lorong = 19; lorong <= 20; lorong++) {
   for (let baris = 1; baris <= 8; baris++) {
     // 60% filled
     if (Math.random() < 0.6) {
-      addStockItem("B", lorong, baris, 1, "AQ-1500ML-MP", 120, 300);
+      addStockItem("B", lorong, baris, 1, "74589", 120, 300);
     }
   }
 }
@@ -291,7 +291,7 @@ for (let lorong = 19; lorong <= 20; lorong++) {
 for (let baris = 1; baris <= 8; baris++) {
   // 65% filled
   if (Math.random() < 0.65) {
-    addStockItem("B", 21, baris, 1, "AQ-600ML-MP", 90, 270);
+    addStockItem("B", 21, baris, 1, "124172", 90, 270);
   }
 }
 
@@ -300,7 +300,7 @@ for (let baris = 1; baris <= 8; baris++) {
   for (let pallet = 1; pallet <= 2; pallet++) {
     // 70% filled
     if (Math.random() < 0.7) {
-      addStockItem("B", 22, baris, pallet, "VIT-550ML", 90, 270);
+      addStockItem("B", 22, baris, pallet, "157095", 90, 270);
     }
   }
 }
@@ -310,7 +310,7 @@ for (let baris = 1; baris <= 8; baris++) {
   for (let pallet = 1; pallet <= 2; pallet++) {
     // 70% filled
     if (Math.random() < 0.7) {
-      addStockItem("B", 23, baris, pallet, "VIT-330ML", 90, 270);
+      addStockItem("B", 23, baris, pallet, "112839", 90, 270);
     }
   }
 }
@@ -320,7 +320,7 @@ for (let baris = 1; baris <= 8; baris++) {
   for (let pallet = 1; pallet <= 2; pallet++) {
     // 65% filled
     if (Math.random() < 0.65) {
-      addStockItem("B", 24, baris, pallet, "VIT-200ML", 90, 270);
+      addStockItem("B", 24, baris, pallet, "173022", 90, 270);
     }
   }
 }
@@ -330,7 +330,7 @@ for (let baris = 1; baris <= 8; baris++) {
   for (let pallet = 1; pallet <= 2; pallet++) {
     // 70% filled
     if (Math.random() < 0.7) {
-      addStockItem("B", 25, baris, pallet, "VIT-1500ML", 120, 300);
+      addStockItem("B", 25, baris, pallet, "74565", 120, 300);
     }
   }
 }
@@ -338,25 +338,25 @@ for (let baris = 1; baris <= 8; baris++) {
 // Lorong 26: ALL REFLECTIONS (6 baris, 1 pallet per baris)
 // Baris 1: 380ML AQUA REFLECTIONS SPARKLING 1X12
 if (Math.random() < 0.8) {
-  addStockItem("B", 26, 1, 1, "AQ-380-SPARK", 150, 360);
+  addStockItem("B", 26, 1, 1, "80333", 150, 360);
 }
 // Baris 2: 380ML AQUA REFLECTIONS BAL 1X12
 if (Math.random() < 0.8) {
-  addStockItem("B", 26, 2, 1, "AQ-380-BAL", 150, 360);
+  addStockItem("B", 26, 2, 1, "174139", 150, 360);
 }
 // Baris 3-4: 380ML AQUA REFLECTIONS SBUX BAL 1X12 (2 baris)
 for (let baris = 3; baris <= 4; baris++) {
   if (Math.random() < 0.8) {
-    addStockItem("B", 26, baris, 1, "AQ-380-SBUX", 150, 360);
+    addStockItem("B", 26, baris, 1, "186452", 150, 360);
   }
 }
 // Baris 5: 750ML AQUA SPARKLING BAL 1X6
 if (Math.random() < 0.8) {
-  addStockItem("B", 26, 5, 1, "AQ-750-SPARK-BAL", 150, 360);
+  addStockItem("B", 26, 5, 1, "174136", 150, 360);
 }
 // Baris 6: 750ML AQUA REFLECTIONS BAL 1X6
 if (Math.random() < 0.8) {
-  addStockItem("B", 26, 6, 1, "AQ-750-REF-BAL", 150, 360);
+  addStockItem("B", 26, 6, 1, "174138", 150, 360);
 }
 
 // === CLUSTER C: Mizone Products + In Transit Area ===
@@ -366,7 +366,7 @@ for (let lorong = 1; lorong <= 3; lorong++) {
     for (let pallet = 1; pallet <= 3; pallet++) {
       // 70% filled
       if (Math.random() < 0.7) {
-        addStockItem("C", lorong, baris, pallet, "MIZ-ACTIV", 40, 150);
+        addStockItem("C", lorong, baris, pallet, "145141", 40, 150);
       }
     }
   }
@@ -378,7 +378,7 @@ for (let lorong = 4; lorong <= 6; lorong++) {
     for (let pallet = 1; pallet <= 3; pallet++) {
       // 70% filled
       if (Math.random() < 0.7) {
-        addStockItem("C", lorong, baris, pallet, "MIZ-MOOD", 90, 270);
+        addStockItem("C", lorong, baris, pallet, "145143", 90, 270);
       }
     }
   }
@@ -390,7 +390,7 @@ for (let lorong = 7; lorong <= 9; lorong++) {
     for (let pallet = 1; pallet <= 3; pallet++) {
       // 70% filled
       if (Math.random() < 0.7) {
-        addStockItem("C", lorong, baris, pallet, "MIZ-COCO", 90, 270);
+        addStockItem("C", lorong, baris, pallet, "206774", 90, 270);
       }
     }
   }
@@ -399,7 +399,7 @@ for (let lorong = 7; lorong <= 9; lorong++) {
 // Lorong 10-16: IN TRANSIT AREA (Buffer/Overflow)
 // This area can contain overflow products from other clusters
 // For demonstration, we'll add some mixed products from other clusters that are "overflowed"
-const inTransitProducts = ["AQ-1500ML", "AQ-330ML", "VIT-550ML", "AQ-600-LOC-24"];
+const inTransitProducts = ["74553", "74556", "157095", "74561"];
 for (let lorong = 10; lorong <= 16; lorong++) {
   for (let baris = 1; baris <= 5; baris++) {
     for (let pallet = 1; pallet <= 3; pallet++) {
@@ -417,23 +417,15 @@ for (let lorong = 10; lorong <= 16; lorong++) {
 for (let baris = 1; baris <= 5; baris++) {
   // 80% filled
   if (Math.random() < 0.8) {
-    addStockItem("D", 1, baris, 1, "AQ-5GAL", 90, 270);
+    addStockItem("D", 1, baris, 1, "74559", 90, 270);
   }
 }
 
-// Lorong 2: 5 GALLON AQUA LOCAL RETUR (5 baris, 1 pallet per baris)
+// Lorong 2: EMPTY BOTTLE AQUA 5 GALLON (5 baris, 1 pallet per baris)
 for (let baris = 1; baris <= 5; baris++) {
   // 80% filled
   if (Math.random() < 0.8) {
-    addStockItem("D", 2, baris, 1, "AQ-5GAL-RETUR", 90, 270);
-  }
-}
-
-// Lorong 3: EMPTY BOTTLE AQUA 5 GALLON (5 baris, 1 pallet per baris)
-for (let baris = 1; baris <= 5; baris++) {
-  // 80% filled
-  if (Math.random() < 0.8) {
-    addStockItem("D", 3, baris, 1, "AQ-EMPTY-5GAL", 90, 270);
+    addStockItem("D", 2, baris, 1, "10169933", 90, 270);
   }
 }
 
@@ -442,23 +434,15 @@ for (let baris = 1; baris <= 5; baris++) {
 for (let baris = 1; baris <= 5; baris++) {
   // 80% filled
   if (Math.random() < 0.8) {
-    addStockItem("E", 1, baris, 1, "VIT-5GAL", 90, 270);
+    addStockItem("E", 1, baris, 1, "74560", 90, 270);
   }
 }
 
-// Lorong 2: 5 GALLON VIT LOCAL RETUR (5 baris, 1 pallet per baris)
+// Lorong 2: EMPTY BOTTLE VIT 5 GALLON (5 baris, 1 pallet per baris)
 for (let baris = 1; baris <= 5; baris++) {
   // 80% filled
   if (Math.random() < 0.8) {
-    addStockItem("E", 2, baris, 1, "VIT-5GAL-RETUR", 90, 270);
-  }
-}
-
-// Lorong 3: EMPTY BOTTLE VIT 5 GALLON (5 baris, 1 pallet per baris)
-for (let baris = 1; baris <= 5; baris++) {
-  // 80% filled
-  if (Math.random() < 0.8) {
-    addStockItem("E", 3, baris, 1, "VIT-EMPTY-5GAL", 90, 270);
+    addStockItem("E", 2, baris, 1, "10169932", 90, 270);
   }
 }
 
@@ -470,7 +454,7 @@ for (let baris = 1; baris <= 5; baris++) {
 const receh1ExpDate = getRandomDate(20, 45); // 20-45 hari dari sekarang (VERY CLOSE)
 stockListData.push({
   id: `STK-RECEH-001`,
-  productCode: "AQ-1100ML-BC",
+  productCode: "142009",
   productName: "1100ML AQUA LOCAL 1X12 BARCODE ON CAP",
   bbPallet: [
     generateBBPallet(getRandomDate(20, 30), "0101"), 
@@ -499,7 +483,7 @@ stockListData.push({
 const receh2ExpDate = getRandomDate(150, 180); // 150-180 hari dari sekarang (YELLOW)
 stockListData.push({
   id: `STK-RECEH-002`,
-  productCode: "AQ-1500ML",
+  productCode: "74553",
   productName: "1500ML AQUA LOCAL 1X12",
   bbPallet: [
     generateBBPallet(getRandomDate(150, 160), "0201"), 
@@ -527,7 +511,7 @@ stockListData.push({
 const receh3ExpDate = getRandomDate(90, 120); // 90-120 hari dari sekarang (GREEN)
 stockListData.push({
   id: `STK-RECEH-003`,
-  productCode: "AQ-1500ML-MP",
+  productCode: "74589",
   productName: "1500ML AQUA LOCAL MULTIPACK 1X6",
   bbPallet: generateBBPallet(receh3ExpDate, "0301"), // Single BB
   batchNumber: "BATCH-202603-301",
@@ -550,36 +534,111 @@ stockListData.push({
 
 // --- END: Manual Receh Data ---
 
-// --- START: Manual Wrong Cluster Data (Salah Cluster) ---
-// Add some products in wrong clusters for testing status "salah-cluster"
-
-// 1. Put Mizone (should be in Cluster C) in Cluster A
+// --- START: Data untuk Produk Baru ---
+// TISSUE AQUA V.4 (10481618) - Qty/Pallet = 0 (tidak ada setting cluster, letakkan di Cluster B)
 stockListData.push({
-  id: `STK-WRONG-001`,
-  productCode: "MZ-1000ML-ORA",
-  productName: "1000ML MIZONE ORANGE 1X12",
-  bbPallet: generateBBPallet(getRandomDate(100, 150), "0301"),
-  batchNumber: "BATCH-202604-301",
-  lotNumber: "LOT-202604-301",
+  id: `STK-NEW-001`,
+  productCode: "10481618",
+  productName: "TISSUE AQUA V.4",
+  bbPallet: generateBBPallet(getRandomDate(180, 365), "1001"),
+  batchNumber: "BATCH-202512-001",
+  lotNumber: "LOT-202512-001",
   location: {
-    cluster: "A", // Wrong! Should be in C
-    lorong: "L5",
-    baris: "B8",
-    level: "P2",
+    cluster: "B",
+    lorong: "L26",
+    baris: "B7",
+    level: "P1",
   },
   qtyPallet: 1,
-  qtyCarton: 84, // Standard untuk Mizone
-  qtyPcs: 1008,
-  expiredDate: getRandomDate(100, 150),
+  qtyCarton: 0, // Belum diketahui
+  qtyPcs: 0,
+  expiredDate: getRandomDate(180, 365),
+  inboundDate: getInboundDate(),
+  status: "available",
+  isReceh: false,
+  notes: "Produk baru - Qty/Pallet belum ditentukan",
+});
+
+// JUG AQUA 19L PC 55 MM (10516937) - Qty = 48
+stockListData.push({
+  id: `STK-NEW-002`,
+  productCode: "10516937",
+  productName: "JUG AQUA 19L PC 55 MM",
+  bbPallet: generateBBPallet(getRandomDate(90, 180), "1002"),
+  batchNumber: "BATCH-202512-002",
+  lotNumber: "LOT-202512-002",
+  location: {
+    cluster: "D",
+    lorong: "L3",
+    baris: "B1",
+    level: "P1",
+  },
+  qtyPallet: 1,
+  qtyCarton: 48,
+  qtyPcs: 48,
+  expiredDate: getRandomDate(90, 180),
+  inboundDate: getInboundDate(),
+  status: "available",
+  isReceh: false,
+  notes: "JUG AQUA 19L - Qty 48 per pallet",
+});
+
+// JUG VIT 19L PC 55 MM (10516939) - Qty = 48
+stockListData.push({
+  id: `STK-NEW-003`,
+  productCode: "10516939",
+  productName: "JUG VIT 19L PC 55 MM",
+  bbPallet: generateBBPallet(getRandomDate(90, 180), "1003"),
+  batchNumber: "BATCH-202512-003",
+  lotNumber: "LOT-202512-003",
+  location: {
+    cluster: "E",
+    lorong: "L3",
+    baris: "B1",
+    level: "P1",
+  },
+  qtyPallet: 1,
+  qtyCarton: 48,
+  qtyPcs: 48,
+  expiredDate: getRandomDate(90, 180),
+  inboundDate: getInboundDate(),
+  status: "available",
+  isReceh: false,
+  notes: "JUG VIT 19L - Qty 48 per pallet",
+});
+
+// 380ML AQUA SPARKLING BAL 1X12 (174137) - Produk duplikat
+stockListData.push({
+  id: `STK-NEW-004`,
+  productCode: "174137",
+  productName: "380ML AQUA SPARKLING BAL 1X12",
+  bbPallet: generateBBPallet(getRandomDate(150, 360), "1004"),
+  batchNumber: "BATCH-202512-004",
+  lotNumber: "LOT-202512-004",
+  location: {
+    cluster: "B",
+    lorong: "L26",
+    baris: "B8",
+    level: "P1",
+  },
+  qtyPallet: 1,
+  qtyCarton: 90,
+  qtyPcs: 1080,
+  expiredDate: getRandomDate(150, 360),
   inboundDate: getInboundDate(),
   status: "available",
   isReceh: false,
 });
 
-// 2. Put 600ML (should be in Cluster A L6-11) in Cluster B
+// --- END: Data untuk Produk Baru ---
+
+// --- START: Manual Wrong Cluster Data (Salah Cluster) ---
+// Add some products in wrong clusters for testing status "salah-cluster"
+
+// 1. Put 600ML (should be in Cluster A L6-11) in Cluster B
 stockListData.push({
-  id: `STK-WRONG-002`,
-  productCode: "AQ-600-LOC-24",
+  id: `STK-WRONG-001`,
+  productCode: "74561",
   productName: "600ML AQUA LOCAL 1X24",
   bbPallet: generateBBPallet(getRandomDate(80, 120), "0102"),
   batchNumber: "BATCH-202603-102",
@@ -591,18 +650,18 @@ stockListData.push({
     level: "P1",
   },
   qtyPallet: 1,
-  qtyCarton: 70,
-  qtyPcs: 1680,
+  qtyCarton: 40,
+  qtyPcs: 960,
   expiredDate: getRandomDate(80, 120),
   inboundDate: getInboundDate(),
   status: "available",
   isReceh: false,
 });
 
-// 3. Put 1500ML (should be in Cluster B) in Cluster C
+// 2. Put 1500ML (should be in Cluster B) in Cluster C
 stockListData.push({
-  id: `STK-WRONG-003`,
-  productCode: "AQ-1500ML",
+  id: `STK-WRONG-002`,
+  productCode: "74553",
   productName: "1500ML AQUA LOCAL 1X12",
   bbPallet: generateBBPallet(getRandomDate(60, 90), "0203"),
   batchNumber: "BATCH-202602-203",
@@ -617,6 +676,29 @@ stockListData.push({
   qtyCarton: 70,
   qtyPcs: 840,
   expiredDate: getRandomDate(60, 90),
+  inboundDate: getInboundDate(),
+  status: "available",
+  isReceh: false,
+});
+
+// 3. Put Mizone ACTIV (should be in Cluster C) in Cluster A
+stockListData.push({
+  id: `STK-WRONG-003`,
+  productCode: "145141",
+  productName: "500ML MIZONE ACTIV LYCHEE LEMON 1X12",
+  bbPallet: generateBBPallet(getRandomDate(100, 150), "0301"),
+  batchNumber: "BATCH-202604-301",
+  lotNumber: "LOT-202604-301",
+  location: {
+    cluster: "A", // Wrong! Should be in C
+    lorong: "L5",
+    baris: "B8",
+    level: "P2",
+  },
+  qtyPallet: 1,
+  qtyCarton: 84,
+  qtyPcs: 1008,
+  expiredDate: getRandomDate(100, 150),
   inboundDate: getInboundDate(),
   status: "available",
   isReceh: false,

@@ -6,6 +6,7 @@ import { stockListData } from "@/lib/mock/stocklistmock";
 import { TruckIcon, MapPin, XCircle } from "lucide-react";
 import { useToast, ToastContainer } from "./toast";
 import { QRCodeSVG } from "qrcode.react";
+import { outboundHistoryData } from "@/lib/mock/transaction-history";
 
 interface FEFOLocation {
   stockId: string;
@@ -53,6 +54,10 @@ export function OutboundForm() {
   const [policeNoHistory, setPoliceNoHistory] = useState<string[]>([]);
   const [showDriverSuggestions, setShowDriverSuggestions] = useState(false);
   const [showPoliceNoSuggestions, setShowPoliceNoSuggestions] = useState(false);
+  
+  // --- HISTORY DETAIL MODAL STATE ---
+  const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(false);
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<typeof outboundHistoryData[0] | null>(null);
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -554,7 +559,7 @@ export function OutboundForm() {
                     <tr>
                       <th className="px-4 py-3 text-left text-sm font-bold">No</th>
                       <th className="px-4 py-3 text-left text-sm font-bold">Lokasi</th>
-                      <th className="px-4 py-3 text-left text-sm font-bold">BB Pallet</th>
+                      <th className="px-4 py-3 text-left text-sm font-bold">BB Produk</th>
                       <th className="px-4 py-3 text-left text-sm font-bold">Qty Ambil (Pallet)</th>
                       <th className="px-4 py-3 text-left text-sm font-bold">Expired Date</th>
                       <th className="px-4 py-3 text-center text-sm font-bold">QR Code</th>
@@ -593,7 +598,11 @@ export function OutboundForm() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="text-sm font-medium text-gray-700">
-                            {loc.expiredDate}
+                            {new Date(loc.expiredDate).toLocaleDateString("id-ID", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
                           </div>
                           <div
                             className={`text-xs font-semibold ${
@@ -604,7 +613,18 @@ export function OutboundForm() {
                                 : "text-green-600"
                             }`}
                           >
-                            {loc.daysToExpire} days
+                            {(() => {
+                              const days = loc.daysToExpire;
+                              const months = Math.floor(days / 30);
+                              const remainingDays = days % 30;
+                              if (months === 0) {
+                                return `${days} hari`;
+                              } else if (remainingDays === 0) {
+                                return `${months} bulan`;
+                              } else {
+                                return `${months} bulan ${remainingDays} hari`;
+                              }
+                            })()}
                           </div>
                         </td>
                         <td className="px-4 py-3">
@@ -620,7 +640,7 @@ export function OutboundForm() {
                             }}
                           >
                             <QRCodeSVG
-                              value={`CLUSTER ${loc.location.split('-')[0]}, LORONG ${loc.location.split('-')[1]}, BARIS ${loc.location.split('-')[2]}, BB ${Array.isArray(loc.bbPallet) ? loc.bbPallet.join(',') : loc.bbPallet}`}
+                              value={Array.isArray(loc.bbPallet) ? loc.bbPallet.join(',') : loc.bbPallet}
                               size={80}
                               level="H"
                               includeMargin={false}
@@ -850,7 +870,7 @@ export function OutboundForm() {
             {/* QR Code Section - Dipindahkan ke konten */}
             <div className="flex justify-center mb-4">
               <QRCodeSVG 
-                value={`CLUSTER ${scannedBarcodeData.location.split('-')[0]}, LORONG ${scannedBarcodeData.location.split('-')[1]}, BARIS ${scannedBarcodeData.location.split('-')[2]}, BB ${scannedBarcodeData.bbPallet}`}
+                value={scannedBarcodeData.bbPallet}
                 size={150} 
                 level="H"
               />
@@ -910,6 +930,271 @@ export function OutboundForm() {
             >
               Tutup
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Last Transaction History */}
+      {outboundHistoryData.length > 0 && (
+        <div className="mt-8 bg-white rounded-2xl shadow-xl p-6">
+          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <span className="text-2xl">📋</span>
+            Transaksi Terakhir
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gradient-to-r from-orange-500 to-red-600 text-white">
+                <tr>
+                  <th className="px-3 py-3 text-left text-xs font-bold">Tanggal</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold">Pengemudi</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold">Produk</th>
+                  <th className="px-2 py-3 text-center text-xs font-bold">Qty Pallet</th>
+                  <th className="px-2 py-3 text-center text-xs font-bold">Qty Carton</th>
+                  <th className="px-2 py-3 text-center text-xs font-bold">Status</th>
+                  <th className="px-2 py-3 text-center text-xs font-bold">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {(() => {
+                  const lastItem = outboundHistoryData[0];
+                  const formatDate = (dateStr: string) => {
+                    const date = new Date(dateStr);
+                    return date.toLocaleDateString("id-ID", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    });
+                  };
+                  return (
+                    <tr key={lastItem.id} className="hover:bg-orange-50 transition-colors">
+                      <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
+                        {formatDate(lastItem.tanggal)}
+                      </td>
+                      <td className="px-3 py-2 text-xs font-semibold text-gray-800 whitespace-nowrap">
+                        {lastItem.namaPengemudi}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="text-xs max-w-[250px]">
+                          <div className="font-mono text-orange-600">{lastItem.productCode}</div>
+                          <div className="font-semibold text-gray-800 truncate" title={lastItem.productName}>
+                            {lastItem.productName}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs font-bold text-green-600">
+                        {lastItem.qtyPallet}
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs font-bold text-blue-600">
+                        {lastItem.qtyCarton}
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        {lastItem.status === "completed" ? (
+                          <span className="inline-block px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-bold whitespace-nowrap">
+                            ✓ Done
+                          </span>
+                        ) : (
+                          <span className="inline-block px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-xs font-bold whitespace-nowrap">
+                            ⚠ Partial
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <button
+                          onClick={() => {
+                            setSelectedHistoryItem(lastItem);
+                            setShowHistoryDetailModal(true);
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-orange-500 text-white text-xs font-semibold rounded-lg hover:bg-orange-600 transition-colors"
+                        >
+                          📄 Detail
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-gray-500 mt-3 text-center">
+            Menampilkan 1 transaksi terakhir dari total {outboundHistoryData.length} transaksi
+          </p>
+        </div>
+      )}
+
+      {/* Modal Detail Transaksi Outbound */}
+      {showHistoryDetailModal && selectedHistoryItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="sticky top-0 bg-linear-to-r from-orange-500 to-red-600 px-6 py-4 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-white">📋 Detail Transaksi Outbound</h2>
+              <button
+                onClick={() => setShowHistoryDetailModal(false)}
+                className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="overflow-y-auto max-h-[calc(90vh-140px)] p-6 space-y-6">
+              {/* Informasi Pengiriman */}
+              <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-xl p-4 border border-orange-200">
+                <h3 className="font-bold text-orange-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">🚚</span> Informasi Pengiriman
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-600">Tanggal:</span>
+                    <p className="font-semibold text-gray-900">
+                      {new Date(selectedHistoryItem.tanggal).toLocaleDateString("id-ID", {
+                        weekday: "long",
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      })}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Nama Pengemudi:</span>
+                    <p className="font-semibold text-gray-900">{selectedHistoryItem.namaPengemudi}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-gray-600">No. Polisi:</span>
+                    <p className="font-semibold text-gray-900">{selectedHistoryItem.nomorPolisi}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informasi Produk */}
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
+                <h3 className="font-bold text-green-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">📦</span> Informasi Produk
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="col-span-2">
+                    <span className="text-gray-600">Nama Produk:</span>
+                    <p className="font-semibold text-gray-900">{selectedHistoryItem.productName}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Kode Produk:</span>
+                    <p className="font-semibold text-gray-900">{selectedHistoryItem.productCode}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Total PCS:</span>
+                    <p className="font-semibold text-gray-900">{selectedHistoryItem.totalPcs.toLocaleString()} pcs</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Qty Pallet:</span>
+                    <p className="font-semibold text-gray-900">{selectedHistoryItem.qtyPallet} pallet</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Qty Carton:</span>
+                    <p className="font-semibold text-gray-900">{selectedHistoryItem.qtyCarton} carton</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lokasi Pengambilan FEFO dengan QR Code */}
+              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-200">
+                <h3 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">📍</span> Lokasi Pengambilan FEFO
+                </h3>
+                <div className="space-y-3">
+                  {selectedHistoryItem.locations.map((location, idx) => {
+                    // Ambil stock data untuk mendapatkan BB Produk
+                    const stockItem = stockListData.find(
+                      (item) => `${item.location.cluster}-${item.location.lorong}-${item.location.baris}-${item.location.level}` === location
+                    );
+                    const bbProduk = stockItem ? (Array.isArray(stockItem.bbPallet) ? stockItem.bbPallet.join(', ') : stockItem.bbPallet) : '-';
+                    
+                    return (
+                      <div key={idx} className="bg-white rounded-lg p-3 border border-purple-200">
+                        <div className="flex items-start gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="inline-block px-2 py-1 bg-purple-600 text-white rounded text-xs font-bold">
+                                #{idx + 1}
+                              </span>
+                              <span className="font-semibold text-gray-900 text-lg">{location}</span>
+                            </div>
+                            <div className="text-sm space-y-1">
+                              <div>
+                                <span className="text-gray-600">BB Produk:</span>
+                                <span className="font-mono font-semibold text-gray-900 ml-2">{bbProduk}</span>
+                              </div>
+                              {stockItem && (
+                                <div>
+                                  <span className="text-gray-600">Expired:</span>
+                                  <span className="font-semibold text-gray-900 ml-2">
+                                    {new Date(stockItem.expiredDate).toLocaleDateString("id-ID", {
+                                      day: "2-digit",
+                                      month: "short",
+                                      year: "numeric",
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
+                            <QRCodeSVG
+                              value={bbProduk}
+                              size={100}
+                              level="H"
+                              includeMargin={false}
+                            />
+                            <p className="text-xs text-gray-600 mt-2 font-semibold">QR BB Produk</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Waktu Input */}
+              <div className="bg-gradient-to-br from-gray-50 to-slate-50 rounded-xl p-4 border border-gray-200">
+                <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">⏰</span> Waktu Input
+                </h3>
+                <div className="text-sm">
+                  <span className="text-gray-600">Dibuat pada:</span>
+                  <p className="font-semibold text-gray-900">
+                    {new Date(selectedHistoryItem.createdAt).toLocaleString("id-ID", {
+                      dateStyle: "full",
+                      timeStyle: "medium",
+                    })}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status */}
+              <div className="bg-gradient-to-br from-slate-50 to-gray-50 rounded-xl p-4 border border-slate-200">
+                <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">✓</span> Status Transaksi
+                </h3>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex px-4 py-2 text-sm font-bold rounded-lg ${
+                    selectedHistoryItem.status === "completed"
+                      ? "bg-green-100 text-green-800"
+                      : "bg-yellow-100 text-yellow-800"
+                  }`}>
+                    {selectedHistoryItem.status === "completed" ? "✅ Selesai" : "⚠️ Partial"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="sticky bottom-0 bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => setShowHistoryDetailModal(false)}
+                className="px-6 py-2.5 bg-orange-500 text-white font-semibold rounded-lg hover:bg-orange-600 transition-colors"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}

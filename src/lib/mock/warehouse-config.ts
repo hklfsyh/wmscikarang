@@ -156,7 +156,7 @@ export const clusterConfigs: ClusterConfig[] = [
     id: "cluster-d",
     cluster: "D",
     clusterName: "Cluster D - Galon AQUA 5 Liter",
-    defaultLorongCount: 3, // L1-L3
+    defaultLorongCount: 2, // L1-L2 (L3 RETUR removed)
     defaultBarisCount: 5, // All lorongs have 5 baris
     defaultPalletPerSel: 1, // 1 pallet per baris
     customLorongConfig: [],
@@ -167,7 +167,7 @@ export const clusterConfigs: ClusterConfig[] = [
     id: "cluster-e",
     cluster: "E",
     clusterName: "Cluster E - Galon VIT 5 Liter",
-    defaultLorongCount: 3, // L1-L3 (each cluster has independent lorong numbering)
+    defaultLorongCount: 2, // L1-L2 (L3 RETUR removed)
     defaultBarisCount: 5, // All lorongs have 5 baris
     defaultPalletPerSel: 1, // 1 pallet per baris
     customLorongConfig: [],
@@ -180,7 +180,7 @@ export const clusterConfigs: ClusterConfig[] = [
 export const productHomes: ProductHome[] = [
   {
     id: "ph-001",
-    productCode: "AQ-220-CUBE-24",
+    productCode: "166126",
     productName: "220ML AQUA CUBE MINI BOTTLE LOCAL 1X24",
     homeCluster: "A",
     allowedLorongRange: [1, 3],
@@ -190,7 +190,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-002",
-    productCode: "AQ-200-LOC-48",
+    productCode: "204579",
     productName: "200ML AQUA LOCAL 1X48",
     homeCluster: "A",
     allowedLorongRange: [4, 5],
@@ -200,7 +200,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-003",
-    productCode: "AQ-600-LOC-24",
+    productCode: "74561",
     productName: "600ML AQUA LOCAL 1X24",
     homeCluster: "A",
     allowedLorongRange: [6, 11],
@@ -210,7 +210,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-004",
-    productCode: "AQ-1500ML",
+    productCode: "74553",
     productName: "1500ML AQUA LOCAL 1X12",
     homeCluster: "B",
     allowedLorongRange: [1, 6],
@@ -220,7 +220,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-005",
-    productCode: "AQ-330ML",
+    productCode: "74556",
     productName: "330ML AQUA LOCAL 1X24",
     homeCluster: "B",
     allowedLorongRange: [6, 12], // Updated: Lorong 6-12 (overlaps with 1500ML di lorong 6)
@@ -230,7 +230,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-006",
-    productCode: "AQ-750ML",
+    productCode: "81681",
     productName: "750ML AQUA LOCAL 1X18",
     homeCluster: "B",
     allowedLorongRange: [13, 16],
@@ -240,7 +240,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-007",
-    productCode: "AQ-1100ML-BC",
+    productCode: "142009",
     productName: "1100ML AQUA LOCAL 1X12 BARCODE ON CAP",
     homeCluster: "B",
     allowedLorongRange: [17, 18],
@@ -250,7 +250,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-008",
-    productCode: "AQ-1500ML-MP",
+    productCode: "74589",
     productName: "1500ML AQUA LOCAL MULTIPACK 1X6",
     homeCluster: "B",
     allowedLorongRange: [19, 20],
@@ -260,7 +260,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-009",
-    productCode: "AQ-600ML-MP",
+    productCode: "124172",
     productName: "600ML AQUA LOCAL MULTIPACK 1X6",
     homeCluster: "B",
     allowedLorongRange: [21, 21],
@@ -270,7 +270,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-010",
-    productCode: "VIT-550ML",
+    productCode: "157095",
     productName: "550ML VIT LOCAL 1X24",
     homeCluster: "B",
     allowedLorongRange: [22, 22],
@@ -280,7 +280,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-011",
-    productCode: "VIT-330ML",
+    productCode: "112839",
     productName: "330ML VIT LOCAL 1X24",
     homeCluster: "B",
     allowedLorongRange: [23, 23],
@@ -290,7 +290,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-012",
-    productCode: "VIT-200ML",
+    productCode: "173022",
     productName: "200ML VIT LOCAL 1X48",
     homeCluster: "B",
     allowedLorongRange: [24, 24],
@@ -300,7 +300,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-013",
-    productCode: "VIT-1500ML",
+    productCode: "74565",
     productName: "1500ML VIT LOCAL 1X12",
     homeCluster: "B",
     allowedLorongRange: [25, 25],
@@ -310,7 +310,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-014",
-    productCode: "AQ-380-SPARK",
+    productCode: "80333",
     productName: "380ML AQUA REFLECTIONS SPARKLING 1X12",
     homeCluster: "B",
     allowedLorongRange: [26, 26],
@@ -320,7 +320,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-015",
-    productCode: "AQ-380-BAL",
+    productCode: "174139",
     productName: "380ML AQUA REFLECTIONS BAL 1X12",
     homeCluster: "B",
     allowedLorongRange: [26, 26],
@@ -330,7 +330,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-016",
-    productCode: "AQ-380-SBUX",
+    productCode: "186452",
     productName: "380ML AQUA REFLECTIONS SBUX BAL 1X12",
     homeCluster: "B",
     allowedLorongRange: [26, 26],
@@ -340,7 +340,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-017",
-    productCode: "AQ-750-SPARK-BAL",
+    productCode: "174136",
     productName: "750ML AQUA SPARKLING BAL 1X6",
     homeCluster: "B",
     allowedLorongRange: [26, 26],
@@ -350,7 +350,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-018",
-    productCode: "AQ-750-REF-BAL",
+    productCode: "174138",
     productName: "750ML AQUA REFLECTIONS BAL 1X6",
     homeCluster: "B",
     allowedLorongRange: [26, 26],
@@ -361,7 +361,7 @@ export const productHomes: ProductHome[] = [
   // Cluster C products (Mizone)
   {
     id: "ph-019",
-    productCode: "MIZ-ACTIV",
+    productCode: "145141",
     productName: "500ML MIZONE ACTIV LYCHEE LEMON 1X12",
     homeCluster: "C",
     allowedLorongRange: [1, 3],
@@ -371,7 +371,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-020",
-    productCode: "MIZ-MOOD",
+    productCode: "145143",
     productName: "500ML MIZONE MOOD UP CRANBERRY 1X12",
     homeCluster: "C",
     allowedLorongRange: [4, 6],
@@ -381,7 +381,7 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-021",
-    productCode: "MIZ-COCO",
+    productCode: "206774",
     productName: "500ML MIZONE COCO BOOST 1X12",
     homeCluster: "C",
     allowedLorongRange: [7, 9],
@@ -389,10 +389,10 @@ export const productHomes: ProductHome[] = [
     maxPalletPerLocation: 3,
     isActive: true,
   },
-  // Cluster D products (Galon AQUA 5 Liter)
+  // Cluster D products (Galon AQUA 5 Liter) - Updated: Only 2 lorongs (L1-L2)
   {
     id: "ph-022",
-    productCode: "AQ-5GAL",
+    productCode: "74559",
     productName: "5 GALLON AQUA LOCAL",
     homeCluster: "D",
     allowedLorongRange: [1, 1], // Strict: 1 lorong per product
@@ -402,28 +402,18 @@ export const productHomes: ProductHome[] = [
   },
   {
     id: "ph-023",
-    productCode: "AQ-5GAL-RETUR",
-    productName: "5 GALLON AQUA LOCAL RETUR",
+    productCode: "10169933",
+    productName: "EMPTY BOTTLE AQUA 5 GALLON",
     homeCluster: "D",
     allowedLorongRange: [2, 2], // Strict: 1 lorong per product
     allowedBarisRange: [1, 5],
     maxPalletPerLocation: 1,
     isActive: true,
   },
+  // Cluster E products (Galon VIT 5 Liter) - Updated: Only 2 lorongs (L1-L2)
   {
     id: "ph-024",
-    productCode: "AQ-EMPTY-5GAL",
-    productName: "EMPTY BOTTLE AQUA 5 GALLON",
-    homeCluster: "D",
-    allowedLorongRange: [3, 3], // Strict: 1 lorong per product
-    allowedBarisRange: [1, 5],
-    maxPalletPerLocation: 1,
-    isActive: true,
-  },
-  // Cluster E products (Galon VIT 5 Liter)
-  {
-    id: "ph-025",
-    productCode: "VIT-5GAL",
+    productCode: "74560",
     productName: "5 GALLON VIT LOCAL",
     homeCluster: "E",
     allowedLorongRange: [1, 1], // Strict: 1 lorong per product
@@ -432,21 +422,11 @@ export const productHomes: ProductHome[] = [
     isActive: true,
   },
   {
-    id: "ph-026",
-    productCode: "VIT-5GAL-RETUR",
-    productName: "5 GALLON VIT LOCAL RETUR",
-    homeCluster: "E",
-    allowedLorongRange: [2, 2], // Strict: 1 lorong per product
-    allowedBarisRange: [1, 5],
-    maxPalletPerLocation: 1,
-    isActive: true,
-  },
-  {
-    id: "ph-027",
-    productCode: "VIT-EMPTY-5GAL",
+    id: "ph-025",
+    productCode: "10169932",
     productName: "EMPTY BOTTLE VIT 5 GALLON",
     homeCluster: "E",
-    allowedLorongRange: [3, 3], // Strict: 1 lorong per product
+    allowedLorongRange: [2, 2], // Strict: 1 lorong per product
     allowedBarisRange: [1, 5],
     maxPalletPerLocation: 1,
     isActive: true,
