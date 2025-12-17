@@ -611,7 +611,7 @@ export function InboundForm() {
     const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded);
     
     if (multiRec.locations.length < totalPalletsNeeded) {
-        error(`Gudang penuh! Hanya ditemukan ${multiRec.locations.length} dari ${totalPalletsNeeded} lokasi yang dibutuhkan.`, 5000);
+        error(`Gudang penuh! Hanya ditemukan ${multiRec.locations.length} dari ${totalPalletsNeeded} lokasi yang dibutuhkan.`);
         setMultiLocationRec(null);
         setRecommendedLocation(null);
         return;
@@ -644,7 +644,7 @@ export function InboundForm() {
       const isTransit = isInTransitLocation(firstLoc.cluster, parseInt(firstLoc.lorong.replace("L", "")));
       const isCrossCluster = firstLoc.cluster !== cluster;
       const transitMsg = isTransit ? (isCrossCluster ? " (In Transit Cluster C - Cross-Cluster Overflow)" : " (In Transit - Overflow)") : "";
-      success(`Rekomendasi ditemukan!\nLokasi: ${firstLoc.cluster}-${firstLoc.lorong}-${firstLoc.baris}-${firstLoc.level}${transitMsg}`, 4000);
+      success(`Rekomendasi ditemukan!\nLokasi: ${firstLoc.cluster}-${firstLoc.lorong}-${firstLoc.baris}-${firstLoc.level}${transitMsg}`);
     } else {
       let transitInfo = "";
       if (hasCrossClusterInTransit) {
@@ -655,7 +655,7 @@ export function InboundForm() {
       } else if (hasInTransit) {
         transitInfo = " (Termasuk area In Transit untuk overflow)";
       }
-      success(`${multiRec.locations.length} lokasi berhasil ditemukan untuk ${totalPalletsNeeded} pallet!${transitInfo}`, 5000);
+      success(`${multiRec.locations.length} lokasi berhasil ditemukan untuk ${totalPalletsNeeded} pallet!${transitInfo}`);
     }
   };
 
@@ -677,7 +677,7 @@ export function InboundForm() {
     const { cluster, lorong, barisStart, barisEnd, palletStart, palletEnd } = manualRange;
     
     if (!cluster || !lorong || !barisStart || !barisEnd || !palletStart || !palletEnd) {
-      error('Semua field range harus diisi!', 3000);
+      error('Semua field range harus diisi!');
       return;
     }
 
@@ -688,12 +688,12 @@ export function InboundForm() {
     const palletEndNum = parseInt(palletEnd.replace(/[^0-9]/g, ''));
 
     if (isNaN(barisStartNum) || isNaN(barisEndNum) || isNaN(palletStartNum) || isNaN(palletEndNum)) {
-      error('Format baris/pallet tidak valid! Contoh: B1, P1', 3000);
+      error('Format baris/pallet tidak valid! Contoh: B1, P1');
       return;
     }
 
     if (barisStartNum > barisEndNum || palletStartNum > palletEndNum) {
-      error('Range tidak valid! Start harus ≤ End', 3000);
+      error('Range tidak valid! Start harus ≤ End');
       return;
     }
 
@@ -711,7 +711,7 @@ export function InboundForm() {
     }
 
     if (locations.length < totalPalletsNeeded) {
-      error(`Range hanya menghasilkan ${locations.length} lokasi, tetapi butuh ${totalPalletsNeeded} lokasi!`, 4000);
+      error(`Range hanya menghasilkan ${locations.length} lokasi, tetapi butuh ${totalPalletsNeeded} lokasi!`);
       return;
     }
 
@@ -721,7 +721,7 @@ export function InboundForm() {
       : locations;
     
     if (locations.length > totalPalletsNeeded) {
-      warning(`Range menghasilkan ${locations.length} lokasi. Sistem akan menggunakan ${totalPalletsNeeded} lokasi pertama (${locationsToUse[0].cluster}-${locationsToUse[0].lorong}-${locationsToUse[0].baris}-${locationsToUse[0].pallet} s/d ${locationsToUse[locationsToUse.length-1].cluster}-${locationsToUse[locationsToUse.length-1].lorong}-${locationsToUse[locationsToUse.length-1].baris}-${locationsToUse[locationsToUse.length-1].pallet}).`, 5000);
+      warning(`Range menghasilkan ${locations.length} lokasi. Sistem akan menggunakan ${totalPalletsNeeded} lokasi pertama (${locationsToUse[0].cluster}-${locationsToUse[0].lorong}-${locationsToUse[0].baris}-${locationsToUse[0].pallet} s/d ${locationsToUse[locationsToUse.length-1].cluster}-${locationsToUse[locationsToUse.length-1].lorong}-${locationsToUse[locationsToUse.length-1].baris}-${locationsToUse[locationsToUse.length-1].pallet}).`);
     }
 
     // Check availability for selected locations
@@ -766,7 +766,7 @@ export function InboundForm() {
     } else {
       // All locations available, proceed
       setManualLocations(locations);
-      success(`${locations.length} lokasi tersedia dan siap digunakan!`, 3000);
+      success(`${locations.length} lokasi tersedia dan siap digunakan!`);
     }
   };
 
@@ -774,7 +774,7 @@ export function InboundForm() {
   const confirmOverrideLocations = () => {
     setManualLocations(expandedLocations);
     setShowAvailabilityModal(false);
-    success(`⚠️ ${expandedLocations.length} lokasi dipilih (termasuk ${occupiedLocations.length} yang sudah terisi)`, 4000);
+    success(`⚠️ ${expandedLocations.length} lokasi dipilih (termasuk ${occupiedLocations.length} yang sudah terisi)`);
   };
 
   // Reset manual range
@@ -804,7 +804,7 @@ export function InboundForm() {
     const selectedProd = getProductByCode(data.produkCode);
     
     if (!selectedProd) {
-      error(`Produk dengan kode "${data.produkCode}" tidak ditemukan di database.`, 5000);
+      error(`Produk dengan kode "${data.produkCode}" tidak ditemukan di database.`);
       return;
     }
 
@@ -812,7 +812,7 @@ export function InboundForm() {
     const { expiredDate: parsedExpDate, kdPlant: parsedKdPlant, isValid } = parseBBProduk(data.bbProduk);
     
     if (!isValid) {
-      error(`BB Produk "${data.bbProduk}" tidak valid. Format harus YYMMDDXXXX dengan tanggal valid.`, 5000);
+      error(`BB Produk "${data.bbProduk}" tidak valid. Format harus YYMMDDXXXX dengan tanggal valid.`);
       return;
     }
 
@@ -842,7 +842,7 @@ export function InboundForm() {
     setErrors({});
     
     // Show success notification
-    success(`QR Scan Berhasil!\n\nData telah diisi:\n- Ekspedisi: ${data.ekspedisi}\n- Produk: ${selectedProd.productName}\n- Qty: ${data.qtyPallet} Pallet + ${data.qtyCarton} Karton\n- BB: ${data.bbProduk}`, 6000);
+    success(`QR Scan Berhasil!\n\nData telah diisi:\n- Ekspedisi: ${data.ekspedisi}\n- Produk: ${selectedProd.productName}\n- Qty: ${data.qtyPallet} Pallet + ${data.qtyCarton} Karton\n- BB: ${data.bbProduk}`);
   };
 
   // Confirm submit after validation
@@ -1079,7 +1079,7 @@ export function InboundForm() {
               <QRScanner 
                 onScanSuccess={handleQRScanSuccess}
                 onScanError={(errorMsg) => {
-                  error(errorMsg, 5000);
+                  error(errorMsg);
                 }}
               />
             </div>
