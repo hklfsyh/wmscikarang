@@ -35,8 +35,54 @@ export interface OutboundHistory {
   createdAt: string;
 }
 
+// Helper: Get today's date string
+const getTodayString = () => new Date().toISOString().slice(0, 10);
+const getTodayISOWithTime = (hour: number, minute: number) => {
+  const today = new Date();
+  today.setHours(hour, minute, 0, 0);
+  return today.toISOString();
+};
+
 // Mock Inbound History Data
 export const inboundHistoryData: InboundHistory[] = [
+  // --- DATA HARI INI (untuk testing fitur Edit & Batal) ---
+  {
+    id: "INB-TODAY-001",
+    tanggal: getTodayString(),
+    ekspedisi: "HGS",
+    namaPengemudi: "Test Driver 1",
+    noDN: "DN-TEST-001",
+    nomorPolisi: "B 1234 TEST",
+    productCode: "166126",
+    productName: "220ML AQUA CUBE MINI BOTTLE LOCAL 1X24",
+    qtyPallet: 2,
+    qtyCarton: 216,
+    totalPcs: 5184,
+    bbProduk: "2606150067",
+    expiredDate: "2026-06-15",
+    location: "A-L1-B1-P1, A-L1-B2-P1",
+    status: "completed",
+    createdAt: getTodayISOWithTime(8, 30),
+  },
+  {
+    id: "INB-TODAY-002",
+    tanggal: getTodayString(),
+    ekspedisi: "SJP",
+    namaPengemudi: "Test Driver 2",
+    noDN: "DN-TEST-002",
+    nomorPolisi: "B 5678 TEST",
+    productCode: "74553",
+    productName: "1500ML AQUA LOCAL 1X12",
+    qtyPallet: 3,
+    qtyCarton: 210,
+    totalPcs: 2520,
+    bbProduk: "2607200067",
+    expiredDate: "2026-07-20",
+    location: "B-L1-B1-P1, B-L1-B2-P1, B-L1-B3-P1",
+    status: "completed",
+    createdAt: getTodayISOWithTime(9, 15),
+  },
+  // --- DATA LAMA ---
   {
     id: "INB-2025-001",
     tanggal: "2025-12-16",
@@ -185,6 +231,36 @@ export const inboundHistoryData: InboundHistory[] = [
 
 // Mock Outbound History Data
 export const outboundHistoryData: OutboundHistory[] = [
+  // --- DATA HARI INI (untuk testing fitur Edit & Batal) ---
+  {
+    id: "OUT-TODAY-001",
+    tanggal: getTodayString(),
+    namaPengemudi: "Test Outbound Driver 1",
+    nomorPolisi: "B 9999 OUT",
+    productCode: "166126",
+    productName: "220ML AQUA CUBE MINI BOTTLE LOCAL 1X24",
+    qtyPallet: 2,
+    qtyCarton: 216,
+    totalPcs: 5184,
+    locations: ["A-L1-B3-P1", "A-L1-B4-P1"],
+    status: "completed",
+    createdAt: getTodayISOWithTime(10, 0),
+  },
+  {
+    id: "OUT-TODAY-002",
+    tanggal: getTodayString(),
+    namaPengemudi: "Test Outbound Driver 2",
+    nomorPolisi: "B 8888 OUT",
+    productCode: "74553",
+    productName: "1500ML AQUA LOCAL 1X12",
+    qtyPallet: 1,
+    qtyCarton: 70,
+    totalPcs: 840,
+    locations: ["B-L1-B4-P1"],
+    status: "completed",
+    createdAt: getTodayISOWithTime(11, 30),
+  },
+  // --- DATA LAMA ---
   {
     id: "OUT-2025-001",
     tanggal: "2025-12-16",

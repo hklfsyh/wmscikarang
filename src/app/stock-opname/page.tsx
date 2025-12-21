@@ -2,7 +2,6 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { productMasterData } from "@/lib/mock/product-master";
-import { stockListData } from "@/lib/mock/stocklistmock";
 import { useToast, ToastContainer } from "@/components/toast";
 
 type AuditItem = {
@@ -12,7 +11,7 @@ type AuditItem = {
 };
 
 export default function StockOpnamePage() {
-  const { showToast, toasts, removeToast } = useToast();
+  const { toasts, removeToast } = useToast();
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [currentTime, setCurrentTime] = useState("");
 
@@ -31,7 +30,7 @@ export default function StockOpnamePage() {
     productMasterData.map((product) => ({
       productCode: product.productCode,
       productName: product.productName,
-      auditQty: '' as any, // Kosong agar user wajib mengisi
+      auditQty: '' as string, // Kosong agar user wajib mengisi
     }))
   );
 
@@ -172,7 +171,7 @@ export default function StockOpnamePage() {
     setTimeout(() => {
       setShowSuccessModal(false);
       setAuditItems((prev) =>
-        prev.map((item) => ({ ...item, auditQty: '' as any }))
+        prev.map((item) => ({ ...item, auditQty: '' as string }))
       );
       setAuditorName("");
     }, 3000);
@@ -392,7 +391,7 @@ export default function StockOpnamePage() {
             type="button"
             onClick={() => {
               setAuditItems((prev) =>
-                prev.map((item) => ({ ...item, auditQty: '' as any }))
+                prev.map((item) => ({ ...item, auditQty: '' as string }))
               );
               setAuditorName("");
             }}

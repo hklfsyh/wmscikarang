@@ -58,6 +58,11 @@ export function OutboundForm() {
   // --- HISTORY DETAIL MODAL STATE ---
   const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(false);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<typeof outboundHistoryData[0] | null>(null);
+  
+  // --- EDIT & BATAL MODAL STATE ---
+  const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
+  const [showBatalConfirmModal, setShowBatalConfirmModal] = useState(false);
+  const [selectedItemForAction, setSelectedItemForAction] = useState<typeof outboundHistoryData[0] | null>(null);
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -259,6 +264,224 @@ export function OutboundForm() {
     setFefoLocations([]);
   }
 
+  // --- FILTER TRANSAKSI HARI INI ---
+  const todayTransactions = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return outboundHistoryData.filter(item => item.tanggal === todayStr);
+  }, []);
+
+  // --- HANDLE EDIT TRANSAKSI ---
+  const handleEditClick = (item: typeof outboundHistoryData[0]) => {
+    setSelectedItemForAction(item);
+    setShowEditConfirmModal(true);
+  };
+
+  const confirmEdit = () => {
+    if (!selectedItemForAction) return;
+
+    // 1. Kembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)
+    selectedItemForAction.locations.forEach(locationStr => {
+      const parts = locationStr.split('-');
+      const loc = {
+        cluster: parts[0],
+        lorong: parts[1],
+        baris: parts[2],
+        level: parts[3]
+      };
+
+      // Cek apakah lokasi sudah terisi oleh produk lain
+      const existingStock = stockListData.find(
+        s => s.location.cluster === loc.cluster &&
+             s.location.lorong === loc.lorong &&
+             s.location.baris === loc.baris &&
+             s.location.level === loc.level
+      );
+
+      // Ambil data produk
+      const productData = getProductByCode(selectedItemForAction.productCode);
+
+      const qtyPerCarton = productData?.qtyPerCarton || 1;
+      const qtyCarton = productData?.qtyPerPallet || 0;
+
+      if (existingStock) {
+        // Lokasi sudah terisi, pindahkan ke In Transit (Cluster C)
+        const inTransitLoc = findAvailableInTransitLocation();
+        if (inTransitLoc) {
+          stockListData.push({
+            id: `STK-RETURN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            productCode: selectedItemForAction.productCode,
+            productName: selectedItemForAction.productName,
+            location: inTransitLoc,
+            qtyPallet: 1,
+            qtyCarton: qtyCarton,
+            qtyPcs: qtyCarton * qtyPerCarton,
+            bbPallet: "RETURNED",
+            batchNumber: "RETURNED",
+            lotNumber: "RETURNED",
+            expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+            inboundDate: new Date().toISOString().slice(0, 10),
+            status: "release"
+          });
+        }
+      } else {
+        // Lokasi kosong, kembalikan ke lokasi asal
+        stockListData.push({
+          id: `STK-RETURN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          productCode: selectedItemForAction.productCode,
+          productName: selectedItemForAction.productName,
+          location: loc,
+          qtyPallet: 1,
+          qtyCarton: qtyCarton,
+          qtyPcs: qtyCarton * qtyPerCarton,
+          bbPallet: "RETURNED",
+          batchNumber: "RETURNED",
+          lotNumber: "RETURNED",
+          expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+          inboundDate: new Date().toISOString().slice(0, 10),
+          status: "release"
+        });
+      }
+    });
+
+    // 2. Hapus dari history
+    const historyIndex = outboundHistoryData.findIndex(h => h.id === selectedItemForAction.id);
+    if (historyIndex !== -1) {
+      outboundHistoryData.splice(historyIndex, 1);
+    }
+
+    // 3. Load data ke form untuk di-edit
+    const selectedProd = getProductByCode(selectedItemForAction.productCode);
+    const qtyPerPallet = selectedProd?.qtyPerPallet || 1;
+    const totalCarton = selectedItemForAction.qtyCarton;
+    const fullPallets = Math.floor(totalCarton / qtyPerPallet);
+    const remainingCartons = totalCarton % qtyPerPallet;
+
+    setForm({
+      tanggal: selectedItemForAction.tanggal,
+      namaPengemudi: selectedItemForAction.namaPengemudi,
+      nomorPolisi: selectedItemForAction.nomorPolisi,
+      productCode: selectedItemForAction.productCode,
+      qtyPalletInput: String(fullPallets),
+      qtyCartonInput: String(remainingCartons),
+    });
+
+    // 4. Reset state
+    setShowEditConfirmModal(false);
+    setSelectedItemForAction(null);
+    setFefoLocations([]);
+
+    success(`Data transaksi ${selectedItemForAction.id} telah dimuat ke form. Stock dikembalikan. Silakan edit dan submit ulang.`);
+  };
+
+  // Helper: Cari lokasi In Transit yang kosong
+  const findAvailableInTransitLocation = () => {
+    // In Transit area di Cluster C, Lorong L11-L12
+    for (let lorong = 11; lorong <= 12; lorong++) {
+      for (let baris = 1; baris <= 9; baris++) {
+        for (let pallet = 1; pallet <= 3; pallet++) {
+          const loc = {
+            cluster: "C",
+            lorong: `L${lorong}`,
+            baris: `B${baris}`,
+            level: `P${pallet}`
+          };
+          const exists = stockListData.some(
+            s => s.location.cluster === loc.cluster &&
+                 s.location.lorong === loc.lorong &&
+                 s.location.baris === loc.baris &&
+                 s.location.level === loc.level
+          );
+          if (!exists) return loc;
+        }
+      }
+    }
+    return null;
+  };
+
+  // --- HANDLE BATAL TRANSAKSI ---
+  const handleBatalClick = (item: typeof outboundHistoryData[0]) => {
+    setSelectedItemForAction(item);
+    setShowBatalConfirmModal(true);
+  };
+
+  const confirmBatal = () => {
+    if (!selectedItemForAction) return;
+
+    // 1. Kembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)
+    selectedItemForAction.locations.forEach(locationStr => {
+      const parts = locationStr.split('-');
+      const loc = {
+        cluster: parts[0],
+        lorong: parts[1],
+        baris: parts[2],
+        level: parts[3]
+      };
+
+      // Cek apakah lokasi sudah terisi oleh produk lain
+      const existingStock = stockListData.find(
+        s => s.location.cluster === loc.cluster &&
+             s.location.lorong === loc.lorong &&
+             s.location.baris === loc.baris &&
+             s.location.level === loc.level
+      );
+
+      // Ambil data produk
+      const productData = getProductByCode(selectedItemForAction.productCode);
+      const qtyPerCarton = productData?.qtyPerCarton || 1;
+      const qtyCarton = productData?.qtyPerPallet || 0;
+
+      if (existingStock) {
+        // Lokasi sudah terisi, pindahkan ke In Transit
+        const inTransitLoc = findAvailableInTransitLocation();
+        if (inTransitLoc) {
+          stockListData.push({
+            id: `STK-RETURN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            productCode: selectedItemForAction.productCode,
+            productName: selectedItemForAction.productName,
+            location: inTransitLoc,
+            qtyPallet: 1,
+            qtyCarton: qtyCarton,
+            qtyPcs: qtyCarton * qtyPerCarton,
+            bbPallet: "RETURNED",
+            batchNumber: "RETURNED",
+            lotNumber: "RETURNED",
+            expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+            inboundDate: new Date().toISOString().slice(0, 10),
+            status: "release"
+          });
+        }
+      } else {
+        // Lokasi kosong, kembalikan ke lokasi asal
+        stockListData.push({
+          id: `STK-RETURN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          productCode: selectedItemForAction.productCode,
+          productName: selectedItemForAction.productName,
+          location: loc,
+          qtyPallet: 1,
+          qtyCarton: qtyCarton,
+          qtyPcs: qtyCarton * qtyPerCarton,
+          bbPallet: "RETURNED",
+          batchNumber: "RETURNED",
+          lotNumber: "RETURNED",
+          expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+          inboundDate: new Date().toISOString().slice(0, 10),
+          status: "release"
+        });
+      }
+    });
+
+    // 2. Hapus dari history
+    const historyIndex = outboundHistoryData.findIndex(h => h.id === selectedItemForAction.id);
+    if (historyIndex !== -1) {
+      outboundHistoryData.splice(historyIndex, 1);
+    }
+
+    // 3. Reset state
+    setShowBatalConfirmModal(false);
+    setSelectedItemForAction(null);
+
+    success(`Transaksi ${selectedItemForAction.id} telah dibatalkan. Stock telah dikembalikan.`);
+  };
 
   return (
     <div className="min-h-screen bg-linear-to-br from-orange-50 to-red-100 p-4 md:p-8">
@@ -934,92 +1157,103 @@ export function OutboundForm() {
         </div>
       )}
 
-      {/* Last Transaction History */}
-      {outboundHistoryData.length > 0 && (
-        <div className="mt-8 bg-white rounded-2xl shadow-xl p-6">
-          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+      {/* Tabel Transaksi Hari Ini */}
+      <div className="mt-8 bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="bg-gradient-to-r from-orange-500 to-red-600 px-6 py-4">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <span className="text-2xl">📋</span>
-            Transaksi Terakhir
+            Transaksi Hari Ini
           </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gradient-to-r from-orange-500 to-red-600 text-white">
-                <tr>
-                  <th className="px-3 py-3 text-left text-xs font-bold">Tanggal</th>
-                  <th className="px-3 py-3 text-left text-xs font-bold">Pengemudi</th>
-                  <th className="px-3 py-3 text-left text-xs font-bold">Produk</th>
-                  <th className="px-2 py-3 text-center text-xs font-bold">Qty Pallet</th>
-                  <th className="px-2 py-3 text-center text-xs font-bold">Qty Carton</th>
-                  <th className="px-2 py-3 text-center text-xs font-bold">Status</th>
-                  <th className="px-2 py-3 text-center text-xs font-bold">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {(() => {
-                  const lastItem = outboundHistoryData[0];
-                  const formatDate = (dateStr: string) => {
-                    const date = new Date(dateStr);
-                    return date.toLocaleDateString("id-ID", {
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                    });
-                  };
-                  return (
-                    <tr key={lastItem.id} className="hover:bg-orange-50 transition-colors">
-                      <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
-                        {formatDate(lastItem.tanggal)}
-                      </td>
-                      <td className="px-3 py-2 text-xs font-semibold text-gray-800 whitespace-nowrap">
-                        {lastItem.namaPengemudi}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="text-xs max-w-[250px]">
-                          <div className="font-mono text-orange-600">{lastItem.productCode}</div>
-                          <div className="font-semibold text-gray-800 truncate" title={lastItem.productName}>
-                            {lastItem.productName}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-2 py-2 text-center text-xs font-bold text-green-600">
-                        {lastItem.qtyPallet}
-                      </td>
-                      <td className="px-2 py-2 text-center text-xs font-bold text-blue-600">
-                        {lastItem.qtyCarton}
-                      </td>
-                      <td className="px-2 py-2 text-center">
-                        {lastItem.status === "completed" ? (
-                          <span className="inline-block px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-bold whitespace-nowrap">
-                            ✓ Done
-                          </span>
-                        ) : (
-                          <span className="inline-block px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-xs font-bold whitespace-nowrap">
-                            ⚠ Partial
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-2 py-2 text-center">
-                        <button
-                          onClick={() => {
-                            setSelectedHistoryItem(lastItem);
-                            setShowHistoryDetailModal(true);
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-orange-500 text-white text-xs font-semibold rounded-lg hover:bg-orange-600 transition-colors"
-                        >
-                          📄 Detail
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })()}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-xs text-gray-500 mt-3 text-center">
-            Menampilkan 1 transaksi terakhir dari total {outboundHistoryData.length} transaksi
+          <p className="text-orange-100 text-sm mt-1">
+            {new Date().toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
           </p>
         </div>
-      )}
+        {todayTransactions.length === 0 ? (
+          <div className="px-6 py-12 text-center">
+            <div className="text-6xl mb-4">📭</div>
+            <p className="text-gray-500 font-medium">Belum ada transaksi outbound hari ini</p>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Waktu</th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Pengemudi</th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Produk</th>
+                    <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Pallet</th>
+                    <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Carton</th>
+                    <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {todayTransactions.map((item) => (
+                    <tr key={item.id} className="hover:bg-orange-50 transition-colors">
+                      <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
+                        {new Date(item.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                      </td>
+                      <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">
+                        {item.namaPengemudi}
+                      </td>
+                      <td className="px-3 py-3 text-sm">
+                        <div className="font-medium text-gray-900">{item.productCode}</div>
+                        <div className="text-gray-500 text-xs truncate max-w-[150px]">{item.productName}</div>
+                      </td>
+                      <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
+                        {item.qtyPallet}
+                      </td>
+                      <td className="px-2 py-3 text-sm text-center font-bold text-blue-600">
+                        {item.qtyCarton}
+                      </td>
+                      <td className="px-2 py-3 text-center">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          item.status === "completed"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-yellow-100 text-yellow-800"
+                        }`}>
+                          {item.status === "completed" ? "✓" : "⚠"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => {
+                              setSelectedHistoryItem(item);
+                              setShowHistoryDetailModal(true);
+                            }}
+                            className="px-2 py-1 bg-orange-500 text-white text-xs font-semibold rounded hover:bg-orange-600 transition-colors"
+                          >
+                            Detail
+                          </button>
+                          <button
+                            onClick={() => handleEditClick(item)}
+                            className="px-2 py-1 bg-amber-500 text-white text-xs font-semibold rounded hover:bg-amber-600 transition-colors"
+                          >
+                            Ubah
+                          </button>
+                          <button
+                            onClick={() => handleBatalClick(item)}
+                            className="px-2 py-1 bg-red-500 text-white text-xs font-semibold rounded hover:bg-red-600 transition-colors"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="bg-gray-50 px-6 py-3 border-t border-gray-200">
+              <p className="text-sm text-gray-600 text-center">
+                {todayTransactions.length} transaksi hari ini
+              </p>
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Modal Detail Transaksi Outbound */}
       {showHistoryDetailModal && selectedHistoryItem && (
@@ -1194,6 +1428,126 @@ export function OutboundForm() {
               >
                 Tutup
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Edit */}
+      {showEditConfirmModal && selectedItemForAction && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setShowEditConfirmModal(false)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-4">
+              <h2 className="text-xl font-bold text-white">✏️ Edit Transaksi</h2>
+            </div>
+            <div className="p-6">
+              <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mb-4">
+                <p className="text-amber-800 font-medium text-sm">
+                  ⚠️ Tindakan ini akan:
+                </p>
+                <ul className="text-amber-700 text-sm mt-2 space-y-1 list-disc list-inside">
+                  <li>Membatalkan transaksi <strong>{selectedItemForAction.id}</strong></li>
+                  <li>Mengembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)</li>
+                  <li>Memuat data ke form untuk di-edit ulang</li>
+                </ul>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-4 mb-4">
+                <p className="text-sm text-gray-600 mb-2">Detail transaksi:</p>
+                <div className="text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Produk:</span>
+                    <span className="font-semibold text-gray-900">{selectedItemForAction.productCode}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Qty:</span>
+                    <span className="font-semibold text-gray-900">{selectedItemForAction.qtyPallet} pallet, {selectedItemForAction.qtyCarton} karton</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Lokasi:</span>
+                    <span className="font-semibold text-gray-900 text-xs">{selectedItemForAction.locations.join(', ')}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowEditConfirmModal(false)}
+                  className="flex-1 px-4 py-2.5 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={confirmEdit}
+                  className="flex-1 px-4 py-2.5 bg-amber-500 text-white font-semibold rounded-lg hover:bg-amber-600 transition-colors"
+                >
+                  Ya, Edit
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Batal */}
+      {showBatalConfirmModal && selectedItemForAction && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setShowBatalConfirmModal(false)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-r from-red-500 to-pink-600 px-6 py-4">
+              <h2 className="text-xl font-bold text-white">❌ Batalkan Transaksi</h2>
+            </div>
+            <div className="p-6">
+              <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-4">
+                <p className="text-red-800 font-medium text-sm">
+                  ⚠️ Tindakan ini akan:
+                </p>
+                <ul className="text-red-700 text-sm mt-2 space-y-1 list-disc list-inside">
+                  <li>Membatalkan transaksi <strong>{selectedItemForAction.id}</strong></li>
+                  <li>Mengembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)</li>
+                  <li>Menghapus record dari history</li>
+                </ul>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-4 mb-4">
+                <p className="text-sm text-gray-600 mb-2">Detail transaksi:</p>
+                <div className="text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Produk:</span>
+                    <span className="font-semibold text-gray-900">{selectedItemForAction.productCode}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Qty:</span>
+                    <span className="font-semibold text-gray-900">{selectedItemForAction.qtyPallet} pallet, {selectedItemForAction.qtyCarton} karton</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Lokasi:</span>
+                    <span className="font-semibold text-gray-900 text-xs">{selectedItemForAction.locations.join(', ')}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowBatalConfirmModal(false)}
+                  className="flex-1 px-4 py-2.5 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Tidak
+                </button>
+                <button
+                  onClick={confirmBatal}
+                  className="flex-1 px-4 py-2.5 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-colors"
+                >
+                  Ya, Batalkan
+                </button>
+              </div>
             </div>
           </div>
         </div>

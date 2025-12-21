@@ -120,7 +120,7 @@ export default function ProductHomeEditor({
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Product Home Assignment</h2>
           <p className="text-sm text-gray-600 mt-1">
-            Atur lokasi "rumah" produk: cluster, lorong, baris, dan kapasitas maksimal
+            Atur lokasi &quot;rumah&quot; produk: cluster, lorong, baris, dan kapasitas maksimal
           </p>
         </div>
         <button
@@ -486,7 +486,7 @@ export default function ProductHomeEditor({
                 Apakah Anda yakin ingin menghapus assignment untuk{" "}
                 <strong>{selectedProductHome.productName}</strong>?
                 <br />
-                Produk ini akan kehilangan aturan lokasi "rumah"nya.
+                Produk ini akan kehilangan aturan lokasi &quot;rumah&quot;nya.
               </p>
             </div>
 

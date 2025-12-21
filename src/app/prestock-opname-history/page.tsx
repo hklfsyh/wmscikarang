@@ -27,7 +27,7 @@ export default function PrestockOpnameHistoryPage() {
   
   // Reconciliation state
   const [reconciliationNotes, setReconciliationNotes] = useState<{ [productCode: string]: string }>({});
-  const [superadminName, setSuperadminName] = useState("Superadmin 1"); // Hardcoded untuk demo
+  const superadminName = "Superadmin 1"; // Hardcoded untuk demo
 
   // Load data on mount
   useEffect(() => {
@@ -114,7 +114,7 @@ export default function PrestockOpnameHistoryPage() {
 
     // Build reconciliation notes array
     const notes: ReconciliationNote[] = Object.entries(reconciliationNotes)
-      .filter(([_, reason]) => reason.trim() !== "")
+      .filter(([, reason]) => reason.trim() !== "")
       .map(([productCode, reason]) => ({
         productCode,
         reason,
@@ -338,7 +338,7 @@ export default function PrestockOpnameHistoryPage() {
             </label>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
+              onChange={(e) => setStatusFilter(e.target.value as "ALL" | "pending" | "reconciled")}
               className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
             >
               <option value="ALL">Semua Status</option>

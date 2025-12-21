@@ -308,7 +308,7 @@ export const getPrestockOpnameHistory = (): PrestockOpnameHistory[] => {
     try {
       const parsed = JSON.parse(saved);
       // Pastikan setiap item memiliki reconciliationStatus dan reconciliationNotes
-      return parsed.map((item: any) => ({
+      return parsed.map((item: Partial<PrestockOpnameHistory>) => ({
         ...item,
         reconciliationStatus: item.reconciliationStatus || 'pending',
         reconciliationNotes: item.reconciliationNotes || [],

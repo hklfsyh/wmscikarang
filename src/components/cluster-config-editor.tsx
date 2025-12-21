@@ -131,7 +131,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
     });
   };
 
-  const handleUpdateCustomLorong = (index: number, field: string, value: any) => {
+  const handleUpdateCustomLorong = (index: number, field: string, value: number) => {
     if (!editData) return;
     
     const updated = [...(editData.customLorongConfig || [])];
@@ -176,7 +176,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
     });
   };
 
-  const handleUpdateCustomCell = (index: number, field: string, value: any) => {
+  const handleUpdateCustomCell = (index: number, field: string, value: number) => {
     if (!editData) return;
     
     const updated = [...(editData.customCellConfig || [])];
@@ -658,7 +658,8 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                           onChange={(e) => {
                             const val = parseInt(e.target.value);
                             if (isNaN(val) || val === 0) {
-                              const { inTransitLorongRange: _, ...rest } = editData!;
+                              const { inTransitLorongRange: omit, ...rest } = editData!;
+                              void omit;
                               setEditData(rest as ClusterConfig);
                             } else {
                               setEditData({
@@ -682,7 +683,8 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                           onChange={(e) => {
                             const val = parseInt(e.target.value);
                             if (isNaN(val) || val === 0) {
-                              const { inTransitLorongRange: _, ...rest } = editData!;
+                              const { inTransitLorongRange: omit2, ...rest } = editData!;
+                              void omit2;
                               setEditData(rest as ClusterConfig);
                             } else {
                               setEditData({
@@ -1020,7 +1022,8 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                       onChange={(e) => {
                         const val = parseInt(e.target.value);
                         if (isNaN(val) || val === 0) {
-                          const { inTransitLorongRange: _, ...rest } = formData;
+                          const { inTransitLorongRange: omit3, ...rest } = formData;
+                          void omit3;
                           setFormData(rest);
                         } else {
                           setFormData({
@@ -1044,7 +1047,8 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                       onChange={(e) => {
                         const val = parseInt(e.target.value);
                         if (isNaN(val) || val === 0) {
-                          const { inTransitLorongRange: _, ...rest } = formData;
+                          const { inTransitLorongRange: omit4, ...rest } = formData;
+                          void omit4;
                           setFormData(rest);
                         } else {
                           setFormData({

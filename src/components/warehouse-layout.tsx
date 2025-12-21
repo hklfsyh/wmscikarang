@@ -492,6 +492,7 @@ export function WarehouseLayout() {
   }, [filteredCells]);
 
   // FIX: Perhitungan Dinamis untuk Legend (Berdasarkan actual cells yang di-generate)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _getStockStats = () => {
     const stats = {
       totalItems: 0,
@@ -562,69 +563,60 @@ export function WarehouseLayout() {
 
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header (Diambil dari file yang Anda inginkan) */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
-                Warehouse Layout Visualization
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-600">
-                Peta lokasi stok produk dengan struktur dinamis berdasarkan konfigurasi cluster (Cluster × Lorong × Baris × Pallet).
-              </p>
-            </div>
-          </div>
+    <div className="min-h-screen bg-slate-50">
+      <div className="w-full max-w-full">
+        {/* Header */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 sm:p-4 mb-3">
+          <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-900 mb-1">
+            Warehouse Layout
+          </h1>
+          <p className="text-[10px] sm:text-xs text-slate-600">
+            Peta lokasi stok produk (Cluster × Lorong × Baris × Pallet)
+          </p>
         </div>
 
         {/* Quick Filter & Search */}
-        <div className="bg-white rounded-xl shadow-xl p-6 mb-6 mt-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">🔍 Pencarian & Filter</h2>
-            <p className="text-gray-500 text-sm mb-4">Filter layout gudang berdasarkan cluster, lorong, baris, produk, atau status</p>
+        <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 mb-3">
+            <h2 className="text-sm sm:text-base font-bold text-gray-800 mb-2">🔍 Pencarian & Filter</h2>
 
             {/* Search Bar */}
-            <div className="mb-4">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Pencarian Global
-              </label>
-              <div className="flex items-center gap-3">
+            <div className="mb-3">
+              <div className="flex items-center gap-2">
                 <input
                     type="text"
-                    placeholder="Cari Lokasi (A-L1-B2-P3), Produk (Code/Name), atau BB Pallet..."
-                    className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                    placeholder="Cari Lokasi, Produk, atau BB Pallet..."
+                    className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                 />
                 {searchQuery && (
                   <button
                       onClick={() => setSearchQuery("")}
-                      className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors flex items-center gap-2"
+                      className="px-2 sm:px-3 py-1.5 sm:py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors flex items-center gap-1"
                   >
-                      <X size={18} />
-                      <span className="hidden sm:inline">Clear</span>
+                      <X size={14} />
                   </button>
                 )}
               </div>
             </div>
 
             {/* Advanced Filters */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
               {/* Cluster Filter */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
                   Cluster
                 </label>
                 <select
                   value={clusterFilter}
                   onChange={(e) => {
                     setClusterFilter(e.target.value as "ALL" | "A" | "B" | "C" | "D" | "E");
-                    setLorongFilter("ALL"); // Reset lorong when cluster changes
-                    setBarisFilter("ALL"); // Reset baris when cluster changes
+                    setLorongFilter("ALL");
+                    setBarisFilter("ALL");
                   }}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
                 >
-                  <option value="ALL">Semua Cluster</option>
+                  <option value="ALL">Semua</option>
                   {clusterConfigs.filter(c => c.isActive).map(c => (
                     <option key={c.cluster} value={c.cluster}>Cluster {c.cluster}</option>
                   ))}
@@ -633,70 +625,70 @@ export function WarehouseLayout() {
 
               {/* Lorong Filter */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
                   Lorong
                 </label>
                 <select
                   value={lorongFilter}
                   onChange={(e) => {
                     setLorongFilter(e.target.value);
-                    setBarisFilter("ALL"); // Reset baris when lorong changes
+                    setBarisFilter("ALL");
                   }}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
                 >
-                  <option value="ALL">Semua Lorong</option>
+                  <option value="ALL">Semua</option>
                   {uniqueLorongs.map(l => (
-                    <option key={l} value={l}>Lorong {l}</option>
+                    <option key={l} value={l}>L{l}</option>
                   ))}
                 </select>
               </div>
 
               {/* Baris Filter */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
                   Baris
                 </label>
                 <select
                   value={barisFilter}
                   onChange={(e) => setBarisFilter(e.target.value)}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
                 >
-                  <option value="ALL">Semua Baris</option>
+                  <option value="ALL">Semua</option>
                   {uniqueBaris.map(b => (
-                    <option key={b} value={b}>Baris {b}</option>
+                    <option key={b} value={b}>B{b}</option>
                   ))}
                 </select>
               </div>
 
               {/* Product Filter */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
                   Produk
                 </label>
                 <select
                   value={productFilter}
                   onChange={(e) => setProductFilter(e.target.value)}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
                 >
-                  <option value="ALL">Semua Produk</option>
+                  <option value="ALL">Semua</option>
                   {uniqueProducts.map(p => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p} value={p}>{p.length > 15 ? p.substring(0, 15) + '...' : p}</option>
                   ))}
                 </select>
               </div>
 
               {/* Status Filter */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
                   Status
                 </label>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as "ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER")}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
                 >
-                  <option value="ALL">Semua Status</option>
-                  <option value="RELEASE">RELEASE (Green)</option>
+                  <option value="ALL">Semua</option>
+                  <option value="RELEASE">Release</option>
                   <option value="HOLD">HOLD (Yellow)</option>
                   <option value="RECEH">RECEH (Blue)</option>
                   <option value="WRONG_CLUSTER">WRONG CLUSTER (Red)</option>
@@ -705,9 +697,9 @@ export function WarehouseLayout() {
             </div>
 
             {/* Reset All Filters Button */}
-            <div className="mt-4 flex justify-between items-center">
-              <p className="text-sm text-gray-600">
-                {filteredCells.length} dari {warehouseCells.length} lokasi ditampilkan
+            <div className="mt-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <p className="text-[10px] sm:text-xs text-gray-600">
+                {filteredCells.length} dari {warehouseCells.length} lokasi
               </p>
               <button
                 onClick={() => {
@@ -718,21 +710,20 @@ export function WarehouseLayout() {
                   setProductFilter("ALL");
                   setStatusFilter("ALL");
                 }}
-                className="px-6 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-semibold flex items-center gap-2"
+                className="px-3 py-1.5 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-semibold flex items-center gap-1"
               >
-                <X size={18} />
-                Reset Semua Filter
+                <X size={12} />
+                Reset
               </button>
             </div>
         </div>
 
-        {/* Warehouse View Sesuai Template Lama */}
-        <div className="space-y-6">
+        {/* Warehouse View */}
+        <div className="space-y-3">
           {clusterConfigs.filter(c => c.isActive).map((clusterConfig) => {
             const cluster = clusterConfig.cluster;
             const clusterCells = cellsByCluster[cluster] || [];
             
-            // FILTER: Skip cluster jika tidak ada cell yang cocok dengan filter
             if (clusterCells.length === 0) {
               return null;
             }
@@ -742,44 +733,39 @@ export function WarehouseLayout() {
               return sum + group.pallets.filter(p => p.product).length;
             }, 0);
             
-            // DYNAMIC: Calculate total slots for this cluster (only filtered cells)
             const totalCount = clusterCells.reduce((sum, group) => {
               return sum + group.pallets.length;
             }, 0);
             
             return (
               <div key={cluster} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                {/* Cluster Header - Clickable */}
+                {/* Cluster Header */}
                 <button
                   onClick={() => toggleCluster(cluster)}
-                  className="w-full px-4 sm:px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
+                  className="w-full px-3 sm:px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors"
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="bg-blue-500 text-white w-10 h-10 sm:w-12 sm:h-12 rounded-lg flex items-center justify-center text-base sm:text-lg font-bold">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <span className="bg-blue-500 text-white w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center text-sm sm:text-base font-bold">
                       {cluster}
                     </span>
                     <div className="text-left">
-                      <h2 className="text-lg sm:text-xl font-bold text-slate-900">
+                      <h2 className="text-sm sm:text-base font-bold text-slate-900">
                         Cluster {cluster}
                       </h2>
-                      <p className="text-xs sm:text-sm text-slate-500">
-                        {filledCount} dari {totalCount} slot di Lorong L1-L{clusterConfig.defaultLorongCount} terisi
+                      <p className="text-[10px] sm:text-xs text-slate-500">
+                        {filledCount} dari {totalCount} slot di L1-L{clusterConfig.defaultLorongCount} terisi
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {isOpen ? (
-                      <span className="text-slate-400">▲</span>
-                    ) : (
-                      <span className="text-slate-400">▼</span>
-                    )}
-                  </div>
+                  <span className="text-slate-400 text-sm">
+                    {isOpen ? "▲" : "▼"}
+                  </span>
                 </button>
                 
-                {/* Cluster Content - Collapsible */}
+                {/* Cluster Content */}
                 {isOpen && (
-                  <div className="px-4 sm:px-6 pb-4 sm:pb-6 border-t border-slate-200">
-                    <div className="mt-4">
+                  <div className="px-2 sm:px-4 pb-3 sm:pb-4 border-t border-slate-200">
+                    <div className="mt-3">
                       <div className="overflow-x-auto">
                         <div className="inline-block min-w-full">
                           {(() => {
@@ -890,29 +876,29 @@ export function WarehouseLayout() {
                         </div>
                       </div>
                     
-                    {/* Info untuk cluster ini */}
-                    <div className="mt-4 pt-4 border-t border-slate-200">
-                      <div className="flex flex-wrap gap-4 text-xs text-slate-600">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded bg-green-500" />
-                          <span>Release (Expired dekat)</span>
+                    {/* Legend */}
+                    <div className="mt-3 pt-3 border-t border-slate-200">
+                      <div className="flex flex-wrap gap-2 sm:gap-3 text-[10px] sm:text-xs text-slate-600">
+                        <div className="flex items-center gap-1">
+                          <div className="w-2.5 h-2.5 rounded bg-green-500" />
+                          <span>Release</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded bg-yellow-400" />
-                          <span>Hold (Expired jauh)</span>
+                        <div className="flex items-center gap-1">
+                          <div className="w-2.5 h-2.5 rounded bg-yellow-400" />
+                          <span>Hold</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded bg-blue-500" />
-                          <span>Receh (Ada sisa)</span>
+                        <div className="flex items-center gap-1">
+                          <div className="w-2.5 h-2.5 rounded bg-blue-500" />
+                          <span>Receh</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded bg-red-500" />
+                        <div className="flex items-center gap-1">
+                          <div className="w-2.5 h-2.5 rounded bg-red-500" />
                           <span>Salah Cluster</span>
                         </div>
                         {getInTransitRange(cluster) && (
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded bg-red-100 border border-red-400" />
-                            <span className="font-semibold text-red-700">In Transit (Buffer/Overflow Area)</span>
+                          <div className="flex items-center gap-1">
+                            <div className="w-2.5 h-2.5 rounded bg-red-100 border border-red-400" />
+                            <span className="font-semibold text-red-700">In Transit</span>
                           </div>
                         )}
                       </div>

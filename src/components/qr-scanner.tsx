@@ -40,7 +40,7 @@ export function QRScanner({ onScanSuccess, onScanError }: QRScannerProps) {
   const [success, setSuccess] = useState(false);
   const [scanStatus, setScanStatus] = useState<string>("");
 
-  const handleScan = (result: any) => {
+  const handleScan = (result: { rawValue: string }[] | null) => {
     if (result && result[0]?.rawValue) {
       const decodedText = result[0].rawValue;
       setScanStatus("✅ QR Code terdeteksi! Memproses...");
@@ -94,8 +94,8 @@ export function QRScanner({ onScanSuccess, onScanError }: QRScannerProps) {
     }
   };
 
-  const handleError = (error: any) => {
-    console.error('QR Scanner error:', error);
+  const handleError = (err: unknown) => {
+    console.error('QR Scanner error:', err);
     setError('Gagal mengakses kamera. Pastikan izin kamera sudah diberikan.');
   };
 

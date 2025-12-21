@@ -19,8 +19,9 @@ export default function AdminManagementPage() {
   const [userRole, setUserRole] = useState<string>("");
   const [admins, setAdmins] = useState<Admin[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedAdmin, setSelectedAdmin] = useState<Admin | null>(null);
+  // Reserved for future edit functionality
+  const [, setShowEditModal] = useState(false);
+  const [, setSelectedAdmin] = useState<Admin | null>(null);
   
   // Form states
   const [formData, setFormData] = useState({
@@ -150,25 +151,25 @@ export default function AdminManagementPage() {
   return (
     <>
       <Navigation />
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 sm:p-6 lg:p-8">
-        <div className="max-w-7xl mx-auto space-y-6">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+        <div className="w-full max-w-full space-y-3 sm:space-y-4">
           {/* Header */}
-          <div className="bg-white rounded-2xl shadow-xl p-6">
-            <div className="flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-xl p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center">
-                  <span className="text-2xl">👥</span>
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center">
+                  <span className="text-xl sm:text-2xl">👥</span>
                 </div>
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-800">Manajemen Admin</h1>
-                  <p className="text-sm text-gray-600">
+                  <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-800">Manajemen Admin</h1>
+                  <p className="text-xs sm:text-sm text-gray-600">
                     Kelola akun Admin Warehouse
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowAddModal(true)}
-                className="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg"
+                className="w-full sm:w-auto px-4 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg"
               >
                 + Tambah Admin
               </button>
@@ -176,39 +177,39 @@ export default function AdminManagementPage() {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <span className="text-2xl">📊</span>
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 lg:p-6">
+              <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <span className="text-lg sm:text-2xl">📊</span>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-600">Total Admin</p>
-                  <p className="text-2xl font-bold text-gray-800">{admins.length}</p>
+                <div className="text-center sm:text-left">
+                  <p className="text-xs sm:text-sm text-gray-600">Total</p>
+                  <p className="text-lg sm:text-2xl font-bold text-gray-800">{admins.length}</p>
                 </div>
               </div>
             </div>
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                  <span className="text-2xl">✓</span>
+            <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 lg:p-6">
+              <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                  <span className="text-lg sm:text-2xl">✓</span>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-600">Admin Aktif</p>
-                  <p className="text-2xl font-bold text-green-600">
+                <div className="text-center sm:text-left">
+                  <p className="text-xs sm:text-sm text-gray-600">Aktif</p>
+                  <p className="text-lg sm:text-2xl font-bold text-green-600">
                     {admins.filter(a => a.isActive).length}
                   </p>
                 </div>
               </div>
             </div>
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
-                  <span className="text-2xl">✗</span>
+            <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 lg:p-6">
+              <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-red-100 rounded-lg flex items-center justify-center">
+                  <span className="text-lg sm:text-2xl">✗</span>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-600">Admin Nonaktif</p>
-                  <p className="text-2xl font-bold text-red-600">
+                <div className="text-center sm:text-left">
+                  <p className="text-xs sm:text-sm text-gray-600">Nonaktif</p>
+                  <p className="text-lg sm:text-2xl font-bold text-red-600">
                     {admins.filter(a => !a.isActive).length}
                   </p>
                 </div>

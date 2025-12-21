@@ -17,13 +17,13 @@ function RootLayoutContent({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen bg-linear-to-br from-slate-50 to-slate-100">
+    <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-linear-to-br from-slate-50 to-slate-100">
       {/* Navigation Sidebar with Digital Clock */}
       <Navigation />
 
       {/* Main content - full width on mobile, with left margin on desktop */}
-      <main className="w-full lg:ml-64 min-h-screen">
-        <div className="p-4 sm:p-6 lg:p-8">
+      <main className="flex-1 min-w-0 lg:ml-64 min-h-screen overflow-x-hidden">
+        <div className="p-3 sm:p-4 lg:p-6 max-w-full">
           {children}
         </div>
       </main>

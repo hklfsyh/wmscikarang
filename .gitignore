@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# project documentation (exclude from git and vercel deploy)
+*.md
+!README.md
+*.txt
+*.dbml
