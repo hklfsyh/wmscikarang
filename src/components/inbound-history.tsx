@@ -348,8 +348,14 @@ export function InboundHistoryPage() {
 
         {/* Detail Modal */}
         {showDetailModal && selectedItem && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+            onClick={handleCloseDetail}
+          >
+            <div 
+              className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
               {/* Modal Header */}
               <div className="bg-linear-to-r from-blue-500 to-indigo-600 p-6 text-white sticky top-0">
                 <div className="flex items-center justify-between">

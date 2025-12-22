@@ -34,7 +34,8 @@ export type WarehouseCell = {
   lorong: number;
   baris: number;
   pallet: number;
-  product?: string;
+  productCode?: string; // Kode produk
+  product?: string; // Nama produk
   bbPallet?: string | string[]; // Support untuk array (multiple BB untuk receh)
   qtyPallet?: number;
   qtyCarton?: number;
@@ -139,6 +140,7 @@ function generateWarehouseCells(): WarehouseCell[] {
             lorong,
             baris,
             pallet,
+            productCode: stock.productCode,
             product: stock.productName,
             bbPallet: stock.bbPallet,
             qtyPallet: stock.qtyPallet,
@@ -179,11 +181,21 @@ type PalletInfoModalProps = {
 function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
   if (!open || !cell) return null;
 
-  const productDetail = cell.product ? getProductByCode(cell.product) : null;
+  const productDetail = cell.productCode ? getProductByCode(cell.productCode) : null;
   const totalPcs = (cell.qtyCarton ?? 0) * (productDetail?.qtyPerCarton ?? 1); 
 
+  // Handle backdrop click
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      onClick={handleBackdropClick}
+    >
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="bg-blue-500 px-4 sm:px-6 py-4 sm:py-5 rounded-t-2xl sticky top-0">
           <div className="flex items-center justify-between">
@@ -200,28 +212,39 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
         </div>
 
         <div className="p-4 sm:p-6 space-y-4 sm:space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
-              <p className="text-xs font-medium text-slate-500 mb-1">Produk</p>
-              <p className="font-semibold text-slate-900 text-xs sm:text-sm wrap-break-word">
-                {cell.product ?? "-"}
-              </p>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
-              <p className="text-xs font-medium text-slate-500 mb-1">BB Pallet</p>
-              <p className="font-semibold text-slate-900 text-xs sm:text-sm">
-                {cell.bbPallet 
-                  ? Array.isArray(cell.bbPallet) 
-                    ? cell.bbPallet.join(", ") 
-                    : cell.bbPallet 
-                  : "-"}
-              </p>
-              {cell.isReceh && Array.isArray(cell.bbPallet) && cell.bbPallet.length > 1 && (
-                <p className="text-[10px] text-blue-600 mt-1">
-                  🔵 Receh: {cell.bbPallet.length} BB dalam 1 pallet
+          {/* Kode Produk & Nama Produk */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3 sm:p-4 border border-blue-200">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs font-medium text-blue-700 mb-1">Kode Produk</p>
+                <p className="font-bold text-blue-900 text-base sm:text-lg">
+                  {cell.productCode ?? "-"}
                 </p>
-              )}
+              </div>
+              <div>
+                <p className="text-xs font-medium text-blue-700 mb-1">Nama Produk</p>
+                <p className="font-semibold text-blue-900 text-xs sm:text-sm">
+                  {cell.product ?? "-"}
+                </p>
+              </div>
             </div>
+          </div>
+
+          {/* BB Pallet */}
+          <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
+            <p className="text-xs font-medium text-slate-500 mb-1">BB Pallet</p>
+            <p className="font-semibold text-slate-900 text-xs sm:text-sm font-mono">
+              {cell.bbPallet 
+                ? Array.isArray(cell.bbPallet) 
+                  ? cell.bbPallet.join(", ") 
+                  : cell.bbPallet 
+                : "-"}
+            </p>
+            {cell.isReceh && Array.isArray(cell.bbPallet) && cell.bbPallet.length > 1 && (
+              <p className="text-[10px] text-blue-600 mt-1">
+                🔵 Receh: {cell.bbPallet.length} BB dalam 1 pallet
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:gap-4">

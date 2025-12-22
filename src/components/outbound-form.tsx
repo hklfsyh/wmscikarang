@@ -184,11 +184,13 @@ export function OutboundForm() {
     // Show success modal
     setShowSuccessModal(true);
     
-    // Reset form after delay
+    // Keep ALL input data for next submission, only reset FEFO locations
     setTimeout(() => {
       setShowSuccessModal(false);
-      handleReset();
-    }, 3000);
+      // Keep: tanggal, namaPengemudi, nomorPolisi, productCode, qty
+      // Reset: FEFO locations only
+      setFefoLocations([]);
+    }, 2000);
   };
 
   // Calculate FEFO locations
@@ -894,8 +896,14 @@ export function OutboundForm() {
 
       {/* Error Modal */}
       {showErrorModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowErrorModal(false)}
+        >
+          <div 
+            className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="bg-linear-to-r from-red-500 to-pink-600 p-6">
               <div className="flex flex-col items-center text-center">
                 <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
@@ -931,8 +939,14 @@ export function OutboundForm() {
 
       {/* Confirmation Modal */}
       {showConfirmModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowConfirmModal(false)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-6">
               <h2 className="text-2xl font-bold text-gray-800 mb-4">
                 Konfirmasi Pengambilan Barang
@@ -1008,8 +1022,14 @@ export function OutboundForm() {
 
       {/* Success Modal */}
       {showSuccessModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowSuccessModal(false)}
+        >
+          <div 
+            className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="bg-linear-to-r from-orange-500 to-red-600 p-6">
               <div className="flex flex-col items-center text-center">
                 <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">

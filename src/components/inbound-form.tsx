@@ -865,14 +865,22 @@ export function InboundForm() {
     // Show success modal
     setShowSuccess(true);
     
-    // Reset form after delay
+    // Reset only location-related fields, keep ALL input data for next submission
     setTimeout(() => {
       setShowSuccess(false);
-      setForm(initialState);
+      // Keep: ekspedisi, tanggal, namaPengemudi, noDN, nomorPolisi, productCode, bbProduk, qty
+      // Reset: location only (cluster, lorong, baris, pallet) and recommendations
+      setForm(prev => ({
+        ...prev,
+        cluster: prev.productCode ? getProductByCode(prev.productCode)?.defaultCluster || "" : "",
+        lorong: "",
+        baris: "",
+        pallet: "",
+      }));
       setMultiLocationRec(null);
       setRecommendedLocation(null);
       setFinalSubmissionData(null);
-    }, 3000);
+    }, 2000);
   };
 
   // --- FILTER TRANSAKSI HARI INI ---
