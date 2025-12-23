@@ -6,14 +6,18 @@ import { outboundHistoryData } from "@/lib/mock/transaction-history";
 import { stockListData } from "@/lib/mock/stocklistmock";
 import { Search, Calendar, TruckIcon, FileDown } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import * as XLSX from 'xlsx';
+import * as XLSX from "xlsx";
 
 export function OutboundHistoryPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [selectedStatus, setSelectedStatus] = useState<"all" | "completed" | "partial">("all");
-  const [selectedItem, setSelectedItem] = useState<typeof outboundHistoryData[0] | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<
+    "all" | "completed" | "partial"
+  >("all");
+  const [selectedItem, setSelectedItem] = useState<
+    (typeof outboundHistoryData)[0] | null
+  >(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Filter data
@@ -35,9 +39,12 @@ export function OutboundHistoryPage() {
       const matchesEndDate = !endDate || itemDate <= new Date(endDate);
 
       // Status filter
-      const matchesStatus = selectedStatus === "all" || item.status === selectedStatus;
+      const matchesStatus =
+        selectedStatus === "all" || item.status === selectedStatus;
 
-      return matchesSearch && matchesStartDate && matchesEndDate && matchesStatus;
+      return (
+        matchesSearch && matchesStartDate && matchesEndDate && matchesStatus
+      );
     });
   }, [searchQuery, startDate, endDate, selectedStatus]);
 
@@ -72,7 +79,7 @@ export function OutboundHistoryPage() {
   };
 
   // Open detail modal
-  const handleViewDetail = (item: typeof outboundHistoryData[0]) => {
+  const handleViewDetail = (item: (typeof outboundHistoryData)[0]) => {
     setSelectedItem(item);
     setShowDetailModal(true);
   };
@@ -83,66 +90,106 @@ export function OutboundHistoryPage() {
     setSelectedItem(null);
   };
 
+  // Helper: Get BB Produk list from locations
+  const getBBProdukFromLocations = (locations: string[]): string[] => {
+    const bbList: string[] = [];
+    locations.forEach((location) => {
+      const stockItem = stockListData.find(
+        (stock) =>
+          `${stock.location.cluster}-${stock.location.lorong}-${stock.location.baris}-${stock.location.level}` ===
+          location
+      );
+      if (stockItem) {
+        const bb = Array.isArray(stockItem.bbPallet)
+          ? stockItem.bbPallet
+          : [stockItem.bbPallet];
+        bb.forEach((b) => {
+          if (b && b !== "-" && !bbList.includes(b)) {
+            bbList.push(b);
+          }
+        });
+      }
+    });
+    return bbList;
+  };
+
   // Export to Excel
   const exportToExcel = () => {
-    // Prepare data for export
-    const exportData = filteredData.map((item, index) => {
-      // Ambil BB Produk dari stockListData berdasarkan lokasi
-      const bbProdukList = item.locations.map((location) => {
-        const stockItem = stockListData.find(
-          (stock) => `${stock.location.cluster}-${stock.location.lorong}-${stock.location.baris}-${stock.location.level}` === location
-        );
-        return stockItem ? (Array.isArray(stockItem.bbPallet) ? stockItem.bbPallet.join(', ') : stockItem.bbPallet) : '-';
-      });
-      const bbProduk = [...new Set(bbProdukList.filter(bb => bb !== '-'))].join(', ') || '-';
+    // Prepare data for export - format: 1 baris per lokasi untuk detail BB Produk
+    const exportData: Record<string, string | number>[] = [];
+    let rowNum = 1;
 
-      return {
-        'No': index + 1,
-        'ID Transaksi': item.id,
-        'Tanggal': formatDate(item.tanggal),
-        'Pengemudi': item.namaPengemudi,
-        'No. Polisi': item.nomorPolisi,
-        'Kode Produk': item.productCode,
-        'Nama Produk': item.productName,
-        'Qty Pallet': item.qtyPallet,
-        'Qty Carton': item.qtyCarton,
-        'Total Pcs': item.totalPcs,
-        'BB Produk': bbProduk,
-        'Lokasi Pengambilan': item.locations.join(', '),
-        'Status': item.status === 'completed' ? 'Selesai' : 'Partial',
-        'Waktu Input': formatDateTime(item.createdAt),
-      };
+    filteredData.forEach((item) => {
+      // Untuk setiap lokasi dalam transaksi, buat baris terpisah
+      item.locations.forEach((location, locIdx) => {
+        const stockItem = stockListData.find(
+          (stock) =>
+            `${stock.location.cluster}-${stock.location.lorong}-${stock.location.baris}-${stock.location.level}` ===
+            location
+        );
+        const bbProduk = stockItem
+          ? Array.isArray(stockItem.bbPallet)
+            ? stockItem.bbPallet.join(", ")
+            : stockItem.bbPallet
+          : "-";
+        const expiredDate = stockItem
+          ? new Date(stockItem.expiredDate).toLocaleDateString("id-ID", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })
+          : "-";
+
+        exportData.push({
+          No: rowNum++,
+          "ID Transaksi": item.id,
+          Tanggal: formatDate(item.tanggal),
+          Pengemudi: item.namaPengemudi,
+          "No. Polisi": item.nomorPolisi,
+          "Kode Produk": item.productCode,
+          "Nama Produk": item.productName,
+          "Lokasi #": locIdx + 1,
+          Lokasi: location,
+          "BB Produk": bbProduk,
+          "Expired Date": expiredDate,
+          Status: item.status === "completed" ? "Selesai" : "Partial",
+          "Waktu Input": formatDateTime(item.createdAt),
+        });
+      });
     });
 
     // Create worksheet
     const ws = XLSX.utils.json_to_sheet(exportData);
-    
+
     // Set column widths
     const colWidths = [
-      { wch: 5 },  // No
-      { wch: 15 }, // ID Transaksi
+      { wch: 5 }, // No
+      { wch: 18 }, // ID Transaksi
       { wch: 12 }, // Tanggal
       { wch: 20 }, // Pengemudi
       { wch: 12 }, // No. Polisi
       { wch: 12 }, // Kode Produk
       { wch: 40 }, // Nama Produk
-      { wch: 10 }, // Qty Pallet
-      { wch: 10 }, // Qty Carton
-      { wch: 10 }, // Total Pcs
+      { wch: 8 }, // Lokasi #
+      { wch: 15 }, // Lokasi
       { wch: 20 }, // BB Produk
-      { wch: 50 }, // Lokasi Pengambilan
+      { wch: 14 }, // Expired Date
       { wch: 10 }, // Status
       { wch: 18 }, // Waktu Input
     ];
-    ws['!cols'] = colWidths;
+    ws["!cols"] = colWidths;
 
     // Create workbook
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Riwayat Outbound');
+    XLSX.utils.book_append_sheet(wb, ws, "Riwayat Outbound");
 
     // Generate filename with current date
     const date = new Date();
-    const filename = `Riwayat_Outbound_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}.xlsx`;
+    const filename = `Riwayat_Outbound_${date.getFullYear()}${String(
+      date.getMonth() + 1
+    ).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}_${String(
+      date.getHours()
+    ).padStart(2, "0")}${String(date.getMinutes()).padStart(2, "0")}.xlsx`;
 
     // Save file
     XLSX.writeFile(wb, filename);
@@ -159,7 +206,9 @@ export function OutboundHistoryPage() {
                 <TruckIcon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
               <div>
-                <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">Riwayat Outbound</h1>
+                <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">
+                  Riwayat Outbound
+                </h1>
                 <p className="text-[10px] sm:text-xs text-gray-600">
                   Data transaksi pengiriman barang keluar dari gudang
                 </p>
@@ -224,7 +273,9 @@ export function OutboundHistoryPage() {
 
           {/* Status Filter & Reset */}
           <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-            <span className="text-[10px] sm:text-xs font-semibold text-gray-700">Status:</span>
+            <span className="text-[10px] sm:text-xs font-semibold text-gray-700">
+              Status:
+            </span>
             <button
               onClick={() => setSelectedStatus("all")}
               className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs rounded-lg font-semibold transition-all ${
@@ -278,26 +329,48 @@ export function OutboundHistoryPage() {
             <table className="w-full min-w-[600px]">
               <thead className="bg-linear-to-r from-orange-500 to-red-600 text-white">
                 <tr>
-                  <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold">Tanggal</th>
-                  <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold">Pengemudi</th>
-                  <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold">Produk</th>
-                  <th className="px-1 py-2 text-center text-[10px] sm:text-xs font-bold">Pallet</th>
-                  <th className="px-1 py-2 text-center text-[10px] sm:text-xs font-bold">Carton</th>
-                  <th className="px-1 py-2 text-center text-[10px] sm:text-xs font-bold">Status</th>
-                  <th className="px-2 py-2 text-center text-[10px] sm:text-xs font-bold">Aksi</th>
+                  <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold">
+                    Tanggal
+                  </th>
+                  <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold">
+                    Pengemudi
+                  </th>
+                  <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold">
+                    Produk
+                  </th>
+                  <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold">
+                    BB Produk
+                  </th>
+                  <th className="px-1 py-2 text-center text-[10px] sm:text-xs font-bold">
+                    Pallet
+                  </th>
+                  <th className="px-1 py-2 text-center text-[10px] sm:text-xs font-bold">
+                    Carton
+                  </th>
+                  <th className="px-1 py-2 text-center text-[10px] sm:text-xs font-bold">
+                    Status
+                  </th>
+                  <th className="px-2 py-2 text-center text-[10px] sm:text-xs font-bold">
+                    Aksi
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredData.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center">
+                    <td colSpan={8} className="px-4 py-8 text-center">
                       <div className="text-4xl mb-2">📦</div>
-                      <p className="text-gray-600 text-xs font-semibold">Tidak ada data</p>
+                      <p className="text-gray-600 text-xs font-semibold">
+                        Tidak ada data
+                      </p>
                     </td>
                   </tr>
                 ) : (
                   filteredData.map((item) => (
-                    <tr key={item.id} className="hover:bg-orange-50 transition-colors">
+                    <tr
+                      key={item.id}
+                      className="hover:bg-orange-50 transition-colors"
+                    >
                       <td className="px-2 py-1.5 text-[10px] sm:text-xs text-gray-700 whitespace-nowrap">
                         {formatDate(item.tanggal)}
                       </td>
@@ -306,11 +379,47 @@ export function OutboundHistoryPage() {
                       </td>
                       <td className="px-2 py-1.5">
                         <div className="text-[10px] sm:text-xs max-w-[150px]">
-                          <div className="font-mono text-orange-600">{item.productCode}</div>
-                          <div className="font-semibold text-gray-800 truncate" title={item.productName}>
+                          <div className="font-mono text-orange-600">
+                            {item.productCode}
+                          </div>
+                          <div
+                            className="font-semibold text-gray-800 truncate"
+                            title={item.productName}
+                          >
                             {item.productName}
                           </div>
                         </div>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        {(() => {
+                          const bbList = getBBProdukFromLocations(
+                            item.locations
+                          );
+                          if (bbList.length === 0)
+                            return (
+                              <span className="text-gray-400 text-[10px]">
+                                -
+                              </span>
+                            );
+                          return (
+                            <div className="text-[10px] sm:text-xs max-w-[120px]">
+                              {bbList.length === 1 ? (
+                                <span className="font-mono text-purple-600">
+                                  {bbList[0]}
+                                </span>
+                              ) : (
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="font-mono text-purple-600">
+                                    {bbList[0]}
+                                  </span>
+                                  <span className="text-gray-500 text-[9px]">
+                                    +{bbList.length - 1} lainnya
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-2 py-2 text-center text-xs font-bold text-green-600">
                         {item.qtyPallet}
@@ -347,11 +456,11 @@ export function OutboundHistoryPage() {
 
         {/* Detail Modal */}
         {showDetailModal && selectedItem && (
-          <div 
+          <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
             onClick={handleCloseDetail}
           >
-            <div 
+            <div
               className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
@@ -359,17 +468,30 @@ export function OutboundHistoryPage() {
               <div className="bg-linear-to-r from-orange-500 to-red-600 p-6 text-white sticky top-0">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-2xl font-bold">Detail Transaksi Outbound</h2>
+                    <h2 className="text-2xl font-bold">
+                      Detail Transaksi Outbound
+                    </h2>
                     <p className="text-sm opacity-90 mt-1">
-                      {formatDate(selectedItem.tanggal)} - {selectedItem.namaPengemudi}
+                      {formatDate(selectedItem.tanggal)} -{" "}
+                      {selectedItem.namaPengemudi}
                     </p>
                   </div>
                   <button
                     onClick={handleCloseDetail}
                     className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
                   >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    <svg
+                      className="w-6 h-6"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
                     </svg>
                   </button>
                 </div>
@@ -386,21 +508,28 @@ export function OutboundHistoryPage() {
                     <div>
                       <span className="text-gray-600">Tanggal:</span>
                       <p className="font-semibold text-gray-900">
-                        {new Date(selectedItem.tanggal).toLocaleDateString("id-ID", {
-                          weekday: "long",
-                          year: "numeric",
-                          month: "long",
-                          day: "numeric",
-                        })}
+                        {new Date(selectedItem.tanggal).toLocaleDateString(
+                          "id-ID",
+                          {
+                            weekday: "long",
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                          }
+                        )}
                       </p>
                     </div>
                     <div>
                       <span className="text-gray-600">Nama Pengemudi:</span>
-                      <p className="font-semibold text-gray-900">{selectedItem.namaPengemudi}</p>
+                      <p className="font-semibold text-gray-900">
+                        {selectedItem.namaPengemudi}
+                      </p>
                     </div>
                     <div className="col-span-2">
                       <span className="text-gray-600">No. Polisi:</span>
-                      <p className="font-semibold text-gray-900">{selectedItem.nomorPolisi}</p>
+                      <p className="font-semibold text-gray-900">
+                        {selectedItem.nomorPolisi}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -413,23 +542,33 @@ export function OutboundHistoryPage() {
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div className="col-span-2">
                       <span className="text-gray-600">Nama Produk:</span>
-                      <p className="font-semibold text-gray-900">{selectedItem.productName}</p>
+                      <p className="font-semibold text-gray-900">
+                        {selectedItem.productName}
+                      </p>
                     </div>
                     <div>
                       <span className="text-gray-600">Kode Produk:</span>
-                      <p className="font-semibold text-gray-900">{selectedItem.productCode}</p>
+                      <p className="font-semibold text-gray-900">
+                        {selectedItem.productCode}
+                      </p>
                     </div>
                     <div>
                       <span className="text-gray-600">Total PCS:</span>
-                      <p className="font-semibold text-gray-900">{selectedItem.totalPcs.toLocaleString()} pcs</p>
+                      <p className="font-semibold text-gray-900">
+                        {selectedItem.totalPcs.toLocaleString()} pcs
+                      </p>
                     </div>
                     <div>
                       <span className="text-gray-600">Qty Pallet:</span>
-                      <p className="font-semibold text-gray-900">{selectedItem.qtyPallet} pallet</p>
+                      <p className="font-semibold text-gray-900">
+                        {selectedItem.qtyPallet} pallet
+                      </p>
                     </div>
                     <div>
                       <span className="text-gray-600">Qty Carton:</span>
-                      <p className="font-semibold text-gray-900">{selectedItem.qtyCarton} carton</p>
+                      <p className="font-semibold text-gray-900">
+                        {selectedItem.qtyCarton} carton
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -441,49 +580,103 @@ export function OutboundHistoryPage() {
                   </h3>
                   <div className="space-y-3">
                     {selectedItem.locations.map((location, idx) => {
-                      // Ambil stock data untuk mendapatkan BB Produk
+                      // Ambil stock data untuk mendapatkan informasi expired
                       const stockItem = stockListData.find(
-                        (item) => `${item.location.cluster}-${item.location.lorong}-${item.location.baris}-${item.location.level}` === location
+                        (item) =>
+                          `${item.location.cluster}-${item.location.lorong}-${item.location.baris}-${item.location.level}` ===
+                          location
                       );
-                      const bbProduk = stockItem ? (Array.isArray(stockItem.bbPallet) ? stockItem.bbPallet.join(', ') : stockItem.bbPallet) : '-';
-                      
+
+                      // Ambil detail qty carton dan BB dari properti locationDetails yang baru kita buat
+                      // Jika data lama (sebelum update), kita berikan fallback '-'
+                      interface LocationDetail {
+                        location: string;
+                        bbPallet?: string;
+                        qtyCarton?: number;
+                      }
+                      const selectedWithDetails = selectedItem as typeof selectedItem & { locationDetails?: LocationDetail[] };
+                      const detail = selectedWithDetails.locationDetails?.find(
+                        (d: LocationDetail) => d.location === location
+                      );
+
+                      const bbProduk =
+                        detail?.bbPallet ||
+                        (stockItem
+                          ? Array.isArray(stockItem.bbPallet)
+                            ? stockItem.bbPallet.join(", ")
+                            : stockItem.bbPallet
+                          : "-");
+                      const displayQty = detail ? detail.qtyCarton : "-";
+
                       return (
-                        <div key={idx} className="bg-white rounded-lg p-3 border border-purple-200">
+                        <div
+                          key={idx}
+                          className="bg-white rounded-lg p-3 border border-purple-200 shadow-sm"
+                        >
                           <div className="flex items-start gap-4">
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-2">
                                 <span className="inline-block px-2 py-1 bg-purple-600 text-white rounded text-xs font-bold">
                                   #{idx + 1}
                                 </span>
-                                <span className="font-semibold text-gray-900 text-lg">{location}</span>
+                                <span className="font-semibold text-gray-900 text-lg">
+                                  {location}
+                                </span>
                               </div>
-                              <div className="text-sm space-y-1">
-                                <div>
-                                  <span className="text-gray-600">BB Produk:</span>
-                                  <span className="font-mono font-semibold text-gray-900 ml-2">{bbProduk}</span>
+
+                              <div className="text-sm space-y-1.5">
+                                <div className="flex justify-between border-b border-gray-50 pb-1">
+                                  <span className="text-gray-600">
+                                    BB Produk:
+                                  </span>
+                                  <span className="font-mono font-bold text-purple-600">
+                                    {bbProduk}
+                                  </span>
                                 </div>
-                                {stockItem && (
-                                  <div>
-                                    <span className="text-gray-600">Expired:</span>
-                                    <span className="font-semibold text-gray-900 ml-2">
-                                      {new Date(stockItem.expiredDate).toLocaleDateString("id-ID", {
-                                        day: "2-digit",
-                                        month: "short",
-                                        year: "numeric",
-                                      })}
+
+                                <div className="flex justify-between border-b border-gray-50 pb-1">
+                                  <span className="text-gray-600">
+                                    Expired:
+                                  </span>
+                                  <span className="font-semibold text-gray-900">
+                                    {stockItem
+                                      ? new Date(
+                                          stockItem.expiredDate
+                                        ).toLocaleDateString("id-ID", {
+                                          day: "2-digit",
+                                          month: "short",
+                                          year: "numeric",
+                                        })
+                                      : "-"}
+                                  </span>
+                                </div>
+
+                                {/* Menampilkan Qty per Lokasi sesuai permintaan Anda */}
+                                <div className="flex justify-between pt-1">
+                                  <span className="text-gray-600 font-medium">
+                                    Qty Diambil:
+                                  </span>
+                                  <span className="font-bold text-orange-600 text-base">
+                                    {displayQty}{" "}
+                                    <span className="text-xs font-normal text-gray-500">
+                                      Carton
                                     </span>
-                                  </div>
-                                )}
+                                  </span>
+                                </div>
                               </div>
                             </div>
+
+                            {/* Barcode / QR Section */}
                             <div className="flex flex-col items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
                               <QRCodeSVG
-                                value={bbProduk}
+                                value={bbProduk !== "-" ? bbProduk : location}
                                 size={100}
                                 level="H"
                                 includeMargin={false}
                               />
-                              <p className="text-xs text-gray-600 mt-2 font-semibold">QR BB Produk</p>
+                              <p className="text-[10px] text-gray-500 mt-2 font-bold uppercase tracking-wider">
+                                QR BB Produk
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -500,10 +693,13 @@ export function OutboundHistoryPage() {
                   <div className="text-sm">
                     <span className="text-gray-600">Dibuat pada:</span>
                     <p className="font-semibold text-gray-900">
-                      {new Date(selectedItem.createdAt).toLocaleString("id-ID", {
-                        dateStyle: "full",
-                        timeStyle: "medium",
-                      })}
+                      {new Date(selectedItem.createdAt).toLocaleString(
+                        "id-ID",
+                        {
+                          dateStyle: "full",
+                          timeStyle: "medium",
+                        }
+                      )}
                     </p>
                   </div>
                 </div>
@@ -514,12 +710,16 @@ export function OutboundHistoryPage() {
                     <span className="text-lg">✓</span> Status Transaksi
                   </h3>
                   <div className="flex items-center gap-2">
-                    <span className={`inline-flex px-4 py-2 text-sm font-bold rounded-lg ${
-                      selectedItem.status === "completed"
-                        ? "bg-green-100 text-green-800"
-                        : "bg-yellow-100 text-yellow-800"
-                    }`}>
-                      {selectedItem.status === "completed" ? "✅ Selesai" : "⚠️ Partial"}
+                    <span
+                      className={`inline-flex px-4 py-2 text-sm font-bold rounded-lg ${
+                        selectedItem.status === "completed"
+                          ? "bg-green-100 text-green-800"
+                          : "bg-yellow-100 text-yellow-800"
+                      }`}
+                    >
+                      {selectedItem.status === "completed"
+                        ? "✅ Selesai"
+                        : "⚠️ Partial"}
                     </span>
                   </div>
                 </div>
