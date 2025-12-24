@@ -1,0 +1,767 @@
+// ================================================================================
+//                    WMS CIKARANG - DATABASE SCHEMA (DBML)
+//                    Warehouse Management System - PostgreSQL
+//                    Versi: 3.4 | Tanggal: 2025-12-23
+// ================================================================================
+//
+// PERUBAHAN DARI VERSI 3.3:
+// 1. Standarisasi BB Produk: varchar(10) di SEMUA tabel (YYMMDDXXXX, tidak boleh lebih)
+// 2. Hapus logika expired +6 bulan di NPL - expired HARUS dari BB Produk
+// 3. Tambah bb_produk dan expired_date ke tabel npl_history
+// 4. Perjelas dokumentasi format BB Produk dan perhitungan expired date
+// 5. Istilah disatukan: BB Produk (bukan BB Pallet)
+//
+// PERUBAHAN DARI VERSI 3.2:
+// 1. Update outbound_history.locations untuk include bb_produk dan expired_date per lokasi FEFO
+// 2. Dokumentasi BB Produk per lokasi untuk QR Code generation
+// 3. Update dokumentasi export Excel format (1 baris per lokasi)
+//
+// PERUBAHAN DARI VERSI 3.1:
+// 1. Tambah tabel npl_history untuk NPL (Nota Pengembalian Lapangan / Inbound Secondary)
+// 2. Tambah tabel stock_movements untuk Permutasi (Relokasi Stock)
+// 3. NPL = Return stock dari lapangan yang tidak terjual
+// 4. Permutasi = Relokasi stock dari lokasi salah/In Transit ke lokasi yang benar
+//
+// PERUBAHAN DARI VERSI 3.0:
+// 1. Dokumentasi fitur Edit & Batal Transaksi Hari Ini
+// 2. Optional: Soft delete fields untuk audit trail (is_cancelled, cancelled_at, cancelled_by)
+// 3. Catatan logic untuk outbound return (conflict handling ke In Transit)
+//
+// PERUBAHAN DARI VERSI 2.0:
+// 1. Products → Per-warehouse (tambah warehouse_id)
+// 2. Expeditions → Per-warehouse (tambah warehouse_id)
+// 3. Role dipertegas: developer, admin_cabang, admin_warehouse
+// 4. Dokumentasi siapa CRUD apa
+//
+// ================================================================================
+
+// ================================================================================
+//                    STANDAR BB PRODUK (PENTING!)
+// ================================================================================
+//
+// FORMAT BB PRODUK: YYMMDDXXXX (10 digit, TIDAK BOLEH LEBIH ATAU KURANG)
+// 
+// Struktur:
+// - YYMMDD (6 digit pertama) = Tanggal Produksi
+//   - YY = Tahun (2 digit, contoh: 25 = 2025)
+//   - MM = Bulan (2 digit, contoh: 12 = Desember)
+//   - DD = Tanggal (2 digit, contoh: 21 = tanggal 21)
+// 
+// - XXXX (4 digit terakhir) = KD Plant (kode identitas pabrik)
+//   - Contoh: 0001, 0002, dll
+//
+// CONTOH VALID:
+// - 2512210001 → Produksi 21 Desember 2025, Plant 0001
+// - 2501150002 → Produksi 15 Januari 2025, Plant 0002
+//
+// CONTOH TIDAK VALID:
+// - BB-NPL-20251222 (SALAH - ada prefix, lebih dari 10 karakter)
+// - 251221 (SALAH - kurang dari 10 digit)
+// - 25122100001 (SALAH - lebih dari 10 digit)
+//
+// PERHITUNGAN EXPIRED DATE:
+// - Expired date = 6 digit pertama BB Produk (sudah merupakan tanggal kadaluarsa)
+// - BUKAN tanggal produksi + shelf life
+// - BB Produk langsung mengandung tanggal expired, tidak perlu kalkulasi tambahan
+// - Contoh: 2506150001 berarti expired date adalah 15 Juni 2025
+//
+// ================================================================================
+
+// ================================================================================
+//                           1. MASTER TABLES
+// ================================================================================
+
+// Tabel Master Gudang (GLOBAL - Hanya developer yang bisa CRUD)
+Table warehouses {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_code varchar(10) [unique, not null, note: 'Kode unik gudang: WH-CKR, WH-BDG']
+  city_name varchar(100) [not null, note: 'Nama kota: Cikarang, Bandung']
+  address text
+  phone varchar(20)
+  is_active boolean [default: true]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+  
+  Note: '''
+  Master gudang - GLOBAL
+  CRUD: Hanya developer
+  Tampil di: Tidak tampil langsung, digunakan untuk filter data
+  '''
+}
+
+// Tabel Master Produk (PER-WAREHOUSE - admin_cabang CRUD)
+Table products {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null, note: 'Produk milik warehouse mana']
+  product_code varchar(50) [not null, note: 'Kode produk: 74561']
+  product_name varchar(255) [not null, note: 'Nama lengkap produk']
+  category varchar(100) [note: 'Kategori: AQUA, MIZONE, VIT, GALON']
+  unit varchar(20) [default: 'carton']
+  qty_per_carton integer [not null, default: 1, note: 'Jumlah unit per karton']
+  qty_carton_per_pallet integer [not null, default: 1, note: 'Jumlah karton per pallet']
+  default_cluster char(1) [note: 'Cluster default: A, B, C, D']
+  is_active boolean [default: true]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, product_code) [unique]
+  }
+  
+  Note: '''
+  Master produk - PER WAREHOUSE
+  CRUD: admin_cabang (warehouse sendiri)
+  Tampil di: Master Data > Tab Produk
+  '''
+}
+
+// Tabel Master Ekspedisi (PER-WAREHOUSE - admin_cabang CRUD)
+Table expeditions {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null, note: 'Ekspedisi milik warehouse mana']
+  expedition_code varchar(20) [not null, note: 'Kode: JNE, SICEPAT, JNT']
+  expedition_name varchar(100) [not null, note: 'Nama lengkap ekspedisi']
+  contact_person varchar(100)
+  phone varchar(20)
+  is_active boolean [default: true]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, expedition_code) [unique]
+  }
+  
+  Note: '''
+  Master ekspedisi - PER WAREHOUSE
+  CRUD: admin_cabang (warehouse sendiri)
+  Tampil di: Master Data > Tab Ekspedisi
+  '''
+}
+
+// ================================================================================
+//                           2. USER MANAGEMENT
+// ================================================================================
+
+// Tabel Users dengan 3 Role
+Table users {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [note: 'NULL hanya untuk role developer']
+  username varchar(50) [unique, not null]
+  password_hash varchar(255) [not null]
+  full_name varchar(100) [not null]
+  role varchar(20) [not null, note: 'developer, admin_cabang, admin_warehouse']
+  email varchar(100)
+  phone varchar(20)
+  is_active boolean [default: true]
+  last_login timestamp
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+  
+  Note: '''
+  ROLE HIERARCHY:
+  - developer: warehouse_id = NULL, akses semua gudang, CRUD semua user, maintenance
+  - admin_cabang: warehouse_id = X, kelola master data gudang X, rekonsel, CRUD admin_warehouse di X
+  - admin_warehouse: warehouse_id = X, operasional (inbound, outbound, input stock opname)
+  
+  CRUD:
+  - developer → Bisa CRUD semua user (developer, admin_cabang, admin_warehouse)
+  - admin_cabang → Hanya bisa CRUD admin_warehouse di warehouse sendiri
+  - admin_warehouse → Tidak bisa CRUD user
+  
+  Tampil di: Manajemen Admin (untuk admin_cabang & developer)
+  '''
+}
+
+// ================================================================================
+//                      3. WAREHOUSE CONFIGURATION
+// ================================================================================
+
+// Tabel Konfigurasi Cluster (PER-WAREHOUSE - admin_cabang CRUD)
+Table cluster_configs {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null]
+  cluster_char char(1) [not null, note: 'Identifier: A, B, C, D']
+  cluster_name varchar(50) [note: 'Nama deskriptif: Cluster A - AQUA']
+  default_lorong_count integer [not null, default: 5, note: 'Jumlah lorong default']
+  default_baris_count integer [not null, default: 5, note: 'Jumlah baris default per lorong']
+  default_pallet_level integer [not null, default: 3, note: 'Jumlah level pallet default']
+  description text
+  is_active boolean [default: true]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, cluster_char) [unique]
+  }
+  
+  Note: '''
+  Konfigurasi struktur cluster - PER WAREHOUSE
+  CRUD: admin_cabang (warehouse sendiri)
+  Tampil di: Master Data > Tab Cluster Config
+  '''
+}
+
+// Tabel Override Konfigurasi Cell (PER-CLUSTER - admin_cabang CRUD)
+Table cluster_cell_overrides {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  cluster_config_id uuid [not null]
+  
+  // Scope override
+  lorong_start integer [not null]
+  lorong_end integer [not null]
+  baris_start integer [note: 'NULL = semua baris']
+  baris_end integer [note: 'NULL = semua baris']
+  
+  // Override values
+  custom_baris_count integer [note: 'Override jumlah baris']
+  custom_pallet_level integer [note: 'Override jumlah pallet level']
+  
+  // Special flags
+  is_transit_area boolean [default: false, note: 'Area in-transit/overflow']
+  is_disabled boolean [default: false, note: 'Lokasi tidak bisa dipakai']
+  
+  note text [note: 'Alasan: Tiang penyangga, Area galon, dll']
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+  
+  Note: '''
+  Override konfigurasi untuk kasus khusus - PER CLUSTER
+  CRUD: admin_cabang (warehouse sendiri)
+  Tampil di: Master Data > Tab Cluster Config > Detail Cluster
+  '''
+}
+
+// Tabel Product Home (PER-WAREHOUSE - admin_cabang CRUD)
+Table product_homes {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null]
+  product_id uuid [not null]
+  cluster_char char(1) [not null]
+  lorong_start integer [default: 1]
+  lorong_end integer [default: 5]
+  baris_start integer [default: 1]
+  baris_end integer [default: 5]
+  max_pallet_per_location integer [default: 3]
+  priority integer [default: 1]
+  is_active boolean [default: true]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, product_id, cluster_char) [unique]
+  }
+  
+  Note: '''
+  Aturan "rumah" produk - PER WAREHOUSE
+  CRUD: admin_cabang (warehouse sendiri)
+  Tampil di: Master Data > Tab Product Home
+  Di tabel: product_id (UUID), Di halaman: product_name (dari JOIN products)
+  '''
+}
+
+// ================================================================================
+//                         4. STOCK & INVENTORY
+// ================================================================================
+
+// Tabel Stock List (PER-WAREHOUSE - Auto dari inbound/outbound)
+Table stock_list {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null]
+  product_id uuid [not null]
+  
+  // Identifikasi - BB Produk WAJIB (10 digit, TIDAK BOLEH LEBIH)
+  bb_produk varchar(10) [not null, note: 'BB Produk WAJIB 10 digit: YYMMDDXXXX (6 digit tanggal produksi + 4 digit KD Plant)']
+  batch_number varchar(50)
+  lot_number varchar(50)
+  
+  // Lokasi Fisik
+  cluster char(1) [not null]
+  lorong integer [not null]
+  baris integer [not null]
+  level integer [not null]
+  
+  // Quantity
+  qty_pallet integer [default: 0]
+  qty_carton integer [default: 0]
+  
+  // Status & Dates
+  expired_date date [not null]
+  inbound_date date [default: `now()`]
+  status varchar(20) [default: 'release', note: 'release, hold, damaged, expired']
+  
+  // Receh tracking
+  is_receh boolean [default: false]
+  parent_stock_id uuid
+  
+  // Audit
+  created_by uuid
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, cluster, lorong, baris, level) [unique]
+    (warehouse_id, product_id)
+    (warehouse_id, bb_produk)
+    (warehouse_id, expired_date)
+  }
+  
+  Note: '''
+  Stok fisik real-time - PER WAREHOUSE
+  CRUD: Otomatis dari inbound/outbound (admin_warehouse trigger)
+  Tampil di: Stock List, Warehouse Layout
+  Di tabel: product_id (UUID), Di halaman: product_name, product_code (dari JOIN products)
+  '''
+}
+
+// ================================================================================
+//                         5. TRANSACTIONS (1 Produk = 1 Record)
+// ================================================================================
+
+// Tabel Inbound History (PER-WAREHOUSE - admin_warehouse CREATE)
+Table inbound_history {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null]
+  transaction_code varchar(50) [unique, not null, note: 'INB-YYYYMMDD-XXXX']
+  
+  // Produk - hanya 1 per record
+  product_id uuid [not null]
+  bb_produk varchar(10) [not null, note: 'BB Produk 10 digit: YYMMDDXXXX (6 digit = expired date)']
+  qty_carton integer [not null]
+  expired_date date [not null, note: 'Diekstrak langsung dari 6 digit pertama BB Produk']
+  
+  // Lokasi penempatan (JSON array untuk multi-location)
+  locations jsonb [not null, note: '[{cluster, lorong, baris, level, qty_carton, is_receh}]']
+  
+  // Info pengiriman
+  expedition_id uuid
+  sender_name varchar(100)
+  driver_name varchar(100)
+  vehicle_number varchar(20)
+  dn_number varchar(50) [note: 'Nomor DN/Surat Jalan']
+  
+  // Metadata
+  received_by uuid [not null]
+  arrival_time timestamp [default: `now()`]
+  notes text
+  
+  created_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, arrival_time)
+    (warehouse_id, product_id)
+  }
+  
+  // Optional: Soft delete untuk audit trail Edit & Batal
+  // is_cancelled boolean [default: false, note: 'True jika transaksi dibatalkan']
+  // cancelled_at timestamp [note: 'Waktu pembatalan']
+  // cancelled_by uuid [note: 'User yang membatalkan']
+  // cancellation_reason text [note: 'Alasan pembatalan']
+  
+  Note: '''
+  History inbound - PER WAREHOUSE, 1 produk = 1 record
+  CREATE: admin_warehouse
+  READ: admin_cabang (history), admin_warehouse (form)
+  DELETE: admin_warehouse (hanya transaksi hari ini - fitur Edit & Batal)
+  Tampil di: Inbound (admin_cabang lihat history, admin_warehouse lihat form + tabel Transaksi Hari Ini)
+  Di tabel: product_id, expedition_id, received_by (UUID), Di halaman: nama-nama (JOIN)
+  
+  FITUR EDIT & BATAL (Hanya Transaksi Hari Ini):
+  - Edit: Hapus stock dari lokasi, hapus record, load data ke form
+  - Batal: Hapus stock dari lokasi, hapus record (tanpa load form)
+  - Window time: Hanya tanggal = CURRENT_DATE
+  '''
+}
+
+// Tabel Outbound History (PER-WAREHOUSE - admin_warehouse CREATE)
+Table outbound_history {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null]
+  transaction_code varchar(50) [unique, not null, note: 'OUT-YYYYMMDD-XXXX']
+  
+  // Produk - hanya 1 per record
+  product_id uuid [not null]
+  bb_produk varchar(10) [note: 'DEPRECATED: Gunakan bb_produk di locations. Field ini untuk backward compatibility. Format: YYMMDDXXXX']
+  qty_carton integer [not null]
+  
+  // Lokasi pengambilan (JSON array - FEFO dengan BB Produk per lokasi)
+  // PENTING: Setiap lokasi FEFO memiliki BB Produk berbeda karena expired date berbeda
+  locations jsonb [not null, note: '[{cluster, lorong, baris, level, qty_carton, stock_id, bb_produk, expired_date}]']
+  
+  // Info pengiriman
+  expedition_id uuid
+  driver_name varchar(100)
+  vehicle_number varchar(20)
+  destination varchar(255)
+  customer_name varchar(100)
+  
+  // Metadata
+  processed_by uuid [not null]
+  departure_time timestamp [default: `now()`]
+  notes text
+  
+  created_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, departure_time)
+    (warehouse_id, product_id)
+  }
+  
+  // Optional: Soft delete untuk audit trail Edit & Batal
+  // is_cancelled boolean [default: false, note: 'True jika transaksi dibatalkan']
+  // cancelled_at timestamp [note: 'Waktu pembatalan']
+  // cancelled_by uuid [note: 'User yang membatalkan']
+  // cancellation_reason text [note: 'Alasan pembatalan']
+  
+  Note: '''
+  History outbound - PER WAREHOUSE, 1 produk = 1 record
+  CREATE: admin_warehouse
+  READ: admin_cabang (history), admin_warehouse (form)
+  DELETE: admin_warehouse (hanya transaksi hari ini - fitur Edit & Batal)
+  Tampil di: Outbound (admin_cabang lihat history, admin_warehouse lihat form + tabel Transaksi Hari Ini)
+  Di tabel: product_id, expedition_id, processed_by (UUID), Di halaman: nama-nama (JOIN)
+  
+  FITUR EDIT & BATAL (Hanya Transaksi Hari Ini):
+  - Edit: Kembalikan stock ke lokasi asal (atau In Transit jika conflict), hapus record, load form
+  - Batal: Kembalikan stock ke lokasi asal (atau In Transit jika conflict), hapus record
+  - Conflict handling: Jika lokasi asal sudah terisi produk lain → pindah ke In Transit (Cluster C L11-L12)
+  - Window time: Hanya tanggal = CURRENT_DATE
+  
+  FITUR BB PRODUK PER LOKASI (FEFO):
+  - Setiap lokasi FEFO memiliki BB Produk berbeda karena expired date berbeda
+  - locations.bb_produk: BB Produk per lokasi untuk QR Code dan tracking
+  - bb_produk (root level): DEPRECATED, gunakan locations[].bb_produk
+  - Export Excel: Format 1 baris per lokasi dengan BB Produk dan Expired Date
+  - Modal Detail: Tampilkan QR Code per lokasi dengan BB Produk
+  '''
+}
+
+// ================================================================================
+//                         6. NPL (NOTA PENGEMBALIAN LAPANGAN)
+// ================================================================================
+
+// Tabel NPL History - Inbound Secondary (Return dari Lapangan)
+Table npl_history {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null]
+  transaction_code varchar(50) [unique, not null, note: 'NPL-YYYYMMDD-XXXX']
+  
+  // Produk - 1 produk per record (sama seperti inbound)
+  product_id uuid [not null]
+  bb_produk varchar(10) [not null, note: 'BB Produk WAJIB 10 digit: YYMMDDXXXX (6 digit = expired date)']
+  qty_carton integer [not null]
+  expired_date date [not null, note: 'Diekstrak langsung dari 6 digit pertama BB Produk']
+  
+  // Lokasi penempatan (JSON array untuk multi-location)
+  locations jsonb [not null, note: '[{cluster, lorong, baris, level, qty_carton, is_receh}]']
+  
+  // Info pengemudi (return driver)
+  driver_name varchar(100) [not null]
+  vehicle_number varchar(20) [not null]
+  
+  // Metadata
+  returned_by uuid [not null, note: 'admin_warehouse yang input NPL']
+  return_time timestamp [default: `now()`]
+  notes text
+  
+  created_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, return_time)
+    (warehouse_id, product_id)
+    (warehouse_id, bb_produk)
+  }
+  
+  Note: '''
+  NPL (Nota Pengembalian Lapangan) - Inbound Secondary
+  Digunakan untuk: Return stock dari lapangan yang tidak terjual
+  
+  Perbedaan dengan Inbound Primary:
+  - Tidak ada expedition_id (bukan dari ekspedisi luar)
+  - Tidak ada dn_number (tidak ada surat jalan)
+  - Transaction code prefix: NPL- (bukan INB-)
+  
+  PENTING - BB Produk & Expired Date:
+  - BB Produk WAJIB diinput dengan format 10 digit: YYMMDDXXXX
+  - 6 digit pertama (YYMMDD) = tanggal kadaluarsa (expired date)
+  - 4 digit terakhir (XXXX) = KD Plant
+  - Expired date langsung dari BB Produk (BUKAN tanggal produksi + shelf life)
+  - TIDAK ADA logika +6 bulan atau shelf life apapun
+  
+  CREATE: admin_warehouse
+  DELETE: admin_warehouse (hanya transaksi hari ini - fitur Edit & Batal)
+  Tampil di: NPL (admin_warehouse lihat form + tabel NPL Hari Ini)
+  '''
+}
+
+// ================================================================================
+//                         7. PERMUTASI (STOCK RELOCATION)
+// ================================================================================
+
+// Tabel Permutasi History - Relokasi Stock
+Table permutasi_history {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null]
+  transaction_code varchar(50) [unique, not null, note: 'PMT-YYYYMMDD-XXXX']
+  
+  // Stock yang dipindah
+  stock_id uuid [not null, note: 'Reference ke stock_list.id']
+  product_id uuid [not null]
+  qty_carton integer [not null]
+  
+  // Lokasi asal dan tujuan
+  from_cluster char(1) [not null]
+  from_lorong integer [not null]
+  from_baris integer [not null]
+  from_level integer [not null]
+  
+  to_cluster char(1) [not null]
+  to_lorong integer [not null]
+  to_baris integer [not null]
+  to_level integer [not null]
+  
+  // Alasan pemindahan
+  reason varchar(100) [not null, note: 'Koreksi cluster, Relokasi dari In Transit']
+  
+  // Metadata
+  moved_by uuid [not null, note: 'admin_warehouse yang memindahkan']
+  moved_at timestamp [default: `now()`]
+  
+  created_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, moved_at)
+    (warehouse_id, product_id)
+  }
+  
+  Note: '''
+  Permutasi - Relokasi Stock dari lokasi salah ke lokasi yang benar
+  
+  Use Cases:
+  1. Stock di lokasi salah cluster → pindah ke home cluster
+  2. Stock di In Transit (overflow) → pindah ke home cluster saat ada slot kosong
+  
+  Proses:
+  1. Admin warehouse lihat daftar stock yang salah lokasi
+  2. Pilih stock → sistem rekomendasikan lokasi tujuan (atau manual)
+  3. Konfirmasi → update stock_list.location, catat di permutasi_history
+  
+  CREATE: admin_warehouse
+  Tampil di: Permutasi (admin_warehouse lihat tabel salah cluster/in transit + form pindah)
+  '''
+}
+
+// ================================================================================
+//                         8. STOCK OPNAME
+// ================================================================================
+
+// Tabel Pre-Stock Opname Header (PER-WAREHOUSE)
+Table prestock_opname {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null]
+  opname_code varchar(50) [unique, not null, note: 'OPN-YYYYMMDD-XXXX']
+  
+  // Auditor (admin_warehouse yang input)
+  auditor_id uuid [not null]
+  audit_date date [not null]
+  audit_time time [not null]
+  
+  // Reconciliation (admin_cabang yang rekonsel)
+  reconciliation_status varchar(20) [default: 'pending', note: 'pending, reconciled']
+  reconciled_by uuid
+  reconciled_at timestamp
+  reconciliation_notes text
+  
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+  
+  indexes {
+    (warehouse_id, audit_date)
+  }
+  
+  Note: '''
+  Header stock opname - PER WAREHOUSE
+  CREATE: admin_warehouse (input audit)
+  UPDATE: admin_cabang (rekonsel)
+  Tampil di: 
+  - Pre-Stock Opname (admin_warehouse) → Form input
+  - Pre-Stock Opname (admin_cabang) → History & Rekonsel
+  Di tabel: auditor_id, reconciled_by (UUID), Di halaman: nama (JOIN users)
+  '''
+}
+
+// Tabel Pre-Stock Opname Items
+Table prestock_opname_items {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  opname_id uuid [not null]
+  product_id uuid [not null]
+  bb_produk varchar(10) [note: 'BB Produk jika audit per BB - format: YYMMDDXXXX']
+  
+  // Quantity comparison
+  audit_qty integer [not null, note: 'Hasil hitung fisik']
+  system_qty integer [note: 'Dari audit sebelumnya, diisi saat rekonsel']
+  difference integer [note: 'Selisih = audit - system']
+  
+  // Reconciliation per item
+  reconciliation_reason text
+  is_reconciled boolean [default: false]
+  
+  created_at timestamp [default: `now()`]
+  
+  Note: '''
+  Detail item stock opname
+  Di tabel: product_id (UUID), Di halaman: product_name, product_code (JOIN)
+  '''
+}
+
+// ================================================================================
+//                         7. AUDIT & LOG (Backend Only)
+// ================================================================================
+
+// Tabel Stock Movement Log (BACKEND ONLY - Tidak tampil di halaman)
+Table stock_movements {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid [not null]
+  stock_id uuid [not null]
+  product_id uuid [not null]
+  bb_produk varchar(10) [not null, note: 'BB Produk 10 digit: YYMMDDXXXX']
+  
+  movement_type varchar(20) [not null, note: 'inbound, outbound, adjustment, transfer']
+  reference_type varchar(20) [note: 'inbound_history, outbound_history, opname']
+  reference_id uuid
+  
+  qty_before integer [not null]
+  qty_change integer [not null]
+  qty_after integer [not null]
+  
+  from_location varchar(20)
+  to_location varchar(20)
+  
+  performed_by uuid [not null]
+  performed_at timestamp [default: `now()`]
+  notes text
+  
+  indexes {
+    (warehouse_id, performed_at)
+    (stock_id)
+  }
+  
+  Note: '''
+  BACKEND ONLY - Tidak tampil di halaman manapun
+  Digunakan untuk: Audit trail, debugging, laporan historis
+  Auto-generated saat: inbound, outbound, adjustment
+  '''
+}
+
+// Tabel Activity Log (BACKEND ONLY - Tidak tampil di halaman)
+Table activity_logs {
+  id uuid [primary key, default: `gen_random_uuid()`]
+  warehouse_id uuid
+  user_id uuid [not null]
+  
+  action varchar(50) [not null, note: 'login, logout, create, update, delete']
+  entity_type varchar(50)
+  entity_id uuid
+  
+  old_values jsonb
+  new_values jsonb
+  ip_address varchar(45)
+  user_agent text
+  
+  created_at timestamp [default: `now()`]
+  
+  indexes {
+    (user_id, created_at)
+  }
+  
+  Note: '''
+  BACKEND ONLY - Tidak tampil di halaman manapun
+  Digunakan untuk: Security audit, troubleshooting
+  Auto-generated saat: Setiap aksi user
+  '''
+}
+
+// ================================================================================
+//                              RELATIONSHIPS
+// ================================================================================
+
+// --- Warehouse Relations ---
+Ref: products.warehouse_id > warehouses.id [delete: cascade]
+Ref: expeditions.warehouse_id > warehouses.id [delete: cascade]
+Ref: cluster_configs.warehouse_id > warehouses.id [delete: cascade]
+Ref: product_homes.warehouse_id > warehouses.id [delete: cascade]
+Ref: stock_list.warehouse_id > warehouses.id [delete: cascade]
+Ref: inbound_history.warehouse_id > warehouses.id [delete: cascade]
+Ref: outbound_history.warehouse_id > warehouses.id [delete: cascade]
+Ref: prestock_opname.warehouse_id > warehouses.id [delete: cascade]
+Ref: stock_movements.warehouse_id > warehouses.id [delete: cascade]
+Ref: users.warehouse_id > warehouses.id [delete: set null]
+
+// --- Cluster Config Relations ---
+Ref: cluster_cell_overrides.cluster_config_id > cluster_configs.id [delete: cascade]
+
+// --- Product Relations ---
+Ref: product_homes.product_id > products.id [delete: cascade]
+Ref: stock_list.product_id > products.id [delete: restrict]
+Ref: inbound_history.product_id > products.id [delete: restrict]
+Ref: outbound_history.product_id > products.id [delete: restrict]
+Ref: prestock_opname_items.product_id > products.id [delete: restrict]
+Ref: stock_movements.product_id > products.id [delete: restrict]
+
+// --- Expedition Relations ---
+Ref: inbound_history.expedition_id > expeditions.id [delete: set null]
+Ref: outbound_history.expedition_id > expeditions.id [delete: set null]
+
+// --- User Relations ---
+Ref: inbound_history.received_by > users.id [delete: restrict]
+Ref: outbound_history.processed_by > users.id [delete: restrict]
+Ref: prestock_opname.auditor_id > users.id [delete: restrict]
+Ref: prestock_opname.reconciled_by > users.id [delete: set null]
+Ref: stock_list.created_by > users.id [delete: set null]
+Ref: stock_movements.performed_by > users.id [delete: restrict]
+Ref: activity_logs.user_id > users.id [delete: cascade]
+
+// --- Stock Opname Relations ---
+Ref: prestock_opname_items.opname_id > prestock_opname.id [delete: cascade]
+
+// --- Stock Self-Reference ---
+Ref: stock_list.parent_stock_id > stock_list.id [delete: set null]
+Ref: stock_movements.stock_id > stock_list.id [delete: cascade]
+
+// ================================================================================
+//                              SUMMARY
+// ================================================================================
+//
+// TOTAL TABEL: 14
+// 
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │                        TABEL YANG TAMPIL DI HALAMAN                         │
+// ├─────────────────────┬───────────────────────┬───────────────────────────────┤
+// │ Tabel               │ Tampil di Halaman     │ Field UUID → Display Name     │
+// ├─────────────────────┼───────────────────────┼───────────────────────────────┤
+// │ products            │ Master Data > Produk  │ -                             │
+// │ expeditions         │ Master Data > Ekspedi │ -                             │
+// │ users               │ Manajemen Admin       │ warehouse_id → city_name      │
+// │ cluster_configs     │ Master Data > Cluster │ -                             │
+// │ cluster_cell_overr  │ Master Data > Cluster │ cluster_config_id → cluster   │
+// │ product_homes       │ Master Data > ProdHom │ product_id → product_name     │
+// │ stock_list          │ Stock List, Warehouse │ product_id → product_name     │
+// │ inbound_history     │ Inbound (history)     │ product_id, expedition_id,    │
+// │                     │                       │ received_by → nama-nama       │
+// │ outbound_history    │ Outbound (history)    │ product_id, expedition_id,    │
+// │                     │                       │ processed_by → nama-nama      │
+// │ prestock_opname     │ Pre-Stock Opname      │ auditor_id, reconciled_by     │
+// │                     │                       │ → full_name                   │
+// │ prestock_opname_it  │ Pre-Stock Opname      │ product_id → product_name     │
+// └─────────────────────┴───────────────────────┴───────────────────────────────┘
+//
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │                    TABEL BACKEND ONLY (Tidak Tampil)                        │
+// ├─────────────────────┬───────────────────────────────────────────────────────┤
+// │ Tabel               │ Kegunaan                                              │
+// ├─────────────────────┼───────────────────────────────────────────────────────┤
+// │ warehouses          │ Filter data, session context (tidak ada CRUD UI)     │
+// │ stock_movements     │ Audit trail pergerakan stok, debugging               │
+// │ activity_logs       │ Security audit, troubleshooting                      │
+// └─────────────────────┴───────────────────────────────────────────────────────┘
+//
+// ================================================================================

@@ -1,0 +1,655 @@
+================================================================================
+           WMS LITE - UI TO DATABASE MIGRATION GUIDE
+           Analisis Gap Frontend Mock vs Backend Supabase PostgreSQL
+           Versi: 1.0 | Tanggal: 2025-12-22
+================================================================================
+
+TUJUAN DOKUMEN INI:
+Mengidentifikasi apa saja yang perlu diubah dari kondisi tampilan/frontend 
+yang sekarang (menggunakan mock data) jika ingin migrasi ke database 
+Supabase PostgreSQL sesuai dengan database-schema.dbml.
+
+================================================================================
+                           RINGKASAN PERUBAHAN
+================================================================================
+
+TOTAL HALAMAN: 12 halaman utama
+TOTAL KOMPONEN: 10+ komponen
+TINGKAT PERUBAHAN: Medium-High (perlu refactor data fetching)
+
+================================================================================
+                    1. LOGIN PAGE (/login)
+================================================================================
+
+KONDISI SAAT INI:
+- Autentikasi menggunakan hardcoded credentials di localStorage
+- Demo login: admin/admin123 (admin_warehouse), superadmin/super123 (admin_cabang)
+- Role disimpan di localStorage sebagai string
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 1.1 Ganti autentikasi ke Supabase Auth
+    - Gunakan @supabase/auth-helpers-nextjs
+    - Setup email/password authentication
+    - Buat custom claims untuk role di JWT
+
+[ ] 1.2 Buat API endpoint /api/auth/login
+    - Validate username + password terhadap tabel users
+    - Return JWT dengan role dan warehouse_id
+
+[ ] 1.3 Update form login
+    - Tambah error handling untuk auth error
+    - Tambah loading state saat login
+    - Redirect berdasarkan role setelah login sukses
+
+[ ] 1.4 Update localStorage ke session/cookies
+    - Gunakan Supabase session management
+    - Set httpOnly cookies untuk keamanan
+
+TABEL DATABASE TERKAIT:
+- users (autentikasi + role + warehouse_id)
+
+================================================================================
+                    2. NAVIGATION (components/navigation.tsx)
+================================================================================
+
+KONDISI SAAT INI:
+- Menu filtering berdasarkan role dari localStorage
+- Logout menghapus localStorage dan redirect ke login
+- Digital clock dan auto refresh setiap 15 menit
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 2.1 Ganti role check dari localStorage ke Supabase session
+    - Buat hook useUser() untuk get current user
+    - Cache user data dengan SWR atau React Query
+
+[ ] 2.2 Update logout function
+    - Call Supabase signOut()
+    - Clear session cookies
+
+[ ] 2.3 Tambah warehouse context
+    - Tampilkan nama warehouse di header
+    - Filter semua data berdasarkan warehouse_id user
+
+TABEL DATABASE TERKAIT:
+- users (untuk role)
+- warehouses (untuk nama warehouse)
+
+================================================================================
+                    3. INBOUND PAGE (/inbound)
+================================================================================
+
+KONDISI SAAT INI:
+- Form input dengan field: ekspedisi, driver, DN, produk, BB Produk, qty, lokasi
+- Rekomendasi lokasi dari product_homes mock data
+- Submit menyimpan ke inboundHistoryData array
+- Tabel "Transaksi Hari Ini" dengan fitur Edit & Batal
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 3.1 Ganti dropdown ekspedisi
+    SAAT INI: ekspedisiMaster array static
+    SEHARUSNYA: Fetch dari tabel expeditions WHERE warehouse_id = current_user.warehouse_id
+
+[ ] 3.2 Ganti dropdown produk
+    SAAT INI: productMasterData array static
+    SEHARUSNYA: Fetch dari tabel products WHERE warehouse_id = current_user.warehouse_id
+
+[ ] 3.3 Ganti rekomendasi lokasi
+    SAAT INI: getValidLocationsForProduct() dari warehouse-config.ts
+    SEHARUSNYA: 
+    - Query product_homes untuk dapat cluster, lorong_range, baris_range
+    - Query stock_list untuk cek lokasi yang sudah terisi
+    - Return available locations
+
+[ ] 3.4 Ganti submit inbound
+    SAAT INI: Push ke array inboundHistoryData
+    SEHARUSNYA:
+    - INSERT ke tabel inbound_history
+    - INSERT ke tabel stock_list (untuk setiap lokasi)
+    - INSERT ke tabel stock_movements (audit trail)
+
+[ ] 3.5 Ganti fetch "Transaksi Hari Ini"
+    SAAT INI: Filter inboundHistoryData.filter(tanggal === today)
+    SEHARUSNYA: 
+    SELECT * FROM inbound_history 
+    WHERE warehouse_id = ? AND DATE(arrival_time) = CURRENT_DATE
+    ORDER BY arrival_time DESC
+
+[ ] 3.6 Update fitur Edit & Batal
+    SAAT INI: Manipulasi array langsung
+    SEHARUSNYA:
+    - Edit: DELETE dari stock_list + DELETE dari inbound_history + load form
+    - Batal: DELETE dari stock_list + DELETE dari inbound_history
+    - Tambah soft delete option (is_cancelled = true)
+
+TABEL DATABASE TERKAIT:
+- expeditions
+- products
+- product_homes
+- stock_list
+- inbound_history
+- stock_movements
+
+API ENDPOINTS YANG DIPERLUKAN:
+- GET /api/expeditions?warehouse_id=xxx
+- GET /api/products?warehouse_id=xxx
+- GET /api/locations/recommend?product_id=xxx&qty=xxx
+- POST /api/inbound
+- GET /api/inbound/today?warehouse_id=xxx
+- DELETE /api/inbound/:id (untuk Edit/Batal)
+
+================================================================================
+                    4. OUTBOUND PAGE (/outbound)
+================================================================================
+
+KONDISI SAAT INI:
+- Form input dengan field: driver, polisi, produk, qty
+- FEFO calculation dari stockListData yang di-sort by expired_date
+- BB Produk diambil dari stock per lokasi FEFO
+- Submit mengurangi qty di stockListData
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 4.1 Ganti dropdown produk
+    SAAT INI: productMasterData array static
+    SEHARUSNYA: Fetch dari products WHERE warehouse_id = current_user.warehouse_id
+
+[ ] 4.2 Ganti FEFO calculation
+    SAAT INI: Sort stockListData by expired_date
+    SEHARUSNYA:
+    SELECT * FROM stock_list 
+    WHERE warehouse_id = ? AND product_id = ? AND status IN ('release', 'hold', 'receh')
+    ORDER BY expired_date ASC
+    
+    Untuk setiap lokasi, include:
+    - bb_produk untuk QR Code
+    - expired_date untuk display
+
+[ ] 4.3 Ganti submit outbound
+    SAAT INI: Manipulasi stockListData array
+    SEHARUSNYA:
+    - INSERT ke outbound_history dengan locations JSON:
+      [{cluster, lorong, baris, level, qty_carton, stock_id, bb_produk, expired_date}]
+    - UPDATE stock_list: kurangi qty atau DELETE jika habis
+    - INSERT ke stock_movements (audit trail)
+
+[ ] 4.4 Update fitur Edit & Batal
+    SAAT INI: Return stock ke lokasi asal atau In Transit jika conflict
+    SEHARUSNYA:
+    - Cek apakah lokasi asal sudah terisi (SELECT FROM stock_list WHERE location = ?)
+    - Jika kosong: INSERT stock kembali ke lokasi asal
+    - Jika conflict: SISTEM OTOMATIS cari lokasi In Transit kosong (Cluster C L10-L16)
+    - Pencarian In Transit: L10 B1 P1 -> P2 -> P3 -> B2 P1 -> dst sampai L16
+    - DELETE dari outbound_history
+    - Opsi manual tetap tersedia untuk konsistensi dengan form lain
+
+TABEL DATABASE TERKAIT:
+- products
+- stock_list
+- outbound_history
+- stock_movements
+
+API ENDPOINTS YANG DIPERLUKAN:
+- GET /api/products?warehouse_id=xxx
+- GET /api/stock/fefo?product_id=xxx&qty=xxx
+- POST /api/outbound
+- GET /api/outbound/today?warehouse_id=xxx
+- DELETE /api/outbound/:id (untuk Edit/Batal)
+
+================================================================================
+                    5. OUTBOUND HISTORY (/outbound/history)
+================================================================================
+
+KONDISI SAAT INI:
+- Menampilkan outboundHistoryData
+- BB Produk ditampilkan dari JOIN dengan stockListData
+- Export Excel format 1 baris per lokasi
+- Modal detail dengan QR Code per lokasi
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 5.1 Ganti fetch history
+    SAAT INI: outboundHistoryData array
+    SEHARUSNYA:
+    SELECT oh.*, p.product_name, u.full_name as processed_by_name
+    FROM outbound_history oh
+    JOIN products p ON oh.product_id = p.id
+    JOIN users u ON oh.processed_by = u.id
+    WHERE oh.warehouse_id = ?
+    ORDER BY oh.departure_time DESC
+
+[ ] 5.2 Update BB Produk display
+    SAAT INI: Lookup dari stockListData berdasarkan location string
+    SEHARUSNYA: BB Produk sudah tersimpan di locations JSON:
+    locations[].bb_produk dan locations[].expired_date
+
+[ ] 5.3 Update Export Excel
+    SAAT INI: Loop locations dan lookup BB dari stockListData
+    SEHARUSNYA: Loop locations JSON, BB Produk sudah include di setiap location object
+
+TABEL DATABASE TERKAIT:
+- outbound_history
+- products (JOIN untuk nama produk)
+- users (JOIN untuk nama processor)
+
+================================================================================
+                    6. STOCK LIST PAGE (/stock-list)
+================================================================================
+
+KONDISI SAAT INI:
+- Judul: "Stock List (Pallet)"
+- Menampilkan stockListData dengan statistics
+- Filter: Cluster, Status
+- Sort: Expired date, Inbound date
+- Status dihitung dynamic: release (<=90 hari), hold (>90 hari), receh, salah-cluster
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 6.1 Ganti fetch stock list
+    SAAT INI: stockListData array
+    SEHARUSNYA:
+    SELECT sl.*, p.product_name, p.product_code
+    FROM stock_list sl
+    JOIN products p ON sl.product_id = p.id
+    WHERE sl.warehouse_id = ?
+    ORDER BY sl.expired_date ASC
+
+[ ] 6.2 Status calculation
+    SAAT INI: calculateDynamicStatus() di frontend
+    SEHARUSNYA: 
+    Option A: Computed column di database (VIEW)
+    Option B: Calculate di frontend setelah fetch (lebih flexible)
+    
+    Logic tetap sama:
+    - release: expired <= 90 hari
+    - hold: expired > 90 hari
+    - receh: is_receh = true
+    - salah-cluster: location tidak sesuai product_homes
+
+[ ] 6.3 Statistics calculation
+    SAAT INI: Aggregate di frontend
+    SEHARUSNYA:
+    Option A: Aggregate di database dengan COUNT/SUM
+    Option B: Aggregate di frontend setelah fetch
+    
+    SELECT 
+      COUNT(*) as total_items,
+      SUM(qty_carton) as total_cartons,
+      COUNT(*) FILTER (WHERE expired_date <= CURRENT_DATE + 90) as release_count
+    FROM stock_list
+    WHERE warehouse_id = ?
+
+TABEL DATABASE TERKAIT:
+- stock_list
+- products (JOIN)
+- product_homes (untuk validasi salah-cluster)
+
+================================================================================
+                    7. WAREHOUSE LAYOUT (/warehouse-layout)
+================================================================================
+
+KONDISI SAAT INI:
+- Render grid berdasarkan clusterConfigs
+- Warna cell berdasarkan stock status
+- Click cell untuk lihat detail
+- In Transit area ditandai khusus
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 7.1 Ganti fetch cluster config
+    SAAT INI: clusterConfigs array dari warehouse-config.ts
+    SEHARUSNYA:
+    SELECT * FROM cluster_configs WHERE warehouse_id = ? AND is_active = true
+    + JOIN cluster_cell_overrides untuk custom config
+
+[ ] 7.2 Ganti fetch stock per location
+    SAAT INI: stockListData
+    SEHARUSNYA:
+    SELECT * FROM stock_list WHERE warehouse_id = ?
+    Kemudian build location map di frontend
+
+[ ] 7.3 Render tetap di frontend
+    - Grid visualization logic tidak perlu pindah ke backend
+    - Status color calculation tetap di frontend
+
+TABEL DATABASE TERKAIT:
+- cluster_configs
+- cluster_cell_overrides
+- stock_list
+- products (JOIN untuk detail)
+
+================================================================================
+                    8. NPL PAGE (/npl)
+================================================================================
+
+KONDISI SAAT INI:
+- Form input: driver, polisi, produk, qty, lokasi
+- Tidak ada ekspedisi dan DN (beda dengan inbound primary)
+
+PERUBAHAN YANG DIPERLUKAN (UPDATE v3.4):
+
+[ ] 8.1 Ganti dropdown produk
+    SEHARUSNYA: Fetch dari products WHERE warehouse_id = current_user.warehouse_id
+
+[ ] 8.2 Tambah input BB Produk (WAJIB)
+    SEBELUM: BB Produk auto-generate "BB-NPL-YYYYMMDD"
+    SEHARUSNYA: 
+    - Input manual 10 digit: YYMMDDXXXX
+    - Parsing sama dengan Inbound Primary
+    - 6 digit pertama = tanggal produksi
+    - 4 digit terakhir = KD Plant
+
+[ ] 8.3 Update logika Expired Date
+    SEBELUM: +6 bulan otomatis dari hari ini
+    SEHARUSNYA:
+    - Diekstrak langsung dari 6 digit pertama BB Produk
+    - 6 digit pertama BB Produk ADALAH expired date (bukan tanggal produksi)
+    - TIDAK ADA shelf_life atau kalkulasi apapun
+    - Contoh: BB 2506150001 = expired 15 Juni 2025
+
+[ ] 8.4 Ganti rekomendasi lokasi
+    SEHARUSNYA: Same as inbound - query product_homes + stock_list
+
+[ ] 8.5 Ganti submit NPL
+    SAAT INI: Push ke nplHistoryData
+    SEHARUSNYA:
+    - INSERT ke npl_history (include bb_produk dan expired_date)
+    - INSERT ke stock_list (expired dari BB Produk, BUKAN +6 bulan)
+    - INSERT ke stock_movements
+
+TABEL DATABASE TERKAIT:
+- products
+- product_homes
+- stock_list
+- npl_history (dengan bb_produk dan expired_date)
+- stock_movements
+
+CATATAN PENTING:
+- BB Produk NPL TIDAK auto-generate
+- Expired date NPL TIDAK +6 bulan
+- Keduanya harus dari BB Produk yang diinput user
+
+================================================================================
+                    9. PERMUTASI PAGE (/permutasi)
+================================================================================
+
+KONDISI SAAT INI:
+- 3 Tab: Salah Cluster, In Transit, History Hari Ini
+- Deteksi stock salah lokasi dari validateProductLocation()
+- Batch move dengan auto-recommend lokasi
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 9.1 Ganti fetch "Salah Cluster" stocks
+    SEHARUSNYA:
+    - Query stock_list
+    - JOIN product_homes
+    - Filter WHERE location tidak sesuai home cluster
+
+[ ] 9.2 Ganti fetch "In Transit" stocks
+    SEHARUSNYA:
+    SELECT * FROM stock_list sl
+    JOIN cluster_configs cc ON sl.warehouse_id = cc.warehouse_id AND sl.cluster = cc.cluster
+    WHERE sl.lorong >= cc.in_transit_lorong_start AND sl.lorong <= cc.in_transit_lorong_end
+
+[ ] 9.3 Ganti submit permutasi
+    SAAT INI: Update stockListData.location
+    SEHARUSNYA:
+    - UPDATE stock_list SET location fields
+    - INSERT ke permutasi_history
+
+TABEL DATABASE TERKAIT:
+- stock_list
+- product_homes
+- cluster_configs
+- permutasi_history
+
+================================================================================
+                    10. PRE-STOCK OPNAME (/stock-opname)
+================================================================================
+
+KONDISI SAAT INI:
+- admin_warehouse: Form input blind (tidak lihat data sistem)
+- admin_cabang: History + Rekonsel
+- Comparison dengan audit sebelumnya (bukan data sistem real-time)
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 10.1 Ganti fetch produk list (untuk form)
+    SEHARUSNYA: SELECT * FROM products WHERE warehouse_id = ? AND is_active = true
+
+[ ] 10.2 Ganti submit audit
+    SAAT INI: Push ke prestockOpnameHistoryData
+    SEHARUSNYA:
+    - INSERT ke prestock_opname (header)
+    - INSERT ke prestock_opname_items (detail per produk)
+
+[ ] 10.3 Ganti fetch history + rekonsel
+    SEHARUSNYA:
+    SELECT po.*, u.full_name as auditor_name
+    FROM prestock_opname po
+    JOIN users u ON po.auditor_id = u.id
+    WHERE po.warehouse_id = ?
+    ORDER BY po.audit_date DESC
+
+[ ] 10.4 Update rekonsel
+    SEHARUSNYA:
+    - UPDATE prestock_opname SET reconciliation_status = 'reconciled', ...
+    - UPDATE prestock_opname_items SET reconciliation_reason = ?, ...
+
+TABEL DATABASE TERKAIT:
+- products
+- prestock_opname
+- prestock_opname_items
+- users (JOIN)
+
+================================================================================
+                    11. MASTER DATA (/stock-list-master)
+================================================================================
+
+KONDISI SAAT INI:
+- 4 Tab: Produk, Ekspedisi, Cluster Config, Product Home
+- CRUD operations manipulasi array
+- Hanya admin_cabang yang bisa akses
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 11.1 Tab Produk
+    - GET: SELECT * FROM products WHERE warehouse_id = ?
+    - CREATE: INSERT INTO products (warehouse_id, ...)
+    - UPDATE: UPDATE products SET ... WHERE id = ?
+    - DELETE: DELETE FROM products WHERE id = ?
+
+[ ] 11.2 Tab Ekspedisi
+    - GET: SELECT * FROM expeditions WHERE warehouse_id = ?
+    - CREATE: INSERT INTO expeditions (warehouse_id, ...)
+    - UPDATE: UPDATE expeditions SET ... WHERE id = ?
+    - DELETE: DELETE FROM expeditions WHERE id = ?
+
+[ ] 11.3 Tab Cluster Config
+    - GET: SELECT * FROM cluster_configs WHERE warehouse_id = ?
+    - GET overrides: SELECT * FROM cluster_cell_overrides WHERE cluster_config_id = ?
+    - CREATE/UPDATE/DELETE for both tables
+
+[ ] 11.4 Tab Product Home
+    - GET: SELECT ph.*, p.product_name FROM product_homes ph JOIN products p ON ...
+    - CREATE: INSERT INTO product_homes ...
+    - UPDATE: UPDATE product_homes SET ...
+    - DELETE: DELETE FROM product_homes WHERE id = ?
+
+TABEL DATABASE TERKAIT:
+- products
+- expeditions
+- cluster_configs
+- cluster_cell_overrides
+- product_homes
+
+================================================================================
+                    12. ADMIN MANAGEMENT (/admin-management)
+================================================================================
+
+KONDISI SAAT INI:
+- List admin_warehouse di warehouse yang sama
+- CRUD untuk admin_warehouse
+- Toggle aktif/nonaktif
+
+PERUBAHAN YANG DIPERLUKAN:
+
+[ ] 12.1 Role-based access
+    - developer: Bisa lihat dan manage semua user di semua warehouse
+    - admin_cabang: Hanya bisa manage admin_warehouse di warehouse sendiri
+    - admin_warehouse: Tidak bisa akses halaman ini
+
+[ ] 12.2 Ganti fetch users
+    SEHARUSNYA (admin_cabang):
+    SELECT * FROM users 
+    WHERE warehouse_id = ? AND role = 'admin_warehouse'
+    
+    SEHARUSNYA (developer):
+    SELECT u.*, w.city_name as warehouse_name FROM users u
+    LEFT JOIN warehouses w ON u.warehouse_id = w.id
+
+[ ] 12.3 Ganti CRUD operations
+    - CREATE: INSERT INTO users (warehouse_id, role, ...)
+    - UPDATE: UPDATE users SET ... WHERE id = ?
+    - DELETE: UPDATE users SET is_active = false WHERE id = ?
+
+TABEL DATABASE TERKAIT:
+- users
+- warehouses (JOIN untuk nama)
+
+================================================================================
+                    PRIORITAS IMPLEMENTASI
+================================================================================
+
+PHASE 1 - Core Authentication & Data (Week 1-2):
+1. Setup Supabase project + auth
+2. Create database tables sesuai schema
+3. Implement login + session management
+4. Implement navigation dengan role check
+
+PHASE 2 - Stock Operations (Week 3-4):
+5. Implement stock list fetch
+6. Implement inbound (form + submit + history)
+7. Implement outbound (form + FEFO + submit + history)
+8. Implement Edit & Batal untuk inbound/outbound
+
+PHASE 3 - Secondary Operations (Week 5-6):
+9. Implement NPL (return)
+10. Implement Permutasi (relokasi)
+11. Implement Pre-Stock Opname + Rekonsel
+
+PHASE 4 - Configuration (Week 7-8):
+12. Implement Master Data CRUD (products, expeditions)
+13. Implement Cluster Config CRUD
+14. Implement Product Home CRUD
+15. Implement Admin Management
+
+PHASE 5 - Polish & Testing (Week 9-10):
+16. Error handling + loading states
+17. Optimistic updates
+18. Caching dengan SWR/React Query
+19. Testing end-to-end
+
+================================================================================
+                    CHECKLIST API ENDPOINTS
+================================================================================
+
+AUTH:
+[ ] POST /api/auth/login
+[ ] POST /api/auth/logout
+[ ] GET /api/auth/me
+
+PRODUCTS:
+[ ] GET /api/products?warehouse_id=xxx
+[ ] POST /api/products
+[ ] PUT /api/products/:id
+[ ] DELETE /api/products/:id
+
+EXPEDITIONS:
+[ ] GET /api/expeditions?warehouse_id=xxx
+[ ] POST /api/expeditions
+[ ] PUT /api/expeditions/:id
+[ ] DELETE /api/expeditions/:id
+
+STOCK:
+[ ] GET /api/stock?warehouse_id=xxx&filters...
+[ ] GET /api/stock/fefo?product_id=xxx&qty=xxx
+[ ] GET /api/stock/wrong-cluster?warehouse_id=xxx
+[ ] GET /api/stock/in-transit?warehouse_id=xxx
+
+INBOUND:
+[ ] POST /api/inbound
+[ ] GET /api/inbound/today?warehouse_id=xxx
+[ ] GET /api/inbound/history?warehouse_id=xxx
+[ ] DELETE /api/inbound/:id
+
+OUTBOUND:
+[ ] POST /api/outbound
+[ ] GET /api/outbound/today?warehouse_id=xxx
+[ ] GET /api/outbound/history?warehouse_id=xxx
+[ ] DELETE /api/outbound/:id
+
+NPL:
+[ ] POST /api/npl
+[ ] GET /api/npl/today?warehouse_id=xxx
+[ ] GET /api/npl/history?warehouse_id=xxx
+[ ] DELETE /api/npl/:id
+
+PERMUTASI:
+[ ] POST /api/permutasi
+[ ] GET /api/permutasi/today?warehouse_id=xxx
+
+OPNAME:
+[ ] POST /api/opname
+[ ] GET /api/opname?warehouse_id=xxx
+[ ] PUT /api/opname/:id/reconcile
+
+CONFIG:
+[ ] GET/POST/PUT/DELETE /api/cluster-configs
+[ ] GET/POST/PUT/DELETE /api/cluster-cell-overrides
+[ ] GET/POST/PUT/DELETE /api/product-homes
+
+USERS:
+[ ] GET /api/users?warehouse_id=xxx
+[ ] POST /api/users
+[ ] PUT /api/users/:id
+[ ] DELETE /api/users/:id
+
+LOCATIONS:
+[ ] GET /api/locations/recommend?product_id=xxx&qty=xxx
+
+================================================================================
+                    CATATAN PENTING
+================================================================================
+
+1. BACKWARD COMPATIBILITY
+   - Buat adapter/wrapper untuk transisi gradual
+   - Mock data bisa tetap dipakai untuk development
+   - Toggle antara mock dan real database dengan env variable
+
+2. DATA MIGRATION
+   - Export mock data ke SQL INSERT statements
+   - Seed database dengan data awal
+   - Validate data integrity setelah migration
+
+3. ROLE-BASED ACCESS
+   - Implement RLS (Row Level Security) di Supabase
+   - admin_cabang hanya akses warehouse sendiri
+   - admin_warehouse hanya bisa operasional (inbound/outbound)
+
+4. AUDIT TRAIL
+   - stock_movements untuk tracking pergerakan stock
+   - activity_logs untuk tracking aksi user
+   - Soft delete untuk data yang perlu history
+
+5. PERFORMANCE
+   - Index pada kolom yang sering di-filter (warehouse_id, product_id, expired_date)
+   - Pagination untuk tabel besar
+   - Caching untuk data yang jarang berubah (master data)
+
+================================================================================
+                    END OF DOCUMENT
+================================================================================
