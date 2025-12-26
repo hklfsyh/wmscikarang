@@ -23,7 +23,7 @@ const RECEH_THRESHOLD = 5;
 
 // --- INTERFACES ---
 interface RecommendedLocation {
-  cluster: string;
+  clusterChar: string;
   lorong: string;
   baris: string;
   level: string;
@@ -74,6 +74,7 @@ const parseBBProduk = (bb: string): { expiredDate: string; kdPlant: string; isVa
 };
 
 export function NplForm() {
+  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
   // Form state
   const [namaPengemudi, setNamaPengemudi] = useState("");
   const [nomorPolisi, setNomorPolisi] = useState("");
@@ -124,17 +125,30 @@ export function NplForm() {
     return productCode ? getProductByCode(productCode) : null;
   }, [productCode]);
 
-  // Product search filter
+  // Load warehouse context
+  useEffect(() => {
+    const userStr = localStorage.getItem("user");
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      setCurrentWarehouseId(user.warehouseId || null);
+    }
+  }, []);
+
+  // Product search filter with warehouse context
   const filteredProducts = useMemo(() => {
-    if (!productSearch) return productMasterData.slice(0, 10);
+    const products = currentWarehouseId 
+      ? productMasterData.filter(p => p.warehouseId === currentWarehouseId)
+      : productMasterData;
+    
+    if (!productSearch) return products.slice(0, 10);
     const search = productSearch.toLowerCase();
-    return productMasterData
+    return products
       .filter((p) => p.productCode.toLowerCase().includes(search) || p.productName.toLowerCase().includes(search))
       .slice(0, 10);
-  }, [productSearch]);
+  }, [productSearch, currentWarehouseId]);
 
   // Qty calculation (same as inbound)
-  const qtyPerPalletStd = selectedProduct?.qtyPerPallet || 0;
+  const qtyPerPalletStd = selectedProduct?.qtyCartonPerPallet || 0;
 
   const { totalPallets, remainingCartons, totalCartons, shouldAttachReceh } = useMemo(() => {
     const palletInput = Number(qtyPalletInput) || 0;
@@ -162,7 +176,7 @@ export function NplForm() {
   const totalPalletsNeeded = shouldAttachReceh ? totalPallets : totalPallets + (isReceh ? 1 : 0);
 
   // Cluster & Location Options
-  const clusterOptions = useMemo(() => clusterConfigs.filter((c) => c.isActive).map((c) => c.cluster), []);
+  const clusterOptions = useMemo(() => clusterConfigs.filter((c) => c.isActive).map((c) => c.clusterChar), []);
 
   const lorongOptions = useMemo(() => {
     if (!manualCluster) return [];
@@ -189,7 +203,7 @@ export function NplForm() {
   // Today's NPL history
   const todayNplHistory = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return nplHistoryData.filter((npl) => npl.tanggal === todayStr);
+    return nplHistoryData.filter((npl) => npl.return_time.startsWith(todayStr));
   }, []);
 
   // Parse BB Produk on change
@@ -210,34 +224,34 @@ export function NplForm() {
   }, [bbProduk]);
 
   // Find multiple recommended locations (same logic as inbound)
-  const findMultipleRecommendedLocations = (cluster: string, palletsNeeded: number): MultiLocationRecommendation => {
+  const findMultipleRecommendedLocations = (clusterChar: string, palletsNeeded: number): MultiLocationRecommendation => {
     const locations: RecommendedLocation[] = [];
     let remainingPallets = palletsNeeded;
 
-    const clusterConfig = getClusterConfig(cluster);
+    const clusterConfig = getClusterConfig(clusterChar);
     if (!clusterConfig) {
       return { locations: [], totalPalletsPlaced: 0, needsMultipleLocations: false };
     }
 
     const validLocs = productCode ? getValidLocationsForProduct(productCode) : null;
 
-    const lorongStart = validLocs && validLocs.cluster === cluster ? validLocs.lorongRange[0] : 1;
+    const lorongStart = validLocs && validLocs.clusterChar === clusterChar ? validLocs.lorongRange[0] : 1;
     const lorongEnd =
-      validLocs && validLocs.cluster === cluster ? validLocs.lorongRange[1] : clusterConfig.defaultLorongCount;
+      validLocs && validLocs.clusterChar === clusterChar ? validLocs.lorongRange[1] : clusterConfig.defaultLorongCount;
 
     // PHASE 1: Primary product home locations
     for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
       if (remainingPallets === 0) break;
-      if (isInTransitLocation(cluster, lorongNum)) continue;
+      if (isInTransitLocation(clusterChar, lorongNum)) continue;
 
-      const maxBaris = getBarisCountForLorong(cluster, lorongNum);
-      const barisStart = validLocs && validLocs.cluster === cluster ? validLocs.barisRange[0] : 1;
-      const barisEnd = validLocs && validLocs.cluster === cluster ? Math.min(validLocs.barisRange[1], maxBaris) : maxBaris;
+      const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
+      const barisStart = validLocs && validLocs.clusterChar === clusterChar ? validLocs.barisRange[0] : 1;
+      const barisEnd = validLocs && validLocs.clusterChar === clusterChar ? Math.min(validLocs.barisRange[1], maxBaris) : maxBaris;
 
       for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
         if (remainingPallets === 0) break;
 
-        const maxPallet = getPalletCapacityForCell(cluster, lorongNum, barisNum);
+        const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
         const productMaxPallet = validLocs ? validLocs.maxPalletPerLocation : 999;
         const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
 
@@ -249,16 +263,16 @@ export function NplForm() {
           const level = `P${palletNum}`;
 
           if (productCode) {
-            const validation = validateProductLocation(productCode, cluster, lorongNum, barisNum);
+            const validation = validateProductLocation(productCode, clusterChar, lorongNum, barisNum);
             if (!validation.isValid) continue;
           }
 
           const locationExists = stockListData.some(
             (item) =>
-              item.location.cluster === cluster &&
-              item.location.lorong === lorong &&
-              item.location.baris === baris &&
-              item.location.level === level
+              item.cluster === clusterChar &&
+              item.lorong === parseInt(lorong.replace('L', '')) &&
+              item.baris === parseInt(baris.replace('B', '')) &&
+              item.level === parseInt(level.replace('P', ''))
           );
 
           if (!locationExists) {
@@ -271,7 +285,7 @@ export function NplForm() {
                 : qtyPerPalletStd;
 
             locations.push({
-              cluster,
+              clusterChar,
               lorong,
               baris,
               level,
@@ -292,11 +306,11 @@ export function NplForm() {
         for (let lorongNum = transitStart; lorongNum <= transitEnd; lorongNum++) {
           if (remainingPallets === 0) break;
 
-          const maxBaris = getBarisCountForLorong(transitConfig.cluster, lorongNum);
+          const maxBaris = getBarisCountForLorong(transitConfig.clusterChar, lorongNum);
           for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
             if (remainingPallets === 0) break;
 
-            const maxPallet = getPalletCapacityForCell(transitConfig.cluster, lorongNum, barisNum);
+            const maxPallet = getPalletCapacityForCell(transitConfig.clusterChar, lorongNum, barisNum);
             for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
               if (remainingPallets === 0) break;
 
@@ -306,16 +320,16 @@ export function NplForm() {
 
               const locationExists = stockListData.some(
                 (item) =>
-                  item.location.cluster === transitConfig.cluster &&
-                  item.location.lorong === lorong &&
-                  item.location.baris === baris &&
-                  item.location.level === level
+                  item.cluster === transitConfig.clusterChar &&
+                  item.lorong === parseInt(lorong.replace('L', '')) &&
+                  item.baris === parseInt(baris.replace('B', '')) &&
+                  item.level === parseInt(level.replace('P', ''))
               );
 
               if (!locationExists) {
                 const isLastPallet = remainingPallets === 1;
                 locations.push({
-                  cluster: transitConfig.cluster,
+                  clusterChar: transitConfig.clusterChar,
                   lorong,
                   baris,
                   level,
@@ -433,10 +447,10 @@ export function NplForm() {
       // Check if manual location is occupied
       const isOccupied = stockListData.some(
         (s) =>
-          s.location.cluster === manualCluster &&
-          s.location.lorong === manualLorong &&
-          s.location.baris === manualBaris &&
-          s.location.level === manualPallet
+          s.cluster === manualCluster &&
+          s.lorong === parseInt(manualLorong.replace('L', '')) &&
+          s.baris === parseInt(manualBaris.replace('B', '')) &&
+          s.level === parseInt(manualPallet.replace('P', ''))
       );
       if (isOccupied) {
         error("Lokasi tujuan sudah terisi!");
@@ -467,7 +481,7 @@ export function NplForm() {
       // Manual single location
       locationsToSave = [
         {
-          cluster: manualCluster,
+          clusterChar: manualCluster,
           lorong: manualLorong,
           baris: manualBaris,
           level: manualPallet,
@@ -481,26 +495,29 @@ export function NplForm() {
     locationsToSave.forEach((loc, idx) => {
       const newStock: StockItem = {
         id: `STOCK-NPL-${Date.now()}-${idx}`,
-        productCode: product.productCode,
-        productName: product.productName,
-        bbPallet: [bbProduk],
-        batchNumber: `BATCH-NPL-${todayStr.replace(/-/g, "")}`,
-        lotNumber: `LOT-NPL-${Date.now()}-${idx}`,
+        warehouseId: "WH001",
+        productId: product.id,
+        bbProduk: bbProduk,
+        cluster: loc.clusterChar,
+        lorong: parseInt(loc.lorong.replace('L', '')),
+        baris: parseInt(loc.baris.replace('B', '')),
+        level: parseInt(loc.level.replace('P', '')),
         qtyPallet: 1,
         qtyCarton: loc.qtyCarton,
-        qtyPcs: loc.qtyCarton * (product.qtyPerCarton || 24),
-        location: { cluster: loc.cluster, lorong: loc.lorong, baris: loc.baris, level: loc.level },
         expiredDate: expiredDate,
         inboundDate: todayStr,
-        status: "available",
+        status: "release",
         isReceh: loc.isReceh,
-        notes: `NPL Return - ${namaPengemudi} (${nomorPolisi})`,
+        parentStockId: null,
+        createdBy: "USER001",
+        createdAt: todayStr,
+        updatedAt: todayStr,
       };
       stockListData.push(newStock);
     });
 
     // Create location string for history
-    const locationString = locationsToSave.map((l) => `${l.cluster}-${l.lorong}-${l.baris}-${l.level}`).join(", ");
+    const locationString = locationsToSave.map((l) => `${l.clusterChar}-${l.lorong}-${l.baris}-${l.level}`).join(", ");
 
     // Add to NPL history
     const transactionCode =
@@ -509,18 +526,27 @@ export function NplForm() {
         : `NPL-${todayStr.replace(/-/g, "")}-${String(nplHistoryData.length + 1).padStart(4, "0")}`;
 
     const newNpl: NplHistory = {
-      id: transactionCode,
-      tanggal: todayStr,
-      namaPengemudi,
-      nomorPolisi,
-      productCode: product.productCode,
-      productName: product.productName,
-      qtyPallet: locationsToSave.length,
-      qtyCarton: totalCartons,
-      totalPcs: totalCartons * (product.qtyPerCarton || 24),
-      location: locationString,
-      status: "completed",
-      createdAt: new Date().toISOString(),
+      id: `npl-${todayStr.replace(/-/g, "")}-${String(nplHistoryData.length + 1).padStart(3, "0")}`,
+      warehouse_id: "wh-001-cikarang",
+      transaction_code: transactionCode,
+      product_id: product.id,
+      bb_produk: bbProduk,
+      qty_carton: totalCartons,
+      expired_date: expiredDate,
+      locations: locationsToSave.map((l) => ({
+        cluster: l.clusterChar,
+        lorong: parseInt(l.lorong.replace('L', '')),
+        baris: parseInt(l.baris.replace('B', '')),
+        level: parseInt(l.level.replace('P', '')),
+        qty_carton: l.qtyCarton,
+        is_receh: l.isReceh,
+      })),
+      driver_name: namaPengemudi,
+      vehicle_number: nomorPolisi,
+      returned_by: "usr-003", // Dewi Lestari (admin_warehouse)
+      return_time: new Date().toISOString(),
+      notes: notes,
+      created_at: new Date().toISOString(),
     };
     nplHistoryData.unshift(newNpl);
 
@@ -560,16 +586,14 @@ export function NplForm() {
     }
 
     // Remove from stock
-    const locationParts = selectedNplForAction.location.split(", ");
-    locationParts.forEach((locStr) => {
-      const parts = locStr.split("-");
+    selectedNplForAction.locations.forEach((loc) => {
       const stockIdx = stockListData.findIndex(
         (s) =>
-          s.productCode === selectedNplForAction.productCode &&
-          s.location.cluster === parts[0] &&
-          s.location.lorong === parts[1] &&
-          s.location.baris === parts[2] &&
-          s.location.level === parts[3]
+          s.productId === selectedNplForAction.product_id &&
+          s.cluster === loc.cluster &&
+          s.lorong === loc.lorong &&
+          s.baris === loc.baris &&
+          s.level === loc.level
       );
       if (stockIdx !== -1) {
         stockListData.splice(stockIdx, 1);
@@ -577,26 +601,27 @@ export function NplForm() {
     });
 
     // Get product info for reverse calculation
-    const product = getProductByCode(selectedNplForAction.productCode);
-    const qtyPerPallet = product?.qtyPerPallet || 1;
-    const totalCarton = selectedNplForAction.qtyCarton;
+    const product = productMasterData.find((p) => p.id === selectedNplForAction.product_id);
+    const qtyPerPallet = product?.qtyCartonPerPallet || 1;
+    const totalCarton = selectedNplForAction.qty_carton;
     const fullPallets = Math.floor(totalCarton / qtyPerPallet);
     const remainingCartons = totalCarton % qtyPerPallet;
 
     // Load into form
-    setNamaPengemudi(selectedNplForAction.namaPengemudi);
-    setNomorPolisi(selectedNplForAction.nomorPolisi);
-    setProductCode(selectedNplForAction.productCode);
-    setProductSearch(selectedNplForAction.productName);
+    setNamaPengemudi(selectedNplForAction.driver_name);
+    setNomorPolisi(selectedNplForAction.vehicle_number);
+    setProductCode(product?.productCode || "");
+    setProductSearch(product?.productName || "");
     setQtyPalletInput(String(fullPallets));
     setQtyCartonInput(String(remainingCartons));
-    setBbProduk("");
-    setExpiredDate("");
-    setKdPlant("");
+    setBbProduk(selectedNplForAction.bb_produk);
+    setExpiredDate(selectedNplForAction.expired_date);
+    setKdPlant(selectedNplForAction.bb_produk.substring(6, 10));
+    setNotes(selectedNplForAction.notes || "");
     setAutoRecommend(true);
     setMultiLocationRec(null);
     setIsEditMode(true);
-    setEditId(selectedNplForAction.id);
+    setEditId(selectedNplForAction.transaction_code);
 
     setShowEditConfirmModal(false);
     setSelectedNplForAction(null);
@@ -620,16 +645,14 @@ export function NplForm() {
     }
 
     // Remove from stock
-    const locationParts = selectedNplForAction.location.split(", ");
-    locationParts.forEach((locStr) => {
-      const parts = locStr.split("-");
+    selectedNplForAction.locations.forEach((loc) => {
       const stockIdx = stockListData.findIndex(
         (s) =>
-          s.productCode === selectedNplForAction.productCode &&
-          s.location.cluster === parts[0] &&
-          s.location.lorong === parts[1] &&
-          s.location.baris === parts[2] &&
-          s.location.level === parts[3]
+          s.productId === selectedNplForAction.product_id &&
+          s.cluster === loc.cluster &&
+          s.lorong === loc.lorong &&
+          s.baris === loc.baris &&
+          s.level === loc.level
       );
       if (stockIdx !== -1) {
         stockListData.splice(stockIdx, 1);
@@ -748,7 +771,7 @@ export function NplForm() {
                         </p>
                         <p className="text-xs text-teal-600 mt-1">
                           Home Cluster: {selectedProduct.defaultCluster || "N/A"} | Qty/Pallet:{" "}
-                          {selectedProduct.qtyPerPallet} | Qty/Carton: {selectedProduct.qtyPerCarton}
+                          {selectedProduct.qtyCartonPerPallet} | Qty/Carton: {selectedProduct.qtyPerCarton}
                         </p>
                       </div>
                     )}
@@ -907,7 +930,7 @@ export function NplForm() {
                                 className={`text-xs p-2 rounded ${loc.isReceh ? "bg-blue-50 text-blue-800" : "bg-green-50 text-green-800"}`}
                               >
                                 <span className="font-mono">
-                                  {loc.cluster}-{loc.lorong}-{loc.baris}-{loc.level}
+                                  {loc.clusterChar}-{loc.lorong}-{loc.baris}-{loc.level}
                                 </span>
                                 <span className="ml-2">({loc.qtyCarton} karton)</span>
                                 {loc.isReceh && <span className="ml-1 text-blue-600">🔵 Receh</span>}
@@ -1047,51 +1070,50 @@ export function NplForm() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {todayNplHistory.map((npl) => (
-                      <tr key={npl.id} className="hover:bg-teal-50 transition-colors">
-                        <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
-                          {new Date(npl.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
-                        </td>
-                        <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">
-                          {npl.namaPengemudi}
-                        </td>
-                        <td className="px-3 py-3 text-sm">
-                          <div className="font-medium text-gray-900">{npl.productCode}</div>
-                          <div className="text-gray-500 text-xs truncate max-w-[150px]">{npl.productName}</div>
-                        </td>
-                        <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
-                          {npl.qtyPallet}
-                        </td>
-                        <td className="px-2 py-3 text-sm text-center font-bold text-blue-600">
-                          {npl.qtyCarton}
-                        </td>
-                        <td className="px-2 py-3 text-center">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            npl.status === "completed"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-yellow-100 text-yellow-800"
-                          }`}>
-                            {npl.status === "completed" ? "✓" : "⚠"}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => handleEditClick(npl)}
-                              className="px-2 py-1 bg-amber-500 text-white text-xs font-semibold rounded hover:bg-amber-600 transition-colors"
-                            >
-                              Ubah
-                            </button>
-                            <button
-                              onClick={() => handleCancelClick(npl)}
-                              className="px-2 py-1 bg-red-500 text-white text-xs font-semibold rounded hover:bg-red-600 transition-colors"
-                            >
-                              Batal
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {todayNplHistory.map((npl) => {
+                      const product = productMasterData.find((p) => p.id === npl.product_id);
+                      return (
+                        <tr key={npl.id} className="hover:bg-teal-50 transition-colors">
+                          <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
+                            {new Date(npl.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                          </td>
+                          <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">
+                            {npl.driver_name}
+                          </td>
+                          <td className="px-3 py-3 text-sm">
+                            <div className="font-medium text-gray-900">{product?.productCode || npl.bb_produk}</div>
+                            <div className="text-gray-500 text-xs truncate max-w-[150px]">{product?.productName || "Unknown Product"}</div>
+                          </td>
+                          <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
+                            {npl.locations.length}
+                          </td>
+                          <td className="px-2 py-3 text-sm text-center font-bold text-blue-600">
+                            {npl.qty_carton}
+                          </td>
+                          <td className="px-2 py-3 text-center">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                              ✓ Completed
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => handleEditClick(npl)}
+                                className="px-2 py-1 bg-amber-500 text-white text-xs font-semibold rounded hover:bg-amber-600 transition-colors"
+                              >
+                                Ubah
+                              </button>
+                              <button
+                                onClick={() => handleCancelClick(npl)}
+                                className="px-2 py-1 bg-red-500 text-white text-xs font-semibold rounded hover:bg-red-600 transition-colors"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1163,10 +1185,10 @@ export function NplForm() {
               </p>
               <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm">
                 <p>
-                  <strong>ID:</strong> {selectedNplForAction.id}
+                  <strong>ID:</strong> {selectedNplForAction.transaction_code}
                 </p>
                 <p>
-                  <strong>Produk:</strong> {selectedNplForAction.productName}
+                  <strong>Produk:</strong> {productMasterData.find(p => p.id === selectedNplForAction.product_id)?.productName || "Unknown Product"}
                 </p>
               </div>
               <div className="flex gap-3">
@@ -1204,13 +1226,13 @@ export function NplForm() {
               </p>
               <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm">
                 <p>
-                  <strong>ID:</strong> {selectedNplForAction.id}
+                  <strong>ID:</strong> {selectedNplForAction.transaction_code}
                 </p>
                 <p>
-                  <strong>Produk:</strong> {selectedNplForAction.productName}
+                  <strong>Produk:</strong> {productMasterData.find(p => p.id === selectedNplForAction.product_id)?.productName || "Unknown Product"}
                 </p>
                 <p>
-                  <strong>Qty:</strong> {selectedNplForAction.qtyCarton} karton
+                  <strong>Qty:</strong> {selectedNplForAction.qty_carton} karton
                 </p>
               </div>
               <div className="flex gap-3">

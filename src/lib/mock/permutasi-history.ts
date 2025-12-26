@@ -2,20 +2,27 @@
 // File: src/lib/mock/permutasi-history.ts
 
 export interface PermutasiHistory {
-  id: string;
-  tanggal: string;
-  productCode: string;
-  productName: string;
-  qtyCarton: number;
-  fromLocation: string;
-  toLocation: string;
+  id: string; // UUID
+  warehouse_id: string; // UUID
+  transaction_code: string;
+  stock_id: string; // UUID reference to stock_list.id
+  product_id: string; // UUID
+  qty_carton: number;
+  from_cluster: string;
+  from_lorong: number;
+  from_baris: number;
+  from_level: number;
+  to_cluster: string;
+  to_lorong: number;
+  to_baris: number;
+  to_level: number;
   reason: string;
-  movedBy: string;
-  createdAt: string;
+  moved_by: string; // UUID admin_warehouse
+  moved_at: string;
+  created_at: string;
 }
 
 // Helper: Get today's date string
-const getTodayString = () => new Date().toISOString().slice(0, 10);
 const getTodayISOWithTime = (hour: number, minute: number) => {
   const today = new Date();
   today.setHours(hour, minute, 0, 0);
@@ -26,64 +33,104 @@ const getTodayISOWithTime = (hour: number, minute: number) => {
 export const permutasiHistoryData: PermutasiHistory[] = [
   // --- DATA HARI INI (untuk testing) ---
   {
-    id: "PMT-TODAY-001",
-    tanggal: getTodayString(),
-    productCode: "74553",
-    productName: "1500ML AQUA LOCAL 1X12",
-    qtyCarton: 70,
-    fromLocation: "C-L12-B3-P1",
-    toLocation: "B-L5-B4-P2",
+    id: "pmt-001",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "PMT-20251226-0001",
+    stock_id: "stk-001",
+    product_id: "prod-ckr-002", // 1500ML AQUA LOCAL 1X12
+    qty_carton: 70,
+    from_cluster: "C",
+    from_lorong: 12,
+    from_baris: 3,
+    from_level: 1,
+    to_cluster: "B",
+    to_lorong: 5,
+    to_baris: 4,
+    to_level: 2,
     reason: "Relokasi dari In Transit",
-    movedBy: "Admin Warehouse",
-    createdAt: getTodayISOWithTime(10, 30),
+    moved_by: "usr-003", // Dewi Lestari (admin_warehouse)
+    moved_at: getTodayISOWithTime(10, 30),
+    created_at: getTodayISOWithTime(10, 30),
   },
   {
-    id: "PMT-TODAY-002",
-    tanggal: getTodayString(),
-    productCode: "157095",
-    productName: "550ML VIT LOCAL 1X24",
-    qtyCarton: 24,
-    fromLocation: "A-L5-B2-P1",
-    toLocation: "B-L22-B7-P1",
+    id: "pmt-002",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "PMT-20251226-0002",
+    stock_id: "stk-002",
+    product_id: "prod-ckr-006", // 550ML VIT LOCAL 1X24
+    qty_carton: 24,
+    from_cluster: "A",
+    from_lorong: 5,
+    from_baris: 2,
+    from_level: 1,
+    to_cluster: "B",
+    to_lorong: 22,
+    to_baris: 7,
+    to_level: 1,
     reason: "Koreksi cluster",
-    movedBy: "Admin Warehouse",
-    createdAt: getTodayISOWithTime(11, 45),
+    moved_by: "usr-003",
+    moved_at: getTodayISOWithTime(11, 45),
+    created_at: getTodayISOWithTime(11, 45),
   },
   // --- DATA LAMA ---
   {
-    id: "PMT-2025-001",
-    tanggal: "2025-12-20",
-    productCode: "74561",
-    productName: "600ML AQUA LOCAL 1X24",
-    qtyCarton: 40,
-    fromLocation: "C-L11-B1-P2",
-    toLocation: "A-L8-B6-P1",
+    id: "pmt-003",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "PMT-20251220-0001",
+    stock_id: "stk-003",
+    product_id: "prod-ckr-001", // 600ML AQUA LOCAL 1X24
+    qty_carton: 40,
+    from_cluster: "C",
+    from_lorong: 11,
+    from_baris: 1,
+    from_level: 2,
+    to_cluster: "A",
+    to_lorong: 8,
+    to_baris: 6,
+    to_level: 1,
     reason: "Relokasi dari In Transit",
-    movedBy: "Admin Warehouse",
-    createdAt: "2025-12-20T09:00:00",
+    moved_by: "usr-003",
+    moved_at: "2025-12-20T09:00:00",
+    created_at: "2025-12-20T09:00:00",
   },
   {
-    id: "PMT-2025-002",
-    tanggal: "2025-12-19",
-    productCode: "145141",
-    productName: "500ML MIZONE ACTIV LYCHEE LEMON 1X12",
-    qtyCarton: 12,
-    fromLocation: "B-L10-B3-P1",
-    toLocation: "C-L2-B4-P2",
+    id: "pmt-004",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "PMT-20251219-0001",
+    stock_id: "stk-004",
+    product_id: "prod-ckr-003", // 500ML MIZONE ACTIV LYCHEE LEMON 1X12
+    qty_carton: 12,
+    from_cluster: "B",
+    from_lorong: 10,
+    from_baris: 3,
+    from_level: 1,
+    to_cluster: "C",
+    to_lorong: 2,
+    to_baris: 4,
+    to_level: 2,
     reason: "Koreksi cluster",
-    movedBy: "Admin Warehouse",
-    createdAt: "2025-12-19T14:30:00",
+    moved_by: "usr-004", // Budi Santoso (admin_warehouse)
+    moved_at: "2025-12-19T14:30:00",
+    created_at: "2025-12-19T14:30:00",
   },
   {
-    id: "PMT-2025-003",
-    tanggal: "2025-12-18",
-    productCode: "74556",
-    productName: "330ML AQUA LOCAL 1X24",
-    qtyCarton: 56,
-    fromLocation: "C-L13-B2-P1",
-    toLocation: "B-L9-B5-P3",
+    id: "pmt-005",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "PMT-20251218-0001",
+    stock_id: "stk-005",
+    product_id: "prod-ckr-007", // 330ML AQUA LOCAL 1X24
+    qty_carton: 56,
+    from_cluster: "C",
+    from_lorong: 13,
+    from_baris: 2,
+    from_level: 1,
+    to_cluster: "B",
+    to_lorong: 9,
+    to_baris: 5,
+    to_level: 3,
     reason: "Relokasi dari In Transit",
-    movedBy: "Admin Warehouse",
-    createdAt: "2025-12-18T16:15:00",
+    moved_by: "usr-003",
+    moved_at: "2025-12-18T16:15:00",
+    created_at: "2025-12-18T16:15:00",
   },
 ];

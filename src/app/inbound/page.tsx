@@ -31,8 +31,8 @@ export default function InboundPage() {
     );
   }
 
-  // Superadmin sees history, Admin Warehouse sees form
-  if (userRole === "superadmin") {
+  // Admin Cabang sees history, Admin Warehouse sees form
+  if (userRole === "admin_cabang") {
     return <InboundHistoryPage />;
   }
 

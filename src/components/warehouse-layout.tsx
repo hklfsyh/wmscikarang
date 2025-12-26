@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { stockListData, type StockItem } from "@/lib/mock/stocklistmock";
 import { 
   getProductByCode, // Import helper function
+  productMasterData, // Import product master data
 } from "@/lib/mock/product-master"; 
 import { 
   clusterConfigs,
@@ -30,7 +31,7 @@ type WarehouseCellStatus = "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER";
 
 export type WarehouseCell = {
   id: string;
-  cluster: string; // Menggunakan string untuk cluster A-E
+  clusterChar: string; // Menggunakan string untuk cluster A-E
   lorong: number;
   baris: number;
   pallet: number;
@@ -68,16 +69,16 @@ function generateWarehouseCells(): WarehouseCell[] {
   
   // Mapping stok ke kunci numerik
   stockListData.forEach((stock: StockItem) => {
-    const lorongNum = parseInt(stock.location.lorong.replace("L", ""));
-    const barisNum = parseInt(stock.location.baris.replace("B", ""));
-    const palletNum = parseInt(stock.location.level.replace("P", ""));
-    const key = `${stock.location.cluster}-${lorongNum}-${barisNum}-${palletNum}`;
+    const lorongNum = stock.lorong;
+    const barisNum = stock.baris;
+    const palletNum = stock.level;
+    const key = `${stock.cluster}-${lorongNum}-${barisNum}-${palletNum}`;
     locationMap.set(key, stock);
   });
   
   // Loop through all active cluster configs (DYNAMIC)
   clusterConfigs.filter(c => c.isActive).forEach((clusterConfig) => {
-    const cluster = clusterConfig.cluster;
+    const cluster = clusterConfig.clusterChar;
     const maxLorong = clusterConfig.defaultLorongCount;
     
     for (let lorong = 1; lorong <= maxLorong; lorong++) {
@@ -99,13 +100,17 @@ function generateWarehouseCells(): WarehouseCell[] {
             let colorCode: StatusColor = "green";
             let status: WarehouseCellStatus = "RELEASE";
             
+            // Get product info - needed for display
+            const product = productMasterData.find(p => p.id === stock.productId);
+            const productCode = product?.productCode || "UNKNOWN";
+            
             // --- IN TRANSIT: Always RED (buffer/overflow products) ---
             if (inTransit) {
               colorCode = "red";
               status = "WRONG_CLUSTER"; // Reuse status for visual consistency
             } else {
               // --- VALIDASI PRODUCT LOCATION (for non In Transit) ---
-              const validation = validateProductLocation(stock.productCode, cluster, lorong, baris);
+              const validation = validateProductLocation(productCode, cluster, lorong, baris);
               const wrongCluster = !validation.isValid;
               
               if (wrongCluster) {
@@ -136,18 +141,18 @@ function generateWarehouseCells(): WarehouseCell[] {
           
           cells.push({
             id: key,
-            cluster,
+            clusterChar: cluster,
             lorong,
             baris,
             pallet,
-            productCode: stock.productCode,
-            product: stock.productName,
-            bbPallet: stock.bbPallet,
+            productCode: product?.productCode || "UNKNOWN",
+            product: product?.productName || "Unknown Product",
+            bbPallet: stock.bbProduk,
             qtyPallet: stock.qtyPallet,
             qtyCarton: stock.qtyCarton,
             status,
             colorCode,
-            assignedCluster: stock.location.cluster,
+            assignedCluster: stock.cluster,
             isReceh: stock.isReceh,
             isInTransit: inTransit,
           });
@@ -155,7 +160,7 @@ function generateWarehouseCells(): WarehouseCell[] {
             // Sel kosong
             cells.push({
               id: key,
-              cluster,
+              clusterChar: cluster,
               lorong,
               baris,
               pallet,
@@ -295,7 +300,7 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
           <div className="grid grid-cols-2 gap-3 sm:gap-4">
             <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
               <p className="text-xs font-medium text-slate-500 mb-1">Cluster</p>
-              <p className="font-semibold text-slate-900">{cell.cluster}</p>
+              <p className="font-semibold text-slate-900">{cell.clusterChar}</p>
             </div>
             <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
               <p className="text-xs font-medium text-slate-500 mb-1">Lokasi Rak</p>
@@ -382,7 +387,8 @@ export function WarehouseLayout() {
   const uniqueProducts = useMemo(() => {
     const products = new Set<string>();
     stockListData.forEach((stock: StockItem) => {
-      if (stock.productName) products.add(stock.productName);
+      const product = productMasterData.find(p => p.id === stock.productId);
+      if (product?.productName) products.add(product.productName);
     });
     return Array.from(products).sort();
   }, []);
@@ -391,7 +397,7 @@ export function WarehouseLayout() {
   const uniqueLorongs = useMemo(() => {
     const lorongs = new Set<number>();
     warehouseCells.forEach((cell) => {
-      if (clusterFilter === "ALL" || cell.cluster === clusterFilter) {
+      if (clusterFilter === "ALL" || cell.clusterChar === clusterFilter) {
         lorongs.add(cell.lorong);
       }
     });
@@ -402,7 +408,7 @@ export function WarehouseLayout() {
   const uniqueBaris = useMemo(() => {
     const baris = new Set<number>();
     warehouseCells.forEach((cell) => {
-      if ((clusterFilter === "ALL" || cell.cluster === clusterFilter) &&
+      if ((clusterFilter === "ALL" || cell.clusterChar === clusterFilter) &&
           (lorongFilter === "ALL" || cell.lorong === parseInt(lorongFilter))) {
         baris.add(cell.baris);
       }
@@ -414,7 +420,7 @@ export function WarehouseLayout() {
   const filteredCells = useMemo(() => {
     return warehouseCells.filter((cell) => {
       // Filter by cluster
-      if (clusterFilter !== "ALL" && cell.cluster !== clusterFilter) {
+      if (clusterFilter !== "ALL" && cell.clusterChar !== clusterFilter) {
         return false;
       }
       
@@ -463,7 +469,7 @@ export function WarehouseLayout() {
         }
         
         // Search in location (e.g., "A-L1-B2-P3" or "A L1 B2 P3")
-        const locationString = `${cell.cluster} L${cell.lorong} B${cell.baris} P${cell.pallet}`.toLowerCase();
+        const locationString = `${cell.clusterChar} L${cell.lorong} B${cell.baris} P${cell.pallet}`.toLowerCase();
         const locationMatch = locationString.includes(query) || 
                              locationString.replace(/ /g, '-').includes(query);
         
@@ -483,17 +489,17 @@ export function WarehouseLayout() {
     }[]> = {};
     
     filteredCells.forEach((cell) => {
-      if (!grouped[cell.cluster]) {
-        grouped[cell.cluster] = [];
+      if (!grouped[cell.clusterChar]) {
+        grouped[cell.clusterChar] = [];
       }
       
-      let group = grouped[cell.cluster].find(
+      let group = grouped[cell.clusterChar].find(
         (g) => g.lorong === cell.lorong && g.baris === cell.baris
       );
       
       if (!group) {
         group = { lorong: cell.lorong, baris: cell.baris, pallets: [] };
-        grouped[cell.cluster].push(group);
+        grouped[cell.clusterChar].push(group);
       }
       
       group.pallets.push(cell);
@@ -569,7 +575,7 @@ export function WarehouseLayout() {
             }
             text-[8px] sm:text-[9px] font-medium text-white shadow-sm
           `}
-          title={`${cell.cluster}-L${cell.lorong}-B${cell.baris}-P${cell.pallet} - ${isFilled ? cell.product : 'Kosong'}`}
+          title={`${cell.clusterChar}-L${cell.lorong}-B${cell.baris}-P${cell.pallet} - ${isFilled ? cell.product : 'Kosong'}`}
         >
           {isFilled ? (
             <div className="font-bold text-[9px] sm:text-[10px]">
@@ -641,7 +647,7 @@ export function WarehouseLayout() {
                 >
                   <option value="ALL">Semua</option>
                   {clusterConfigs.filter(c => c.isActive).map(c => (
-                    <option key={c.cluster} value={c.cluster}>Cluster {c.cluster}</option>
+                    <option key={c.clusterChar} value={c.clusterChar}>Cluster {c.clusterChar}</option>
                   ))}
                 </select>
               </div>
@@ -744,7 +750,7 @@ export function WarehouseLayout() {
         {/* Warehouse View */}
         <div className="space-y-3">
           {clusterConfigs.filter(c => c.isActive).map((clusterConfig) => {
-            const cluster = clusterConfig.cluster;
+            const cluster = clusterConfig.clusterChar;
             const clusterCells = cellsByCluster[cluster] || [];
             
             if (clusterCells.length === 0) {

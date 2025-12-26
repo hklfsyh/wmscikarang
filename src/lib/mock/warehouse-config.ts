@@ -13,39 +13,69 @@ export interface CustomCellConfig {
   palletPerSel: number; // Custom pallet capacity for this specific cell range
 }
 
+export interface ClusterCellOverride {
+  id: string;
+  clusterConfigId: string; // Reference to cluster_configs.id
+  lorongStart: number;
+  lorongEnd: number;
+  barisStart: number | null; // NULL = semua baris
+  barisEnd: number | null; // NULL = semua baris
+  customBarisCount: number | null; // Override jumlah baris
+  customPalletLevel: number | null; // Override jumlah pallet level
+  isTransitArea: boolean; // Area in-transit/overflow
+  isDisabled: boolean; // Lokasi tidak bisa dipakai
+  note: string; // Alasan: Tiang penyangga, Area galon, dll
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ClusterConfig {
   id: string;
-  cluster: string;
+  clusterChar: string;
   clusterName: string;
+  warehouseId: string;
+  description: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
   defaultLorongCount: number; // Default number of lorong
   defaultBarisCount: number; // Default number of baris
-  defaultPalletPerSel: number; // Default pallet capacity per cell
+  defaultPalletLevel: number; // Default pallet capacity per cell
   customLorongConfig?: CustomLorongConfig[]; // Custom lorong configurations
   customCellConfig?: CustomCellConfig[]; // Custom cell configurations
   inTransitLorongRange?: [number, number]; // Optional: Lorong range for In Transit area (buffer for overflow)
-  isActive: boolean;
 }
 
 export interface ProductHome {
   id: string;
-  productCode: string;
-  productName: string;
-  homeCluster: string; // Primary cluster
-  allowedLorongRange: [number, number]; // [start, end] e.g., [1, 2]
-  allowedBarisRange: [number, number]; // [start, end] e.g., [1, 8]
-  maxPalletPerLocation: number; // Max pallet that can be stored per location
+  warehouseId: string;
+  productId: string; // UUID reference to products.id
+  clusterChar: string; // char(1)
+  lorongStart: number;
+  lorongEnd: number;
+  barisStart: number;
+  barisEnd: number;
+  maxPalletPerLocation: number;
+  priority: number;
   isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // MOCK DATA: Cluster Configurations
 export const clusterConfigs: ClusterConfig[] = [
   {
     id: "cluster-a",
-    cluster: "A",
+    warehouseId: "wh-001-cikarang",
+    clusterChar: "A",
     clusterName: "Cluster A - Fast Moving",
+    description: "Cluster untuk produk fast moving seperti AQUA 220ML dan 600ML",
+    isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
     defaultLorongCount: 11,
     defaultBarisCount: 9,
-    defaultPalletPerSel: 3,
+    defaultPalletLevel: 3,
     customLorongConfig: [
       {
         lorongRange: [1, 2],
@@ -66,15 +96,19 @@ export const clusterConfigs: ClusterConfig[] = [
       },
       // Lorong 6-11 baris 1-9 will use default 3 pallet per sel (600ML AQUA LOCAL)
     ],
-    isActive: true,
   },
   {
     id: "cluster-b",
-    cluster: "B",
+    warehouseId: "wh-001-cikarang",
+    clusterChar: "B",
     clusterName: "Cluster B - Medium Moving",
+    description: "Cluster untuk produk medium moving dengan berbagai ukuran AQUA, VIT, dan Mizone",
+    isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
     defaultLorongCount: 26, // Updated: Lorong 1-26
     defaultBarisCount: 8, // Most common baris count
-    defaultPalletPerSel: 2, // Most common pallet capacity
+    defaultPalletLevel: 2, // Most common pallet capacity
     customLorongConfig: [
       {
         lorongRange: [26, 26],
@@ -138,41 +172,286 @@ export const clusterConfigs: ClusterConfig[] = [
         palletPerSel: 1, // ALL REFLECTIONS (6 baris total, 1 pallet each)
       },
     ],
-    isActive: true,
   },
   {
     id: "cluster-c",
-    cluster: "C",
+    warehouseId: "wh-001-cikarang",
+    clusterChar: "C",
     clusterName: "Cluster C - Mizone Products + In Transit",
+    description: "Cluster untuk produk Mizone dan area In Transit sebagai buffer overflow",
+    isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
     defaultLorongCount: 16, // Lorong 1-16 (L1-L9: Mizone, L10-L16: In Transit)
     defaultBarisCount: 5, // All lorongs have 5 baris
-    defaultPalletPerSel: 3, // All cells have 3 pallet capacity
+    defaultPalletLevel: 3, // All cells have 3 pallet capacity
     customLorongConfig: [],
     customCellConfig: [],
     inTransitLorongRange: [10, 16], // Lorong 10-16 adalah In Transit area (buffer/overflow)
-    isActive: true,
   },
   {
     id: "cluster-d",
-    cluster: "D",
+    warehouseId: "wh-001-cikarang",
+    clusterChar: "D",
     clusterName: "Cluster D - Galon AQUA 5 Liter",
+    description: "Cluster khusus untuk galon AQUA 5 liter dan empty bottles",
+    isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
     defaultLorongCount: 2, // L1-L2 (L3 RETUR removed)
     defaultBarisCount: 5, // All lorongs have 5 baris
-    defaultPalletPerSel: 1, // 1 pallet per baris
+    defaultPalletLevel: 1, // 1 pallet per baris
     customLorongConfig: [],
     customCellConfig: [],
-    isActive: true,
   },
   {
     id: "cluster-e",
-    cluster: "E",
+    warehouseId: "wh-001-cikarang",
+    clusterChar: "E",
     clusterName: "Cluster E - Galon VIT 5 Liter",
+    description: "Cluster khusus untuk galon VIT 5 liter dan empty bottles",
+    isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
     defaultLorongCount: 2, // L1-L2 (L3 RETUR removed)
     defaultBarisCount: 5, // All lorongs have 5 baris
-    defaultPalletPerSel: 1, // 1 pallet per baris
+    defaultPalletLevel: 1, // 1 pallet per baris
     customLorongConfig: [],
     customCellConfig: [],
-    isActive: true,
+  },
+];
+
+// MOCK DATA: Cluster Cell Overrides (PER-CLUSTER - admin_cabang CRUD)
+export const clusterCellOverrides: ClusterCellOverride[] = [
+  // Cluster A Overrides
+  {
+    id: "cco-a-001",
+    clusterConfigId: "cluster-a",
+    lorongStart: 1,
+    lorongEnd: 2,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: 8, // Lorong 1-2 only have 8 baris
+    customPalletLevel: 2, // And only 2 pallet per sel (220ML AQUA CUBE MINI)
+    isTransitArea: false,
+    isDisabled: false,
+    note: "220ML AQUA CUBE MINI - kapasitas terbatas",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-a-002",
+    clusterConfigId: "cluster-a",
+    lorongStart: 3,
+    lorongEnd: 3,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 2, // Lorong 3, all 9 baris, 2 pallet per sel (220ML AQUA CUBE MINI)
+    isTransitArea: false,
+    isDisabled: false,
+    note: "220ML AQUA CUBE MINI - lorong 3",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-a-003",
+    clusterConfigId: "cluster-a",
+    lorongStart: 4,
+    lorongEnd: 5,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 2, // Lorong 4-5, all 9 baris, 2 pallet per sel (200ML AQUA LOCAL)
+    isTransitArea: false,
+    isDisabled: false,
+    note: "200ML AQUA LOCAL - kapasitas pallet terbatas",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+
+  // Cluster B Overrides
+  {
+    id: "cco-b-001",
+    clusterConfigId: "cluster-b",
+    lorongStart: 1,
+    lorongEnd: 6,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 2, // 1500ML AQUA LOCAL 1X12
+    isTransitArea: false,
+    isDisabled: false,
+    note: "1500ML AQUA LOCAL 1X12",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-002",
+    clusterConfigId: "cluster-b",
+    lorongStart: 6,
+    lorongEnd: 12,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 3, // 330ML AQUA LOCAL 1X24
+    isTransitArea: false,
+    isDisabled: false,
+    note: "330ML AQUA LOCAL 1X24",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-003",
+    clusterConfigId: "cluster-b",
+    lorongStart: 13,
+    lorongEnd: 16,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 2, // 750ML AQUA LOCAL 1X18
+    isTransitArea: false,
+    isDisabled: false,
+    note: "750ML AQUA LOCAL 1X18",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-004",
+    clusterConfigId: "cluster-b",
+    lorongStart: 17,
+    lorongEnd: 18,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 2, // 1100ML AQUA LOCAL 1X12 BARCODE ON CAP
+    isTransitArea: false,
+    isDisabled: false,
+    note: "1100ML AQUA LOCAL 1X12 BARCODE ON CAP",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-005",
+    clusterConfigId: "cluster-b",
+    lorongStart: 19,
+    lorongEnd: 20,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 1, // 1500ML AQUA LOCAL MULTIPACK 1X6
+    isTransitArea: false,
+    isDisabled: false,
+    note: "1500ML AQUA LOCAL MULTIPACK 1X6",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-006",
+    clusterConfigId: "cluster-b",
+    lorongStart: 21,
+    lorongEnd: 21,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 1, // 600ML AQUA LOCAL MULTIPACK 1X6
+    isTransitArea: false,
+    isDisabled: false,
+    note: "600ML AQUA LOCAL MULTIPACK 1X6",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-007",
+    clusterConfigId: "cluster-b",
+    lorongStart: 22,
+    lorongEnd: 22,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 2, // 550ML VIT LOCAL 1X24
+    isTransitArea: false,
+    isDisabled: false,
+    note: "550ML VIT LOCAL 1X24",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-008",
+    clusterConfigId: "cluster-b",
+    lorongStart: 23,
+    lorongEnd: 23,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 2, // 330ML VIT LOCAL 1X24
+    isTransitArea: false,
+    isDisabled: false,
+    note: "330ML VIT LOCAL 1X24",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-009",
+    clusterConfigId: "cluster-b",
+    lorongStart: 24,
+    lorongEnd: 24,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 2, // 200ML VIT LOCAL 1X48
+    isTransitArea: false,
+    isDisabled: false,
+    note: "200ML VIT LOCAL 1X48",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-010",
+    clusterConfigId: "cluster-b",
+    lorongStart: 25,
+    lorongEnd: 25,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: 2, // 1500ML VIT LOCAL 1X12
+    isTransitArea: false,
+    isDisabled: false,
+    note: "1500ML VIT LOCAL 1X12",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "cco-b-011",
+    clusterConfigId: "cluster-b",
+    lorongStart: 26,
+    lorongEnd: 26,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: 6, // Lorong 26 hanya 6 baris untuk semua Reflections
+    customPalletLevel: 1, // ALL REFLECTIONS (6 baris total, 1 pallet each)
+    isTransitArea: false,
+    isDisabled: false,
+    note: "ALL REFLECTIONS - kapasitas terbatas",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  },
+
+  // Cluster C Overrides (In Transit Area)
+  {
+    id: "cco-c-001",
+    clusterConfigId: "cluster-c",
+    lorongStart: 10,
+    lorongEnd: 16,
+    barisStart: null, // semua baris
+    barisEnd: null, // semua baris
+    customBarisCount: null, // use default
+    customPalletLevel: null, // use default
+    isTransitArea: true, // Area in-transit/overflow
+    isDisabled: false,
+    note: "Area In Transit - buffer untuk overflow stock",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
 ];
 
@@ -180,256 +459,381 @@ export const clusterConfigs: ClusterConfig[] = [
 export const productHomes: ProductHome[] = [
   {
     id: "ph-001",
-    productCode: "166126",
-    productName: "220ML AQUA CUBE MINI BOTTLE LOCAL 1X24",
-    homeCluster: "A",
-    allowedLorongRange: [1, 3],
-    allowedBarisRange: [1, 9], // Note: Lorong 1-2 only have 8 baris, Lorong 3 has 9
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-166126",
+    clusterChar: "A",
+    lorongStart: 1,
+    lorongEnd: 3,
+    barisStart: 1,
+    barisEnd: 9, // Note: Lorong 1-2 only have 8 baris, Lorong 3 has 9
     maxPalletPerLocation: 2,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-002",
-    productCode: "204579",
-    productName: "200ML AQUA LOCAL 1X48",
-    homeCluster: "A",
-    allowedLorongRange: [4, 5],
-    allowedBarisRange: [1, 9],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-204579",
+    clusterChar: "A",
+    lorongStart: 4,
+    lorongEnd: 5,
+    barisStart: 1,
+    barisEnd: 9,
     maxPalletPerLocation: 2,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-003",
-    productCode: "74561",
-    productName: "600ML AQUA LOCAL 1X24",
-    homeCluster: "A",
-    allowedLorongRange: [6, 11],
-    allowedBarisRange: [1, 9],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-74561",
+    clusterChar: "A",
+    lorongStart: 6,
+    lorongEnd: 11,
+    barisStart: 1,
+    barisEnd: 9,
     maxPalletPerLocation: 3,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-004",
-    productCode: "74553",
-    productName: "1500ML AQUA LOCAL 1X12",
-    homeCluster: "B",
-    allowedLorongRange: [1, 6],
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-74553",
+    clusterChar: "B",
+    lorongStart: 1,
+    lorongEnd: 6,
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 2,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-005",
-    productCode: "74556",
-    productName: "330ML AQUA LOCAL 1X24",
-    homeCluster: "B",
-    allowedLorongRange: [6, 12], // Updated: Lorong 6-12 (overlaps with 1500ML di lorong 6)
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-74556",
+    clusterChar: "B",
+    lorongStart: 6,
+    lorongEnd: 12, // Updated: Lorong 6-12 (overlaps with 1500ML di lorong 6)
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 3,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-006",
-    productCode: "81681",
-    productName: "750ML AQUA LOCAL 1X18",
-    homeCluster: "B",
-    allowedLorongRange: [13, 16],
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-81681",
+    clusterChar: "B",
+    lorongStart: 13,
+    lorongEnd: 16,
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 2,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-007",
-    productCode: "142009",
-    productName: "1100ML AQUA LOCAL 1X12 BARCODE ON CAP",
-    homeCluster: "B",
-    allowedLorongRange: [17, 18],
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-142009",
+    clusterChar: "B",
+    lorongStart: 17,
+    lorongEnd: 18,
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 2,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-008",
-    productCode: "74589",
-    productName: "1500ML AQUA LOCAL MULTIPACK 1X6",
-    homeCluster: "B",
-    allowedLorongRange: [19, 20],
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-74589",
+    clusterChar: "B",
+    lorongStart: 19,
+    lorongEnd: 20,
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-009",
-    productCode: "124172",
-    productName: "600ML AQUA LOCAL MULTIPACK 1X6",
-    homeCluster: "B",
-    allowedLorongRange: [21, 21],
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-124172",
+    clusterChar: "B",
+    lorongStart: 21,
+    lorongEnd: 21,
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-010",
-    productCode: "157095",
-    productName: "550ML VIT LOCAL 1X24",
-    homeCluster: "B",
-    allowedLorongRange: [22, 22],
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-157095",
+    clusterChar: "B",
+    lorongStart: 22,
+    lorongEnd: 22,
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 2,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-011",
-    productCode: "112839",
-    productName: "330ML VIT LOCAL 1X24",
-    homeCluster: "B",
-    allowedLorongRange: [23, 23],
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-112839",
+    clusterChar: "B",
+    lorongStart: 23,
+    lorongEnd: 23,
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 2,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-012",
-    productCode: "173022",
-    productName: "200ML VIT LOCAL 1X48",
-    homeCluster: "B",
-    allowedLorongRange: [24, 24],
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-173022",
+    clusterChar: "B",
+    lorongStart: 24,
+    lorongEnd: 24,
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 2,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-013",
-    productCode: "74565",
-    productName: "1500ML VIT LOCAL 1X12",
-    homeCluster: "B",
-    allowedLorongRange: [25, 25],
-    allowedBarisRange: [1, 8],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-74565",
+    clusterChar: "B",
+    lorongStart: 25,
+    lorongEnd: 25,
+    barisStart: 1,
+    barisEnd: 8,
     maxPalletPerLocation: 2,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-014",
-    productCode: "80333",
-    productName: "380ML AQUA REFLECTIONS SPARKLING 1X12",
-    homeCluster: "B",
-    allowedLorongRange: [26, 26],
-    allowedBarisRange: [1, 1], // 1 baris
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-80333",
+    clusterChar: "B",
+    lorongStart: 26,
+    lorongEnd: 26,
+    barisStart: 1,
+    barisEnd: 1, // 1 baris
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-015",
-    productCode: "174139",
-    productName: "380ML AQUA REFLECTIONS BAL 1X12",
-    homeCluster: "B",
-    allowedLorongRange: [26, 26],
-    allowedBarisRange: [2, 2], // 1 baris
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-174139",
+    clusterChar: "B",
+    lorongStart: 26,
+    lorongEnd: 26,
+    barisStart: 2,
+    barisEnd: 2, // 1 baris
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-016",
-    productCode: "186452",
-    productName: "380ML AQUA REFLECTIONS SBUX BAL 1X12",
-    homeCluster: "B",
-    allowedLorongRange: [26, 26],
-    allowedBarisRange: [3, 4], // 2 baris
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-186452",
+    clusterChar: "B",
+    lorongStart: 26,
+    lorongEnd: 26,
+    barisStart: 3,
+    barisEnd: 4, // 2 baris
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-017",
-    productCode: "174136",
-    productName: "750ML AQUA SPARKLING BAL 1X6",
-    homeCluster: "B",
-    allowedLorongRange: [26, 26],
-    allowedBarisRange: [5, 5], // 1 baris
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-174136",
+    clusterChar: "B",
+    lorongStart: 26,
+    lorongEnd: 26,
+    barisStart: 5,
+    barisEnd: 5, // 1 baris
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-018",
-    productCode: "174138",
-    productName: "750ML AQUA REFLECTIONS BAL 1X6",
-    homeCluster: "B",
-    allowedLorongRange: [26, 26],
-    allowedBarisRange: [6, 6], // 1 baris
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-174138",
+    clusterChar: "B",
+    lorongStart: 26,
+    lorongEnd: 26,
+    barisStart: 6,
+    barisEnd: 6, // 1 baris
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   // Cluster C products (Mizone)
   {
     id: "ph-019",
-    productCode: "145141",
-    productName: "500ML MIZONE ACTIV LYCHEE LEMON 1X12",
-    homeCluster: "C",
-    allowedLorongRange: [1, 3],
-    allowedBarisRange: [1, 5],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-145141",
+    clusterChar: "C",
+    lorongStart: 1,
+    lorongEnd: 3,
+    barisStart: 1,
+    barisEnd: 5,
     maxPalletPerLocation: 3,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-020",
-    productCode: "145143",
-    productName: "500ML MIZONE MOOD UP CRANBERRY 1X12",
-    homeCluster: "C",
-    allowedLorongRange: [4, 6],
-    allowedBarisRange: [1, 5],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-145143",
+    clusterChar: "C",
+    lorongStart: 4,
+    lorongEnd: 6,
+    barisStart: 1,
+    barisEnd: 5,
     maxPalletPerLocation: 3,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-021",
-    productCode: "206774",
-    productName: "500ML MIZONE COCO BOOST 1X12",
-    homeCluster: "C",
-    allowedLorongRange: [7, 9],
-    allowedBarisRange: [1, 5],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-206774",
+    clusterChar: "C",
+    lorongStart: 7,
+    lorongEnd: 9,
+    barisStart: 1,
+    barisEnd: 5,
     maxPalletPerLocation: 3,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   // Cluster D products (Galon AQUA 5 Liter) - Updated: Only 2 lorongs (L1-L2)
   {
     id: "ph-022",
-    productCode: "74559",
-    productName: "5 GALLON AQUA LOCAL",
-    homeCluster: "D",
-    allowedLorongRange: [1, 1], // Strict: 1 lorong per product
-    allowedBarisRange: [1, 5],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-74559",
+    clusterChar: "D",
+    lorongStart: 1,
+    lorongEnd: 1, // Strict: 1 lorong per product
+    barisStart: 1,
+    barisEnd: 5,
     maxPalletPerLocation: 1, // 1 pallet per baris
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-023",
-    productCode: "10169933",
-    productName: "EMPTY BOTTLE AQUA 5 GALLON",
-    homeCluster: "D",
-    allowedLorongRange: [2, 2], // Strict: 1 lorong per product
-    allowedBarisRange: [1, 5],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-10169933",
+    clusterChar: "D",
+    lorongStart: 2,
+    lorongEnd: 2, // Strict: 1 lorong per product
+    barisStart: 1,
+    barisEnd: 5,
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   // Cluster E products (Galon VIT 5 Liter) - Updated: Only 2 lorongs (L1-L2)
   {
     id: "ph-024",
-    productCode: "74560",
-    productName: "5 GALLON VIT LOCAL",
-    homeCluster: "E",
-    allowedLorongRange: [1, 1], // Strict: 1 lorong per product
-    allowedBarisRange: [1, 5],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-74560",
+    clusterChar: "E",
+    lorongStart: 1,
+    lorongEnd: 1, // Strict: 1 lorong per product
+    barisStart: 1,
+    barisEnd: 5,
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "ph-025",
-    productCode: "10169932",
-    productName: "EMPTY BOTTLE VIT 5 GALLON",
-    homeCluster: "E",
-    allowedLorongRange: [2, 2], // Strict: 1 lorong per product
-    allowedBarisRange: [1, 5],
+    warehouseId: "wh-001-cikarang",
+    productId: "prod-10169932",
+    clusterChar: "E",
+    lorongStart: 2,
+    lorongEnd: 2, // Strict: 1 lorong per product
+    barisStart: 1,
+    barisEnd: 5,
     maxPalletPerLocation: 1,
+    priority: 1,
     isActive: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
 ];
 
@@ -438,22 +842,22 @@ export const productHomes: ProductHome[] = [
 /**
  * Get cluster configuration by cluster name
  */
-export function getClusterConfig(cluster: string): ClusterConfig | undefined {
-  return clusterConfigs.find((c) => c.cluster === cluster && c.isActive);
+export function getClusterConfig(clusterChar: string): ClusterConfig | undefined {
+  return clusterConfigs.find((c) => c.clusterChar === clusterChar && c.isActive);
 }
 
 /**
- * Get product home assignment by product code
+ * Get product home assignment by product ID
  */
-export function getProductHome(productCode: string): ProductHome | undefined {
-  return productHomes.find((ph) => ph.productCode === productCode && ph.isActive);
+export function getProductHome(productId: string): ProductHome | undefined {
+  return productHomes.find((ph) => ph.productId === productId && ph.isActive);
 }
 
 /**
  * Get number of baris for a specific lorong in a cluster
  */
-export function getBarisCountForLorong(cluster: string, lorong: number): number {
-  const config = getClusterConfig(cluster);
+export function getBarisCountForLorong(clusterChar: string, lorong: number): number {
+  const config = getClusterConfig(clusterChar);
   if (!config) return 0;
 
   // Check if this lorong has custom baris count
@@ -468,11 +872,11 @@ export function getBarisCountForLorong(cluster: string, lorong: number): number 
  * Get pallet capacity for a specific cell (cluster-lorong-baris)
  */
 export function getPalletCapacityForCell(
-  cluster: string,
+  clusterChar: string,
   lorong: number,
   baris: number
 ): number {
-  const config = getClusterConfig(cluster);
+  const config = getClusterConfig(clusterChar);
   if (!config) return 0;
 
   // Check custom cell config first (most specific)
@@ -494,51 +898,51 @@ export function getPalletCapacityForCell(
   if (customLorong?.palletPerSel) return customLorong.palletPerSel;
 
   // Return default
-  return config.defaultPalletPerSel;
+  return config.defaultPalletLevel;
 }
 
 /**
  * Validate if a product can be placed in a specific location
  */
 export function validateProductLocation(
-  productCode: string,
-  cluster: string,
+  productId: string,
+  clusterChar: string,
   lorong: number,
   baris: number
 ): { isValid: boolean; reason?: string } {
-  const productHome = getProductHome(productCode);
+  const productHome = getProductHome(productId);
   
   if (!productHome) {
     return { isValid: true }; // No restriction if product home not defined
   }
 
   // Check cluster
-  if (productHome.homeCluster !== cluster) {
+  if (productHome.clusterChar !== clusterChar) {
     return {
       isValid: false,
-      reason: `Product ${productCode} can only be stored in Cluster ${productHome.homeCluster}`,
+      reason: `Product ${productId} can only be stored in Cluster ${productHome.clusterChar}`,
     };
   }
 
   // Check lorong range
   if (
-    lorong < productHome.allowedLorongRange[0] ||
-    lorong > productHome.allowedLorongRange[1]
+    lorong < productHome.lorongStart ||
+    lorong > productHome.lorongEnd
   ) {
     return {
       isValid: false,
-      reason: `Product ${productCode} can only be stored in Lorong ${productHome.allowedLorongRange[0]}-${productHome.allowedLorongRange[1]}`,
+      reason: `Product ${productId} can only be stored in Lorong ${productHome.lorongStart}-${productHome.lorongEnd}`,
     };
   }
 
   // Check baris range
   if (
-    baris < productHome.allowedBarisRange[0] ||
-    baris > productHome.allowedBarisRange[1]
+    baris < productHome.barisStart ||
+    baris > productHome.barisEnd
   ) {
     return {
       isValid: false,
-      reason: `Product ${productCode} can only be stored in Baris ${productHome.allowedBarisRange[0]}-${productHome.allowedBarisRange[1]}`,
+      reason: `Product ${productId} can only be stored in Baris ${productHome.barisStart}-${productHome.barisEnd}`,
     };
   }
 
@@ -548,20 +952,20 @@ export function validateProductLocation(
 /**
  * Get all valid locations for a product
  */
-export function getValidLocationsForProduct(productCode: string): {
-  cluster: string;
+export function getValidLocationsForProduct(productId: string): {
+  clusterChar: string;
   lorongRange: [number, number];
   barisRange: [number, number];
   maxPalletPerLocation: number;
 } | null {
-  const productHome = getProductHome(productCode);
+  const productHome = getProductHome(productId);
   
   if (!productHome) return null;
 
   return {
-    cluster: productHome.homeCluster,
-    lorongRange: productHome.allowedLorongRange,
-    barisRange: productHome.allowedBarisRange,
+    clusterChar: productHome.clusterChar,
+    lorongRange: [productHome.lorongStart, productHome.lorongEnd],
+    barisRange: [productHome.barisStart, productHome.barisEnd],
     maxPalletPerLocation: productHome.maxPalletPerLocation,
   };
 }
@@ -569,8 +973,8 @@ export function getValidLocationsForProduct(productCode: string): {
 /**
  * Check if a location is in In Transit area (buffer/overflow area)
  */
-export function isInTransitLocation(cluster: string, lorong: number): boolean {
-  const config = getClusterConfig(cluster);
+export function isInTransitLocation(clusterChar: string, lorong: number): boolean {
+  const config = getClusterConfig(clusterChar);
   if (!config || !config.inTransitLorongRange) return false;
   
   return lorong >= config.inTransitLorongRange[0] && lorong <= config.inTransitLorongRange[1];
@@ -579,8 +983,8 @@ export function isInTransitLocation(cluster: string, lorong: number): boolean {
 /**
  * Get In Transit lorong range for a cluster
  */
-export function getInTransitRange(cluster: string): [number, number] | null {
-  const config = getClusterConfig(cluster);
+export function getInTransitRange(clusterChar: string): [number, number] | null {
+  const config = getClusterConfig(clusterChar);
   return config?.inTransitLorongRange ?? null;
 }
 
@@ -589,13 +993,13 @@ export function getInTransitRange(cluster: string): [number, number] | null {
  * In Transit area can accept any product as overflow/buffer
  */
 export function validateProductLocationWithTransit(
-  productCode: string,
-  cluster: string,
+  productId: string,
+  clusterChar: string,
   lorong: number,
   baris: number
 ): { isValid: boolean; reason?: string; isInTransit?: boolean } {
   // First check if it's in In Transit area
-  if (isInTransitLocation(cluster, lorong)) {
+  if (isInTransitLocation(clusterChar, lorong)) {
     return { 
       isValid: true, 
       isInTransit: true,
@@ -604,6 +1008,6 @@ export function validateProductLocationWithTransit(
   }
   
   // If not in transit, use normal validation
-  const normalValidation = validateProductLocation(productCode, cluster, lorong, baris);
+  const normalValidation = validateProductLocation(productId, clusterChar, lorong, baris);
   return { ...normalValidation, isInTransit: false };
 }

@@ -6,7 +6,7 @@ import { stockListData } from "@/lib/mock/stocklistmock";
 import { TruckIcon, MapPin, XCircle } from "lucide-react";
 import { useToast, ToastContainer } from "./toast";
 import { QRCodeSVG } from "qrcode.react";
-import { outboundHistoryData } from "@/lib/mock/transaction-history";
+import { outboundHistoryData, OutboundHistory } from "@/lib/mock/transaction-history";
 
 interface FEFOLocation {
   stockId: string;
@@ -39,6 +39,7 @@ const initialState: OutboundFormState = {
 };
 
 export function OutboundForm() {
+  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
   const [form, setForm] = useState<OutboundFormState>(initialState);
   const [fefoLocations, setFefoLocations] = useState<FEFOLocation[]>([]);
   const { toasts, removeToast, success, error } = useToast();
@@ -60,16 +61,27 @@ export function OutboundForm() {
 
   // --- HISTORY DETAIL MODAL STATE ---
   const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(false);
-  const [selectedHistoryItem, setSelectedHistoryItem] = useState<
-    (typeof outboundHistoryData)[0] | null
-  >(null);
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<OutboundHistory | null>(null);
 
   // --- EDIT & BATAL MODAL STATE ---
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showBatalConfirmModal, setShowBatalConfirmModal] = useState(false);
-  const [selectedItemForAction, setSelectedItemForAction] = useState<
-    (typeof outboundHistoryData)[0] | null
-  >(null);
+  const [selectedItemForAction, setSelectedItemForAction] = useState<OutboundHistory | null>(null);
+
+  // Load warehouse context
+  useEffect(() => {
+    const userStr = localStorage.getItem("user");
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      setCurrentWarehouseId(user.warehouseId || null);
+    }
+  }, []);
+
+  // Filter products by warehouse
+  const filteredProducts = useMemo(() => {
+    if (!currentWarehouseId) return productMasterData;
+    return productMasterData.filter(p => p.warehouseId === currentWarehouseId);
+  }, [currentWarehouseId]);
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -109,7 +121,7 @@ export function OutboundForm() {
     : null;
 
   // --- LOGIKA QTY DINAMIS (CALCULATED VALUES) ---
-  const qtyPerPalletStd = selectedProduct?.qtyPerPallet || 0;
+  const qtyPerPalletStd = selectedProduct?.qtyCartonPerPallet || 0;
 
   const { totalPallets, remainingCartons, totalCartons } = useMemo(() => {
     const palletInput = Number(form.qtyPalletInput) || 0;
@@ -196,37 +208,50 @@ export function OutboundForm() {
 
   // Confirm outbound
   const confirmOutbound = () => {
-    const qtyPerPalletStd = selectedProduct?.qtyPerPallet || 0;
+    const qtyPerPalletStd = selectedProduct?.qtyCartonPerPallet || 0;
     let remainingTotalCartons = totalCartons;
 
-    // 1. Buat detail pembagian karton per lokasi
-    const locationDetails = fefoLocations.map((loc) => {
+    // 1. Buat detail lokasi FEFO dengan BB Produk per lokasi
+    const locationsArray = fefoLocations.map((loc) => {
       const takenCartons = Math.min(remainingTotalCartons, qtyPerPalletStd);
       remainingTotalCartons -= takenCartons;
 
+      // Parse location string ke komponen (misal: "A-L1-B1-P1")
+      const parts = loc.location.split('-');
+      const cluster = parts[0];
+      const lorong = parseInt(parts[1].replace('L', ''));
+      const baris = parseInt(parts[2].replace('B', ''));
+      const level = parseInt(parts[3].replace('P', ''));
+
       return {
-        location: loc.location,
+        cluster,
+        lorong,
+        baris,
+        level,
         qtyCarton: takenCartons,
-        bbPallet: Array.isArray(loc.bbPallet)
-          ? loc.bbPallet.join(", ")
-          : loc.bbPallet,
+        stockId: loc.stockId,
+        bbProduk: Array.isArray(loc.bbPallet) ? loc.bbPallet.join(", ") : loc.bbPallet,
+        expiredDate: loc.expiredDate,
       };
     });
 
-    // 2. Simpan sebagai SATU entry history agar tabel tetap rapi (menyatu)
-    const newHistoryEntry = {
-      id: `OUT-${Date.now().toString().slice(-6)}`,
-      tanggal: form.tanggal,
-      namaPengemudi: form.namaPengemudi,
-      nomorPolisi: form.nomorPolisi,
-      productCode: form.productCode,
-      productName: selectedProduct?.productName || "",
-      qtyPallet: totalPalletsNeeded,
+    // 2. Buat entry history baru sesuai OutboundHistory interface
+    const transactionCode = `OUT-${form.tanggal.replace(/-/g, '')}-${Date.now().toString().slice(-4)}`;
+    
+    const newHistoryEntry: OutboundHistory = {
+      id: `out-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      warehouseId: "WH001",
+      transactionCode,
+      productId: selectedProduct?.id || "UNKNOWN",
+      bbProduk: locationsArray[0]?.bbProduk || "", // Legacy field, isi dengan BB pertama
       qtyCarton: totalCartons,
-      totalPcs: totalPcs,
-      locations: fefoLocations.map((l) => l.location), // Array string untuk tabel utama
-      locationDetails: locationDetails, // Simpan objek detail untuk Pop-up
-      status: "completed" as const,
+      locations: locationsArray,
+      expeditionId: null,
+      driverName: form.namaPengemudi,
+      vehicleNumber: form.nomorPolisi,
+      processedBy: "USER001",
+      departureTime: `${form.tanggal}T${new Date().toTimeString().slice(0, 8)}`,
+      notes: `Outbound ${totalPalletsNeeded} pallet, ${totalCartons} carton`,
       createdAt: new Date().toISOString(),
     };
 
@@ -271,7 +296,7 @@ export function OutboundForm() {
     const availableStocks = stockListData
       .filter(
         (stock) =>
-          stock.productCode === form.productCode &&
+          stock.productId === getProductByCode(form.productCode)?.id &&
           (stock.status === "release" ||
             stock.status === "hold" ||
             stock.status === "receh")
@@ -302,8 +327,8 @@ export function OutboundForm() {
 
         locations.push({
           stockId: stock.id,
-          location: `${stock.location.cluster}-${stock.location.lorong}-${stock.location.baris}-${stock.location.level}`,
-          bbPallet: stock.bbPallet,
+          location: `${stock.cluster}-L${stock.lorong}-B${stock.baris}-P${stock.level}`,
+          bbPallet: stock.bbProduk,
           expiredDate: stock.expiredDate,
           availableQtyPallet: availablePallet,
           allocatedQtyPallet: allocatePallet,
@@ -340,11 +365,11 @@ export function OutboundForm() {
   // --- FILTER TRANSAKSI HARI INI ---
   const todayTransactions = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return outboundHistoryData.filter((item) => item.tanggal === todayStr);
+    return outboundHistoryData.filter((item) => item.departureTime.startsWith(todayStr));
   }, []);
 
   // --- HANDLE EDIT TRANSAKSI ---
-  const handleEditClick = (item: (typeof outboundHistoryData)[0]) => {
+  const handleEditClick = (item: OutboundHistory) => {
     setSelectedItemForAction(item);
     setShowEditConfirmModal(true);
   };
@@ -353,74 +378,75 @@ export function OutboundForm() {
     if (!selectedItemForAction) return;
 
     // 1. Kembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)
-    selectedItemForAction.locations.forEach((locationStr) => {
-      const parts = locationStr.split("-");
-      const loc = {
-        cluster: parts[0],
-        lorong: parts[1],
-        baris: parts[2],
-        level: parts[3],
-      };
-
+    selectedItemForAction.locations.forEach((locationItem) => {
       // Cek apakah lokasi sudah terisi oleh produk lain
       const existingStock = stockListData.find(
         (s) =>
-          s.location.cluster === loc.cluster &&
-          s.location.lorong === loc.lorong &&
-          s.location.baris === loc.baris &&
-          s.location.level === loc.level
+          s.cluster === locationItem.cluster &&
+          s.lorong === locationItem.lorong &&
+          s.baris === locationItem.baris &&
+          s.level === locationItem.level
       );
 
       // Ambil data produk
-      const productData = getProductByCode(selectedItemForAction.productCode);
-
-      const qtyPerCarton = productData?.qtyPerCarton || 1;
-      const qtyCarton = productData?.qtyPerPallet || 0;
+      const productData = productMasterData.find(p => p.id === selectedItemForAction.productId);
 
       if (existingStock) {
         // Lokasi sudah terisi, pindahkan ke In Transit (Cluster C)
         const inTransitLoc = findAvailableInTransitLocation();
         if (inTransitLoc) {
+          const todayStr = new Date().toISOString().slice(0, 10);
           stockListData.push({
             id: `STK-RETURN-${Date.now()}-${Math.random()
               .toString(36)
               .substr(2, 9)}`,
-            productCode: selectedItemForAction.productCode,
-            productName: selectedItemForAction.productName,
-            location: inTransitLoc,
+            warehouseId: "WH001",
+            productId: productData?.id || "UNKNOWN",
+            bbProduk: "RETURNED",
+            cluster: inTransitLoc.clusterChar,
+            lorong: parseInt(inTransitLoc.lorong.replace('L', '')),
+            baris: parseInt(inTransitLoc.baris.replace('B', '')),
+            level: parseInt(inTransitLoc.level.replace('P', '')),
             qtyPallet: 1,
-            qtyCarton: qtyCarton,
-            qtyPcs: qtyCarton * qtyPerCarton,
-            bbPallet: "RETURNED",
-            batchNumber: "RETURNED",
-            lotNumber: "RETURNED",
+            qtyCarton: locationItem.qtyCarton,
             expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
               .toISOString()
               .slice(0, 10),
-            inboundDate: new Date().toISOString().slice(0, 10),
+            inboundDate: todayStr,
             status: "release",
+            isReceh: false,
+            parentStockId: null,
+            createdBy: "USER001",
+            createdAt: todayStr,
+            updatedAt: todayStr,
           });
         }
       } else {
         // Lokasi kosong, kembalikan ke lokasi asal
+        const todayStr = new Date().toISOString().slice(0, 10);
         stockListData.push({
           id: `STK-RETURN-${Date.now()}-${Math.random()
             .toString(36)
             .substr(2, 9)}`,
-          productCode: selectedItemForAction.productCode,
-          productName: selectedItemForAction.productName,
-          location: loc,
+          warehouseId: "WH001",
+          productId: productData?.id || "UNKNOWN",
+          bbProduk: "RETURNED",
+          cluster: locationItem.cluster,
+          lorong: locationItem.lorong,
+          baris: locationItem.baris,
+          level: locationItem.level,
           qtyPallet: 1,
-          qtyCarton: qtyCarton,
-          qtyPcs: qtyCarton * qtyPerCarton,
-          bbPallet: "RETURNED",
-          batchNumber: "RETURNED",
-          lotNumber: "RETURNED",
+          qtyCarton: locationItem.qtyCarton,
           expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
             .toISOString()
             .slice(0, 10),
-          inboundDate: new Date().toISOString().slice(0, 10),
+          inboundDate: todayStr,
           status: "release",
+          isReceh: false,
+          parentStockId: null,
+          createdBy: "USER001",
+          createdAt: todayStr,
+          updatedAt: todayStr,
         });
       }
     });
@@ -434,17 +460,17 @@ export function OutboundForm() {
     }
 
     // 3. Load data ke form untuk di-edit
-    const selectedProd = getProductByCode(selectedItemForAction.productCode);
-    const qtyPerPallet = selectedProd?.qtyPerPallet || 1;
+    const selectedProd = productMasterData.find(p => p.id === selectedItemForAction.productId);
+    const qtyPerPallet = selectedProd?.qtyCartonPerPallet || 1;
     const totalCarton = selectedItemForAction.qtyCarton;
     const fullPallets = Math.floor(totalCarton / qtyPerPallet);
     const remainingCartons = totalCarton % qtyPerPallet;
 
     setForm({
-      tanggal: selectedItemForAction.tanggal,
-      namaPengemudi: selectedItemForAction.namaPengemudi,
-      nomorPolisi: selectedItemForAction.nomorPolisi,
-      productCode: selectedItemForAction.productCode,
+      tanggal: selectedItemForAction.departureTime.slice(0, 10),
+      namaPengemudi: selectedItemForAction.driverName,
+      nomorPolisi: selectedItemForAction.vehicleNumber,
+      productCode: selectedProd?.productCode || '',
       qtyPalletInput: String(fullPallets),
       qtyCartonInput: String(remainingCartons),
     });
@@ -455,7 +481,7 @@ export function OutboundForm() {
     setFefoLocations([]);
 
     success(
-      `Data transaksi ${selectedItemForAction.id} telah dimuat ke form. Stock dikembalikan. Silakan edit dan submit ulang.`
+      `Data transaksi ${selectedItemForAction.transactionCode} telah dimuat ke form. Stock dikembalikan. Silakan edit dan submit ulang.`
     );
   };
 
@@ -466,17 +492,17 @@ export function OutboundForm() {
       for (let baris = 1; baris <= 9; baris++) {
         for (let pallet = 1; pallet <= 3; pallet++) {
           const loc = {
-            cluster: "C",
+            clusterChar: "C",
             lorong: `L${lorong}`,
             baris: `B${baris}`,
             level: `P${pallet}`,
           };
           const exists = stockListData.some(
             (s) =>
-              s.location.cluster === loc.cluster &&
-              s.location.lorong === loc.lorong &&
-              s.location.baris === loc.baris &&
-              s.location.level === loc.level
+              s.cluster === loc.clusterChar &&
+              s.lorong === parseInt(loc.lorong.replace('L', '')) &&
+              s.baris === parseInt(loc.baris.replace('B', '')) &&
+              s.level === parseInt(loc.level.replace('P', ''))
           );
           if (!exists) return loc;
         }
@@ -486,7 +512,7 @@ export function OutboundForm() {
   };
 
   // --- HANDLE BATAL TRANSAKSI ---
-  const handleBatalClick = (item: (typeof outboundHistoryData)[0]) => {
+  const handleBatalClick = (item: OutboundHistory) => {
     setSelectedItemForAction(item);
     setShowBatalConfirmModal(true);
   };
@@ -495,73 +521,75 @@ export function OutboundForm() {
     if (!selectedItemForAction) return;
 
     // 1. Kembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)
-    selectedItemForAction.locations.forEach((locationStr) => {
-      const parts = locationStr.split("-");
-      const loc = {
-        cluster: parts[0],
-        lorong: parts[1],
-        baris: parts[2],
-        level: parts[3],
-      };
-
+    selectedItemForAction.locations.forEach((locationItem) => {
       // Cek apakah lokasi sudah terisi oleh produk lain
       const existingStock = stockListData.find(
         (s) =>
-          s.location.cluster === loc.cluster &&
-          s.location.lorong === loc.lorong &&
-          s.location.baris === loc.baris &&
-          s.location.level === loc.level
+          s.cluster === locationItem.cluster &&
+          s.lorong === locationItem.lorong &&
+          s.baris === locationItem.baris &&
+          s.level === locationItem.level
       );
 
       // Ambil data produk
-      const productData = getProductByCode(selectedItemForAction.productCode);
-      const qtyPerCarton = productData?.qtyPerCarton || 1;
-      const qtyCarton = productData?.qtyPerPallet || 0;
+      const productData = productMasterData.find(p => p.id === selectedItemForAction.productId);
 
       if (existingStock) {
         // Lokasi sudah terisi, pindahkan ke In Transit
         const inTransitLoc = findAvailableInTransitLocation();
         if (inTransitLoc) {
+          const todayStr = new Date().toISOString().slice(0, 10);
           stockListData.push({
             id: `STK-RETURN-${Date.now()}-${Math.random()
               .toString(36)
               .substr(2, 9)}`,
-            productCode: selectedItemForAction.productCode,
-            productName: selectedItemForAction.productName,
-            location: inTransitLoc,
+            warehouseId: "WH001",
+            productId: productData?.id || "UNKNOWN",
+            bbProduk: "RETURNED",
+            cluster: inTransitLoc.clusterChar,
+            lorong: parseInt(inTransitLoc.lorong.replace('L', '')),
+            baris: parseInt(inTransitLoc.baris.replace('B', '')),
+            level: parseInt(inTransitLoc.level.replace('P', '')),
             qtyPallet: 1,
-            qtyCarton: qtyCarton,
-            qtyPcs: qtyCarton * qtyPerCarton,
-            bbPallet: "RETURNED",
-            batchNumber: "RETURNED",
-            lotNumber: "RETURNED",
+            qtyCarton: locationItem.qtyCarton,
             expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
               .toISOString()
               .slice(0, 10),
-            inboundDate: new Date().toISOString().slice(0, 10),
+            inboundDate: todayStr,
             status: "release",
+            isReceh: false,
+            parentStockId: null,
+            createdBy: "USER001",
+            createdAt: todayStr,
+            updatedAt: todayStr,
           });
         }
       } else {
         // Lokasi kosong, kembalikan ke lokasi asal
+        const todayStr = new Date().toISOString().slice(0, 10);
         stockListData.push({
           id: `STK-RETURN-${Date.now()}-${Math.random()
             .toString(36)
             .substr(2, 9)}`,
-          productCode: selectedItemForAction.productCode,
-          productName: selectedItemForAction.productName,
-          location: loc,
+          warehouseId: "WH001",
+          productId: productData?.id || "UNKNOWN",
+          bbProduk: "RETURNED",
+          cluster: locationItem.cluster,
+          lorong: locationItem.lorong,
+          baris: locationItem.baris,
+          level: locationItem.level,
           qtyPallet: 1,
-          qtyCarton: qtyCarton,
-          qtyPcs: qtyCarton * qtyPerCarton,
-          bbPallet: "RETURNED",
-          batchNumber: "RETURNED",
-          lotNumber: "RETURNED",
+          qtyCarton: locationItem.qtyCarton,
           expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
             .toISOString()
             .slice(0, 10),
-          inboundDate: new Date().toISOString().slice(0, 10),
+          inboundDate: todayStr,
           status: "release",
+          isReceh: false,
+          parentStockId: null,
+          createdBy: "USER001",
+          createdAt: todayStr,
+          updatedAt: todayStr,
         });
       }
     });
@@ -579,7 +607,7 @@ export function OutboundForm() {
     setSelectedItemForAction(null);
 
     success(
-      `Transaksi ${selectedItemForAction.id} telah dibatalkan. Stock telah dikembalikan.`
+      `Transaksi ${selectedItemForAction.transactionCode} telah dibatalkan. Stock telah dikembalikan.`
     );
   };
 
@@ -718,7 +746,7 @@ export function OutboundForm() {
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all"
                 >
                   <option value="">Pilih produk</option>
-                  {productMasterData.map((product) => (
+                  {filteredProducts.map((product) => (
                     <option key={product.id} value={product.productCode}>
                       {product.productName}
                     </option>
@@ -925,7 +953,7 @@ export function OutboundForm() {
                       // Variabel pembantu untuk menghitung sisa karton di UI
                       let tempRemainingCartons = totalCartons;
                       const qtyPerPalletStd =
-                        selectedProduct?.qtyPerPallet || 0;
+                        selectedProduct?.qtyCartonPerPallet || 0;
 
                       return fefoLocations.map((loc, index) => {
                         // Hitung karton spesifik untuk baris ini
@@ -1455,45 +1483,41 @@ export function OutboundForm() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {todayTransactions.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="hover:bg-orange-50 transition-colors"
-                    >
-                      <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
-                        {new Date(item.createdAt).toLocaleTimeString("id-ID", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </td>
-                      <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">
-                        {item.namaPengemudi}
-                      </td>
-                      <td className="px-3 py-3 text-sm">
-                        <div className="font-medium text-gray-900">
-                          {item.productCode}
-                        </div>
-                        <div className="text-gray-500 text-xs truncate max-w-[150px]">
-                          {item.productName}
-                        </div>
-                      </td>
-                      <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
-                        {item.qtyPallet}
-                      </td>
-                      <td className="px-2 py-3 text-sm text-center font-bold text-blue-600">
-                        {item.qtyCarton}
-                      </td>
-                      <td className="px-2 py-3 text-center">
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            item.status === "completed"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-yellow-100 text-yellow-800"
-                          }`}
-                        >
-                          {item.status === "completed" ? "✓" : "⚠"}
-                        </span>
-                      </td>
+                  {todayTransactions.map((item) => {
+                    const product = productMasterData.find(p => p.id === item.productId);
+                    return (
+                      <tr
+                        key={item.id}
+                        className="hover:bg-orange-50 transition-colors"
+                      >
+                        <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
+                          {new Date(item.departureTime).toLocaleTimeString("id-ID", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                        <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">
+                          {item.driverName}
+                        </td>
+                        <td className="px-3 py-3 text-sm">
+                          <div className="font-medium text-gray-900">
+                            {product?.productCode || '-'}
+                          </div>
+                          <div className="text-gray-500 text-xs truncate max-w-[150px]">
+                            {product?.productName || '-'}
+                          </div>
+                        </td>
+                        <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
+                          {item.locations.length}
+                        </td>
+                        <td className="px-2 py-3 text-sm text-center font-bold text-blue-600">
+                          {item.qtyCarton}
+                        </td>
+                        <td className="px-2 py-3 text-center">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                            ✓
+                          </span>
+                        </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center justify-center gap-1">
                           <button
@@ -1520,7 +1544,8 @@ export function OutboundForm() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1561,7 +1586,7 @@ export function OutboundForm() {
                   <div>
                     <span className="text-gray-600">Tanggal:</span>
                     <p className="font-semibold text-gray-900">
-                      {new Date(selectedHistoryItem.tanggal).toLocaleDateString(
+                      {new Date(selectedHistoryItem.departureTime).toLocaleDateString(
                         "id-ID",
                         {
                           weekday: "long",
@@ -1575,13 +1600,13 @@ export function OutboundForm() {
                   <div>
                     <span className="text-gray-600">Nama Pengemudi:</span>
                     <p className="font-semibold text-gray-900">
-                      {selectedHistoryItem.namaPengemudi}
+                      {selectedHistoryItem.driverName}
                     </p>
                   </div>
                   <div className="col-span-2">
                     <span className="text-gray-600">No. Polisi:</span>
                     <p className="font-semibold text-gray-900">
-                      {selectedHistoryItem.nomorPolisi}
+                      {selectedHistoryItem.vehicleNumber}
                     </p>
                   </div>
                 </div>
@@ -1596,25 +1621,35 @@ export function OutboundForm() {
                   <div className="col-span-2">
                     <span className="text-gray-600">Nama Produk:</span>
                     <p className="font-semibold text-gray-900">
-                      {selectedHistoryItem.productName}
+                      {(() => {
+                        const product = productMasterData.find(p => p.id === selectedHistoryItem.productId);
+                        return product?.productName || '-';
+                      })()}
                     </p>
                   </div>
                   <div>
                     <span className="text-gray-600">Kode Produk:</span>
                     <p className="font-semibold text-gray-900">
-                      {selectedHistoryItem.productCode}
+                      {(() => {
+                        const product = productMasterData.find(p => p.id === selectedHistoryItem.productId);
+                        return product?.productCode || '-';
+                      })()}
                     </p>
                   </div>
                   <div>
                     <span className="text-gray-600">Total PCS:</span>
                     <p className="font-semibold text-gray-900">
-                      {selectedHistoryItem.totalPcs.toLocaleString()} pcs
+                      {(() => {
+                        const product = productMasterData.find(p => p.id === selectedHistoryItem.productId);
+                        const totalPcs = product ? selectedHistoryItem.qtyCarton * product.qtyPerCarton : 0;
+                        return totalPcs.toLocaleString();
+                      })()} pcs
                     </p>
                   </div>
                   <div>
                     <span className="text-gray-600">Qty Pallet:</span>
                     <p className="font-semibold text-gray-900">
-                      {selectedHistoryItem.qtyPallet} pallet
+                      {selectedHistoryItem.locations.length} pallet
                     </p>
                   </div>
                   <div>
@@ -1632,19 +1667,7 @@ export function OutboundForm() {
                   <span className="text-lg">📍</span> Lokasi Pengambilan FEFO
                 </h3>
                 <div className="space-y-3">
-                  {selectedHistoryItem.locations.map((location, idx) => {
-                    // Ambil stock data untuk mendapatkan BB Produk
-                    const stockItem = stockListData.find(
-                      (item) =>
-                        `${item.location.cluster}-${item.location.lorong}-${item.location.baris}-${item.location.level}` ===
-                        location
-                    );
-                    const bbProduk = stockItem
-                      ? Array.isArray(stockItem.bbPallet)
-                        ? stockItem.bbPallet.join(", ")
-                        : stockItem.bbPallet
-                      : "-";
-
+                  {selectedHistoryItem.locations.map((locationItem, idx) => {
                     return (
                       <div
                         key={idx}
@@ -1657,7 +1680,7 @@ export function OutboundForm() {
                                 #{idx + 1}
                               </span>
                               <span className="font-semibold text-gray-900 text-lg">
-                                {location}
+                                {locationItem.cluster}-L{locationItem.lorong}-B{locationItem.baris}-P{locationItem.level}
                               </span>
                             </div>
                             <div className="text-sm space-y-1">
@@ -1666,30 +1689,22 @@ export function OutboundForm() {
                                   BB Produk:
                                 </span>
                                 <span className="font-mono font-semibold text-gray-900 ml-2">
-                                  {bbProduk}
+                                  {locationItem.bbProduk}
                                 </span>
                               </div>
-                              {stockItem && (
-                                <div>
-                                  <span className="text-gray-600">
-                                    Expired:
-                                  </span>
-                                  <span className="font-semibold text-gray-900 ml-2">
-                                    {new Date(
-                                      stockItem.expiredDate
-                                    ).toLocaleDateString("id-ID", {
-                                      day: "2-digit",
-                                      month: "short",
-                                      year: "numeric",
-                                    })}
-                                  </span>
-                                </div>
-                              )}
+                              <div>
+                                <span className="text-gray-600">
+                                  Qty Carton:
+                                </span>
+                                <span className="font-semibold text-gray-900 ml-2">
+                                  {locationItem.qtyCarton} carton
+                                </span>
+                              </div>
                             </div>
                           </div>
                           <div className="flex flex-col items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
                             <QRCodeSVG
-                              value={bbProduk}
+                              value={locationItem.bbProduk}
                               size={100}
                               level="H"
                               includeMargin={false}
@@ -1730,16 +1745,8 @@ export function OutboundForm() {
                   <span className="text-lg">✓</span> Status Transaksi
                 </h3>
                 <div className="flex items-center gap-2">
-                  <span
-                    className={`inline-flex px-4 py-2 text-sm font-bold rounded-lg ${
-                      selectedHistoryItem.status === "completed"
-                        ? "bg-green-100 text-green-800"
-                        : "bg-yellow-100 text-yellow-800"
-                    }`}
-                  >
-                    {selectedHistoryItem.status === "completed"
-                      ? "✅ Selesai"
-                      : "⚠️ Partial"}
+                  <span className="inline-flex px-4 py-2 text-sm font-bold rounded-lg bg-green-100 text-green-800">
+                    ✅ Selesai
                   </span>
                 </div>
               </div>
@@ -1781,7 +1788,7 @@ export function OutboundForm() {
                 <ul className="text-amber-700 text-sm mt-2 space-y-1 list-disc list-inside">
                   <li>
                     Membatalkan transaksi{" "}
-                    <strong>{selectedItemForAction.id}</strong>
+                    <strong>{selectedItemForAction.transactionCode}</strong>
                   </li>
                   <li>
                     Mengembalikan stock ke lokasi asal (atau In Transit jika
@@ -1796,20 +1803,23 @@ export function OutboundForm() {
                   <div className="flex justify-between">
                     <span className="text-gray-500">Produk:</span>
                     <span className="font-semibold text-gray-900">
-                      {selectedItemForAction.productCode}
+                      {(() => {
+                        const product = productMasterData.find(p => p.id === selectedItemForAction.productId);
+                        return product?.productCode || '-';
+                      })()}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Qty:</span>
                     <span className="font-semibold text-gray-900">
-                      {selectedItemForAction.qtyPallet} pallet,{" "}
+                      {selectedItemForAction.locations.length} pallet,{" "}
                       {selectedItemForAction.qtyCarton} karton
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Lokasi:</span>
                     <span className="font-semibold text-gray-900 text-xs">
-                      {selectedItemForAction.locations.join(", ")}
+                      {selectedItemForAction.locations.map(loc => `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`).join(", ")}
                     </span>
                   </div>
                 </div>
@@ -1856,7 +1866,7 @@ export function OutboundForm() {
                 <ul className="text-red-700 text-sm mt-2 space-y-1 list-disc list-inside">
                   <li>
                     Membatalkan transaksi{" "}
-                    <strong>{selectedItemForAction.id}</strong>
+                    <strong>{selectedItemForAction.transactionCode}</strong>
                   </li>
                   <li>
                     Mengembalikan stock ke lokasi asal (atau In Transit jika
@@ -1871,20 +1881,23 @@ export function OutboundForm() {
                   <div className="flex justify-between">
                     <span className="text-gray-500">Produk:</span>
                     <span className="font-semibold text-gray-900">
-                      {selectedItemForAction.productCode}
+                      {(() => {
+                        const product = productMasterData.find(p => p.id === selectedItemForAction.productId);
+                        return product?.productCode || '-';
+                      })()}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Qty:</span>
                     <span className="font-semibold text-gray-900">
-                      {selectedItemForAction.qtyPallet} pallet,{" "}
+                      {selectedItemForAction.locations.length} pallet,{" "}
                       {selectedItemForAction.qtyCarton} karton
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Lokasi:</span>
                     <span className="font-semibold text-gray-900 text-xs">
-                      {selectedItemForAction.locations.join(", ")}
+                      {selectedItemForAction.locations.map(loc => `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`).join(", ")}
                     </span>
                   </div>
                 </div>

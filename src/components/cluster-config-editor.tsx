@@ -1,16 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { type ClusterConfig } from "@/lib/mock/warehouse-config";
+import { type ClusterConfig, type ClusterCellOverride } from "@/lib/mock/warehouse-config";
 import { useToast, ToastContainer } from "./toast";
 import { Save, Plus, Trash2, Edit2, X } from "lucide-react";
 
 interface ClusterConfigEditorProps {
   clusters: ClusterConfig[];
   onUpdate: (clusters: ClusterConfig[]) => void;
+  cellOverrides: ClusterCellOverride[];
+  onUpdateOverrides: (overrides: ClusterCellOverride[]) => void;
 }
 
-export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfigEditorProps) {
+export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides, onUpdateOverrides }: ClusterConfigEditorProps) {
   const { toasts, removeToast, success, error } = useToast();
   const [selectedCluster, setSelectedCluster] = useState<ClusterConfig | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -20,14 +22,16 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
 
   const [formData, setFormData] = useState<ClusterConfig>({
     id: "",
-    cluster: "",
+    warehouseId: "wh-001-cikarang",
+    clusterChar: "",
     clusterName: "",
     defaultLorongCount: 10,
     defaultBarisCount: 10,
-    defaultPalletPerSel: 3,
-    customLorongConfig: [],
-    customCellConfig: [],
+    defaultPalletLevel: 3,
+    description: "",
     isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   });
 
   // Handler untuk select cluster
@@ -51,38 +55,39 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
 
   const handleSaveEdit = () => {
     if (!editData) return;
-    
-    if (!editData.cluster || !editData.clusterName) {
+
+    if (!editData.clusterChar || !editData.clusterName) {
       error("Cluster dan nama harus diisi!");
       return;
     }
 
     onUpdate(clusters.map((c) => (c.id === selectedCluster?.id ? editData : c)));
     success("Konfigurasi cluster berhasil diupdate!");
-    
+
     setSelectedCluster(editData);
     setEditMode(false);
     setEditData(null);
   };
 
-  // Handler untuk add cluster
   const handleAdd = () => {
     setFormData({
       id: `cluster-${Date.now()}`,
-      cluster: "",
+      warehouseId: "wh-001-cikarang",
+      clusterChar: "",
       clusterName: "",
       defaultLorongCount: 10,
       defaultBarisCount: 10,
-      defaultPalletPerSel: 3,
-      customLorongConfig: [],
-      customCellConfig: [],
+      defaultPalletLevel: 3,
+      description: "",
       isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
     setShowAddModal(true);
   };
 
   const handleSubmitAdd = () => {
-    if (!formData.cluster || !formData.clusterName) {
+    if (!formData.clusterChar || !formData.clusterName) {
       error("Cluster dan nama harus diisi!");
       return;
     }
@@ -106,131 +111,45 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
     setShowDeleteModal(false);
   };
 
-  // Handler untuk custom lorong config
-  const handleAddCustomLorong = () => {
-    if (!editData) return;
-    
-    setEditData({
-      ...editData,
-      customLorongConfig: [
-        ...(editData.customLorongConfig || []),
-        { lorongRange: [1, 1], barisCount: editData.defaultBarisCount },
-      ],
-    });
+  // Helper function to get overrides for current cluster
+  const getClusterOverrides = (clusterId: string) => {
+    return cellOverrides.filter(override => override.clusterConfigId === clusterId);
   };
 
-  const handleRemoveCustomLorong = (index: number) => {
-    if (!editData) return;
-    
-    const updated = [...(editData.customLorongConfig || [])];
-    updated.splice(index, 1);
-    
-    setEditData({
-      ...editData,
-      customLorongConfig: updated,
-    });
+  // Handler untuk cell overrides
+  const handleAddCellOverride = () => {
+    if (!selectedCluster) return;
+
+    const newOverride: ClusterCellOverride = {
+      id: `cco-${Date.now()}`,
+      clusterConfigId: selectedCluster.id,
+      lorongStart: 1,
+      lorongEnd: 1,
+      barisStart: null,
+      barisEnd: null,
+      customBarisCount: null,
+      customPalletLevel: null,
+      isTransitArea: false,
+      isDisabled: false,
+      note: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    onUpdateOverrides([...cellOverrides, newOverride]);
   };
 
-  const handleUpdateCustomLorong = (index: number, field: string, value: number) => {
-    if (!editData) return;
-    
-    const updated = [...(editData.customLorongConfig || [])];
-    if (field === "lorongStart") {
-      updated[index].lorongRange[0] = value;
-    } else if (field === "lorongEnd") {
-      updated[index].lorongRange[1] = value;
-    } else if (field === "barisCount") {
-      updated[index].barisCount = value;
-    } else if (field === "palletPerSel") {
-      updated[index].palletPerSel = value;
-    }
-    
-    setEditData({
-      ...editData,
-      customLorongConfig: updated,
-    });
+  const handleUpdateCellOverride = (overrideId: string, field: string, value: string | number | boolean | null) => {
+    const updated = cellOverrides.map(override =>
+      override.id === overrideId
+        ? { ...override, [field]: value, updatedAt: new Date().toISOString() }
+        : override
+    );
+    onUpdateOverrides(updated);
   };
 
-  // Handler untuk custom cell config
-  const handleAddCustomCell = () => {
-    if (!editData) return;
-    
-    setEditData({
-      ...editData,
-      customCellConfig: [
-        ...(editData.customCellConfig || []),
-        { lorongRange: [1, 1], barisRange: [1, 1], palletPerSel: editData.defaultPalletPerSel },
-      ],
-    });
-  };
-
-  const handleRemoveCustomCell = (index: number) => {
-    if (!editData) return;
-    
-    const updated = [...(editData.customCellConfig || [])];
-    updated.splice(index, 1);
-    
-    setEditData({
-      ...editData,
-      customCellConfig: updated,
-    });
-  };
-
-  const handleUpdateCustomCell = (index: number, field: string, value: number) => {
-    if (!editData) return;
-    
-    const updated = [...(editData.customCellConfig || [])];
-    if (field === "lorongStart") {
-      updated[index].lorongRange[0] = value;
-    } else if (field === "lorongEnd") {
-      updated[index].lorongRange[1] = value;
-    } else if (field === "barisStart") {
-      updated[index].barisRange[0] = value;
-    } else if (field === "barisEnd") {
-      updated[index].barisRange[1] = value;
-    } else if (field === "palletPerSel") {
-      updated[index].palletPerSel = value;
-    }
-    
-    setEditData({
-      ...editData,
-      customCellConfig: updated,
-    });
-  };
-
-  // Handler untuk add modal custom config
-  const addCustomLorongConfig = () => {
-    setFormData({
-      ...formData,
-      customLorongConfig: [
-        ...(formData.customLorongConfig || []),
-        { lorongRange: [1, 1], barisCount: formData.defaultBarisCount },
-      ],
-    });
-  };
-
-  const removeCustomLorongConfig = (index: number) => {
-    setFormData({
-      ...formData,
-      customLorongConfig: formData.customLorongConfig?.filter((_, i) => i !== index),
-    });
-  };
-
-  const addCustomCellConfig = () => {
-    setFormData({
-      ...formData,
-      customCellConfig: [
-        ...(formData.customCellConfig || []),
-        { lorongRange: [1, 1], barisRange: [1, 1], palletPerSel: formData.defaultPalletPerSel },
-      ],
-    });
-  };
-
-  const removeCustomCellConfig = (index: number) => {
-    setFormData({
-      ...formData,
-      customCellConfig: formData.customCellConfig?.filter((_, i) => i !== index),
-    });
+  const handleRemoveCellOverride = (overrideId: string) => {
+    onUpdateOverrides(cellOverrides.filter(override => override.id !== overrideId));
   };
 
   const displayCluster = editMode ? editData : selectedCluster;
@@ -238,7 +157,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
   return (
     <div className="space-y-6">
       <ToastContainer toasts={toasts} onRemove={removeToast} />
-      
+
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -262,7 +181,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
         <div className="lg:col-span-1">
           <div className="bg-white rounded-xl shadow-lg p-6">
             <h3 className="text-xl font-bold text-slate-800 mb-4">Daftar Cluster</h3>
-            
+
             <div className="space-y-2">
               {clusters.filter(c => c.isActive).map((cluster) => (
                 <button
@@ -276,7 +195,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-lg bg-blue-500 text-white flex items-center justify-center font-bold text-lg">
-                      {cluster.cluster}
+                      {cluster.clusterChar}
                     </div>
                     <div className="flex-1">
                       <h4 className="font-semibold text-slate-800">{cluster.clusterName}</h4>
@@ -316,7 +235,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-2xl font-bold mb-1">
-                      Cluster {displayCluster.cluster}
+                      Cluster {displayCluster.clusterChar}
                     </h2>
                     <p className="text-blue-100">{displayCluster.clusterName}</p>
                   </div>
@@ -372,12 +291,12 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                       <input
                         type="text"
                         maxLength={1}
-                        value={editData?.cluster || ""}
-                        onChange={(e) => setEditData({ ...editData!, cluster: e.target.value.toUpperCase() })}
+                        value={editData?.clusterChar || ""}
+                        onChange={(e) => setEditData({ ...editData!, clusterChar: e.target.value.toUpperCase() })}
                         className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
                       />
                     ) : (
-                      <div className="text-2xl font-bold text-slate-800">{displayCluster.cluster}</div>
+                      <div className="text-2xl font-bold text-slate-800">{displayCluster.clusterChar}</div>
                     )}
                   </div>
                   <div>
@@ -441,275 +360,173 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                         <input
                           type="number"
                           min="1"
-                          value={editData?.defaultPalletPerSel || 0}
-                          onChange={(e) => setEditData({ ...editData!, defaultPalletPerSel: parseInt(e.target.value) || 0 })}
+                          value={editData?.defaultPalletLevel || 0}
+                          onChange={(e) => setEditData({ ...editData!, defaultPalletLevel: parseInt(e.target.value) || 0 })}
                           className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
                         />
                       ) : (
-                        <div className="text-xl font-bold text-slate-800">{displayCluster.defaultPalletPerSel}</div>
+                        <div className="text-xl font-bold text-slate-800">{displayCluster.defaultPalletLevel}</div>
                       )}
                     </div>
                   </div>
                 </div>
 
-                {/* Custom Lorong Config */}
+                {/* Cell Overrides */}
                 <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
                   <div className="flex justify-between items-center mb-4">
-                    <h4 className="font-semibold text-purple-900">Custom Lorong Configuration</h4>
+                    <h4 className="font-semibold text-purple-900">Cell Overrides</h4>
                     {editMode && (
                       <button
-                        onClick={handleAddCustomLorong}
+                        onClick={handleAddCellOverride}
                         className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 flex items-center gap-1"
                       >
                         <Plus className="w-4 h-4" />
-                        <span>Tambah</span>
+                        <span>Tambah Override</span>
                       </button>
                     )}
                   </div>
                   <div className="space-y-3">
-                    {(displayCluster.customLorongConfig || []).map((config, index) => (
-                      <div key={index} className="bg-white p-3 rounded-lg border border-purple-200">
+                    {getClusterOverrides(displayCluster?.id || "").map((override) => (
+                      <div key={override.id} className="bg-white p-3 rounded-lg border border-purple-200">
                         {editMode ? (
-                          <div className="flex gap-3 items-center">
-                            <div className="flex-1 grid grid-cols-4 gap-2">
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
                               <div>
-                                <label className="text-xs text-slate-600">Lorong Dari</label>
+                                <label className="text-xs text-slate-600">Lorong Start</label>
                                 <input
                                   type="number"
                                   min="1"
-                                  value={config.lorongRange[0]}
-                                  onChange={(e) => handleUpdateCustomLorong(index, "lorongStart", parseInt(e.target.value) || 1)}
+                                  value={override.lorongStart}
+                                  onChange={(e) => handleUpdateCellOverride(override.id, "lorongStart", parseInt(e.target.value) || 1)}
                                   className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
                                 />
                               </div>
                               <div>
-                                <label className="text-xs text-slate-600">Lorong Sampai</label>
+                                <label className="text-xs text-slate-600">Lorong End</label>
                                 <input
                                   type="number"
                                   min="1"
-                                  value={config.lorongRange[1]}
-                                  onChange={(e) => handleUpdateCustomLorong(index, "lorongEnd", parseInt(e.target.value) || 1)}
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs text-slate-600">Jumlah Baris</label>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={config.barisCount}
-                                  onChange={(e) => handleUpdateCustomLorong(index, "barisCount", parseInt(e.target.value) || 1)}
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs text-slate-600">Pallet/Sel</label>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={config.palletPerSel || displayCluster.defaultPalletPerSel}
-                                  onChange={(e) => handleUpdateCustomLorong(index, "palletPerSel", parseInt(e.target.value) || 1)}
+                                  value={override.lorongEnd}
+                                  onChange={(e) => handleUpdateCellOverride(override.id, "lorongEnd", parseInt(e.target.value) || 1)}
                                   className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
                                 />
                               </div>
                             </div>
-                            <button
-                              onClick={() => handleRemoveCustomLorong(index)}
-                              className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-700">
-                            <span className="font-semibold">Lorong {config.lorongRange[0]}-{config.lorongRange[1]}</span>
-                            {": "}
-                            <span>{config.barisCount} Baris</span>
-                            {config.palletPerSel && <span>, {config.palletPerSel} Pallet/Sel</span>}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {(!displayCluster.customLorongConfig || displayCluster.customLorongConfig.length === 0) && (
-                      <p className="text-sm text-slate-500 text-center py-2">
-                        Belum ada custom lorong configuration
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Custom Cell Config */}
-                <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
-                  <div className="flex justify-between items-center mb-4">
-                    <h4 className="font-semibold text-green-900">Custom Cell Configuration</h4>
-                    {editMode && (
-                      <button
-                        onClick={handleAddCustomCell}
-                        className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 flex items-center gap-1"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Tambah</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="space-y-3">
-                    {(displayCluster.customCellConfig || []).map((config, index) => (
-                      <div key={index} className="bg-white p-3 rounded-lg border border-green-200">
-                        {editMode ? (
-                          <div className="flex gap-3 items-center">
-                            <div className="flex-1 grid grid-cols-5 gap-2">
+                            <div className="grid grid-cols-2 gap-3">
                               <div>
-                                <label className="text-xs text-slate-600">Lorong Dari</label>
+                                <label className="text-xs text-slate-600">Baris Start (NULL = semua)</label>
                                 <input
                                   type="number"
                                   min="1"
-                                  value={config.lorongRange[0]}
-                                  onChange={(e) => handleUpdateCustomCell(index, "lorongStart", parseInt(e.target.value) || 1)}
+                                  value={override.barisStart || ""}
+                                  placeholder="Kosongkan untuk semua baris"
+                                  onChange={(e) => handleUpdateCellOverride(override.id, "barisStart", e.target.value ? parseInt(e.target.value) : null)}
                                   className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
                                 />
                               </div>
                               <div>
-                                <label className="text-xs text-slate-600">Lorong Sampai</label>
+                                <label className="text-xs text-slate-600">Baris End (NULL = semua)</label>
                                 <input
                                   type="number"
                                   min="1"
-                                  value={config.lorongRange[1]}
-                                  onChange={(e) => handleUpdateCustomCell(index, "lorongEnd", parseInt(e.target.value) || 1)}
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs text-slate-600">Baris Dari</label>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={config.barisRange[0]}
-                                  onChange={(e) => handleUpdateCustomCell(index, "barisStart", parseInt(e.target.value) || 1)}
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs text-slate-600">Baris Sampai</label>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={config.barisRange[1]}
-                                  onChange={(e) => handleUpdateCustomCell(index, "barisEnd", parseInt(e.target.value) || 1)}
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs text-slate-600">Pallet/Sel</label>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={config.palletPerSel}
-                                  onChange={(e) => handleUpdateCustomCell(index, "palletPerSel", parseInt(e.target.value) || 1)}
+                                  value={override.barisEnd || ""}
+                                  placeholder="Kosongkan untuk semua baris"
+                                  onChange={(e) => handleUpdateCellOverride(override.id, "barisEnd", e.target.value ? parseInt(e.target.value) : null)}
                                   className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
                                 />
                               </div>
                             </div>
-                            <button
-                              onClick={() => handleRemoveCustomCell(index)}
-                              className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-xs text-slate-600">Custom Baris Count (NULL = default)</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={override.customBarisCount || ""}
+                                  placeholder="Kosongkan untuk default"
+                                  onChange={(e) => handleUpdateCellOverride(override.id, "customBarisCount", e.target.value ? parseInt(e.target.value) : null)}
+                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs text-slate-600">Custom Pallet Level (NULL = default)</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={override.customPalletLevel || ""}
+                                  placeholder="Kosongkan untuk default"
+                                  onChange={(e) => handleUpdateCellOverride(override.id, "customPalletLevel", e.target.value ? parseInt(e.target.value) : null)}
+                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-xs text-slate-600">Area Transit</label>
+                                <select
+                                  value={override.isTransitArea ? "true" : "false"}
+                                  onChange={(e) => handleUpdateCellOverride(override.id, "isTransitArea", e.target.value === "true")}
+                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
+                                >
+                                  <option value="false">Tidak</option>
+                                  <option value="true">Ya</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-xs text-slate-600">Disabled</label>
+                                <select
+                                  value={override.isDisabled ? "true" : "false"}
+                                  onChange={(e) => handleUpdateCellOverride(override.id, "isDisabled", e.target.value === "true")}
+                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
+                                >
+                                  <option value="false">Tidak</option>
+                                  <option value="true">Ya</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-xs text-slate-600">Catatan</label>
+                              <textarea
+                                value={override.note}
+                                onChange={(e) => handleUpdateCellOverride(override.id, "note", e.target.value)}
+                                placeholder="Alasan override..."
+                                className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
+                                rows={2}
+                              />
+                            </div>
+                            <div className="flex justify-end">
+                              <button
+                                onClick={() => handleRemoveCellOverride(override.id)}
+                                className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         ) : (
-                          <div className="text-sm text-slate-700">
-                            <span className="font-semibold">
-                              Lorong {config.lorongRange[0]}-{config.lorongRange[1]}, 
-                              Baris {config.barisRange[0]}-{config.barisRange[1]}
-                            </span>
-                            {": "}
-                            <span>{config.palletPerSel} Pallet/Sel</span>
+                          <div className="text-sm text-slate-700 space-y-1">
+                            <div className="font-semibold">
+                              Lorong {override.lorongStart}-{override.lorongEnd}
+                              {override.barisStart && override.barisEnd && `, Baris ${override.barisStart}-${override.barisEnd}`}
+                              {!override.barisStart && !override.barisEnd && ", Semua Baris"}
+                            </div>
+                            <div className="flex gap-4 text-xs">
+                              {override.customBarisCount && <span>Baris: {override.customBarisCount}</span>}
+                              {override.customPalletLevel && <span>Pallet: {override.customPalletLevel}</span>}
+                              {override.isTransitArea && <span className="text-orange-600 font-semibold">TRANSIT AREA</span>}
+                              {override.isDisabled && <span className="text-red-600 font-semibold">DISABLED</span>}
+                            </div>
+                            {override.note && <div className="text-xs text-slate-500 italic">{override.note}</div>}
                           </div>
                         )}
                       </div>
                     ))}
-                    {(!displayCluster.customCellConfig || displayCluster.customCellConfig.length === 0) && (
+                    {getClusterOverrides(displayCluster?.id || "").length === 0 && (
                       <p className="text-sm text-slate-500 text-center py-2">
-                        Belum ada custom cell configuration
+                        Belum ada cell overrides untuk cluster ini
                       </p>
                     )}
                   </div>
-                </div>
-
-                {/* In Transit Area */}
-                <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                  <h4 className="font-semibold text-orange-900 mb-3">
-                    In Transit Area Configuration
-                  </h4>
-                  <p className="text-xs text-orange-700 mb-3">
-                    Area In Transit adalah zona buffer/overflow untuk produk yang tidak muat di lokasi home-nya.
-                  </p>
-                  {editMode ? (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">
-                          Lorong Start (In Transit)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={editData?.inTransitLorongRange?.[0] || ""}
-                          placeholder="Kosongkan jika tidak ada"
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (isNaN(val) || val === 0) {
-                              const { inTransitLorongRange: omit, ...rest } = editData!;
-                              void omit;
-                              setEditData(rest as ClusterConfig);
-                            } else {
-                              setEditData({
-                                ...editData!,
-                                inTransitLorongRange: [val, editData?.inTransitLorongRange?.[1] || val] as [number, number],
-                              });
-                            }
-                          }}
-                          className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">
-                          Lorong End (In Transit)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={editData?.inTransitLorongRange?.[1] || ""}
-                          placeholder="Kosongkan jika tidak ada"
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (isNaN(val) || val === 0) {
-                              const { inTransitLorongRange: omit2, ...rest } = editData!;
-                              void omit2;
-                              setEditData(rest as ClusterConfig);
-                            } else {
-                              setEditData({
-                                ...editData!,
-                                inTransitLorongRange: [editData?.inTransitLorongRange?.[0] || val, val] as [number, number],
-                              });
-                            }
-                          }}
-                          className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      {displayCluster.inTransitLorongRange && displayCluster.inTransitLorongRange[0] > 0 ? (
-                        <div className="p-3 bg-orange-100 border border-orange-300 rounded-lg">
-                          <p className="text-sm font-semibold text-orange-900">
-                            ✅ In Transit Area: Lorong {displayCluster.inTransitLorongRange[0]} - {displayCluster.inTransitLorongRange[1]}
-                          </p>
-                        </div>
-                      ) : (
-                        <p className="text-sm text-slate-500">Tidak ada area in transit</p>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -741,8 +558,8 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                   <input
                     type="text"
                     maxLength={1}
-                    value={formData.cluster}
-                    onChange={(e) => setFormData({ ...formData, cluster: e.target.value.toUpperCase() })}
+                    value={formData.clusterChar}
+                    onChange={(e) => setFormData({ ...formData, clusterChar: e.target.value.toUpperCase() })}
                     className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
                     placeholder="A"
                   />
@@ -800,274 +617,14 @@ export default function ClusterConfigEditor({ clusters, onUpdate }: ClusterConfi
                     <input
                       type="number"
                       min="1"
-                      value={formData.defaultPalletPerSel}
+                      value={formData.defaultPalletLevel}
                       onChange={(e) =>
-                        setFormData({ ...formData, defaultPalletPerSel: parseInt(e.target.value) || 0 })
+                        setFormData({ ...formData, defaultPalletLevel: parseInt(e.target.value) || 0 })
                       }
                       className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
                     />
                   </div>
                 </div>
-              </div>
-
-              {/* Custom Lorong Config */}
-              <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h4 className="font-semibold text-purple-900">Custom Lorong Configuration</h4>
-                  <button
-                    onClick={addCustomLorongConfig}
-                    className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700"
-                  >
-                    + Tambah
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {formData.customLorongConfig?.map((config, index) => (
-                    <div key={index} className="flex gap-3 items-center bg-white p-3 rounded-lg">
-                      <div className="flex-1 grid grid-cols-4 gap-2">
-                        <div>
-                          <label className="text-xs text-slate-600">Lorong Dari</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={config.lorongRange[0]}
-                            onChange={(e) => {
-                              const newConfigs = [...(formData.customLorongConfig || [])];
-                              newConfigs[index].lorongRange[0] = parseInt(e.target.value) || 1;
-                              setFormData({ ...formData, customLorongConfig: newConfigs });
-                            }}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-600">Lorong Sampai</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={config.lorongRange[1]}
-                            onChange={(e) => {
-                              const newConfigs = [...(formData.customLorongConfig || [])];
-                              newConfigs[index].lorongRange[1] = parseInt(e.target.value) || 1;
-                              setFormData({ ...formData, customLorongConfig: newConfigs });
-                            }}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-600">Jumlah Baris</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={config.barisCount}
-                            onChange={(e) => {
-                              const newConfigs = [...(formData.customLorongConfig || [])];
-                              newConfigs[index].barisCount = parseInt(e.target.value) || 1;
-                              setFormData({ ...formData, customLorongConfig: newConfigs });
-                            }}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-600">Pallet/Sel (optional)</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={config.palletPerSel || ""}
-                            placeholder="Default"
-                            onChange={(e) => {
-                              const newConfigs = [...(formData.customLorongConfig || [])];
-                              newConfigs[index].palletPerSel = parseInt(e.target.value) || undefined;
-                              setFormData({ ...formData, customLorongConfig: newConfigs });
-                            }}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                          />
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => removeCustomLorongConfig(index)}
-                        className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  {(!formData.customLorongConfig || formData.customLorongConfig.length === 0) && (
-                    <p className="text-sm text-slate-500 text-center py-2">
-                      Belum ada custom lorong configuration
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Custom Cell Config */}
-              <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h4 className="font-semibold text-green-900">Custom Cell Configuration</h4>
-                  <button
-                    onClick={addCustomCellConfig}
-                    className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700"
-                  >
-                    + Tambah
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {formData.customCellConfig?.map((config, index) => (
-                    <div key={index} className="flex gap-3 items-center bg-white p-3 rounded-lg">
-                      <div className="flex-1 grid grid-cols-5 gap-2">
-                        <div>
-                          <label className="text-xs text-slate-600">Lorong Dari</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={config.lorongRange[0]}
-                            onChange={(e) => {
-                              const newConfigs = [...(formData.customCellConfig || [])];
-                              newConfigs[index].lorongRange[0] = parseInt(e.target.value) || 1;
-                              setFormData({ ...formData, customCellConfig: newConfigs });
-                            }}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-600">Lorong Sampai</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={config.lorongRange[1]}
-                            onChange={(e) => {
-                              const newConfigs = [...(formData.customCellConfig || [])];
-                              newConfigs[index].lorongRange[1] = parseInt(e.target.value) || 1;
-                              setFormData({ ...formData, customCellConfig: newConfigs });
-                            }}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-600">Baris Dari</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={config.barisRange[0]}
-                            onChange={(e) => {
-                              const newConfigs = [...(formData.customCellConfig || [])];
-                              newConfigs[index].barisRange[0] = parseInt(e.target.value) || 1;
-                              setFormData({ ...formData, customCellConfig: newConfigs });
-                            }}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-600">Baris Sampai</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={config.barisRange[1]}
-                            onChange={(e) => {
-                              const newConfigs = [...(formData.customCellConfig || [])];
-                              newConfigs[index].barisRange[1] = parseInt(e.target.value) || 1;
-                              setFormData({ ...formData, customCellConfig: newConfigs });
-                            }}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-600">Pallet/Sel</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={config.palletPerSel}
-                            onChange={(e) => {
-                              const newConfigs = [...(formData.customCellConfig || [])];
-                              newConfigs[index].palletPerSel = parseInt(e.target.value) || 1;
-                              setFormData({ ...formData, customCellConfig: newConfigs });
-                            }}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm"
-                          />
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => removeCustomCellConfig(index)}
-                        className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  {(!formData.customCellConfig || formData.customCellConfig.length === 0) && (
-                    <p className="text-sm text-slate-500 text-center py-2">
-                      Belum ada custom cell configuration
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* In Transit Area */}
-              <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                <h4 className="font-semibold text-orange-900 mb-3">
-                  In Transit Area Configuration (Opsional)
-                </h4>
-                <p className="text-xs text-orange-700 mb-3">
-                  Area In Transit adalah zona buffer/overflow untuk produk yang tidak muat di lokasi home-nya.
-                </p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Lorong Start (In Transit)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.inTransitLorongRange?.[0] || ""}
-                      placeholder="Kosongkan jika tidak ada"
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val) || val === 0) {
-                          const { inTransitLorongRange: omit3, ...rest } = formData;
-                          void omit3;
-                          setFormData(rest);
-                        } else {
-                          setFormData({
-                            ...formData,
-                            inTransitLorongRange: [val, formData.inTransitLorongRange?.[1] || val] as [number, number],
-                          });
-                        }
-                      }}
-                      className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Lorong End (In Transit)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.inTransitLorongRange?.[1] || ""}
-                      placeholder="Kosongkan jika tidak ada"
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val) || val === 0) {
-                          const { inTransitLorongRange: omit4, ...rest } = formData;
-                          void omit4;
-                          setFormData(rest);
-                        } else {
-                          setFormData({
-                            ...formData,
-                            inTransitLorongRange: [formData.inTransitLorongRange?.[0] || val, val] as [number, number],
-                          });
-                        }
-                      }}
-                      className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500"
-                    />
-                  </div>
-                </div>
-                {formData.inTransitLorongRange && formData.inTransitLorongRange[0] > 0 && (
-                  <div className="mt-3 p-3 bg-orange-100 border border-orange-300 rounded-lg">
-                    <p className="text-sm font-semibold text-orange-900">
-                      ✅ In Transit Area: Lorong {formData.inTransitLorongRange[0]} - {formData.inTransitLorongRange[1]}
-                    </p>
-                  </div>
-                )}
               </div>
             </div>
 

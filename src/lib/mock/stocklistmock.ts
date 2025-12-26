@@ -9,27 +9,38 @@ import { productMasterData } from "@/lib/mock/product-master";
 import { validateProductLocation, isInTransitLocation } from "@/lib/mock/warehouse-config";
 // --- END: Perubahan Import ---
 
+// Stock Item Interface - Aligned with database schema stock_list table
 export interface StockItem {
-  id: string;
-  productCode: string;
-  productName: string;
-  bbPallet: string | string[];      // BB Pallet - bisa array untuk receh dengan multiple BB
-  batchNumber: string;   // Kept for compatibility
-  lotNumber: string;
-  location: {
-    cluster: string; 
-    lorong: string;  
-    baris: string;   
-    level: string;   
-  };
-  qtyPallet: number; // Jumlah tumpukan pallet di lokasi rak (max 3 untuk full pallet)
-  qtyCarton: number; // Total karton/box (menggunakan qtyPerPallet dari Master)
-  qtyPcs: number; // Total pcs/unit
-  expiredDate: string;
-  inboundDate: string;
-  status: "available" | "hold" | "release" | "receh" | "salah-cluster";
-  isReceh?: boolean; // Flag untuk pallet receh (tidak penuh)
-  notes?: string;
+  id: string; // UUID
+  warehouseId: string; // UUID - reference to warehouses.id
+  productId: string; // UUID - reference to products.id
+  
+  // Identifikasi - BB Produk WAJIB (10 digit, TIDAK BOLEH LEBIH)
+  bbProduk: string; // varchar(10) - Format: YYMMDDXXXX
+  
+  // Lokasi Fisik - separate fields (NOT nested object)
+  cluster: string; // char(1)
+  lorong: number; // integer
+  baris: number; // integer
+  level: number; // integer
+  
+  // Quantity
+  qtyPallet: number; // integer
+  qtyCarton: number; // integer
+  
+  // Status & Dates
+  expiredDate: string; // date (ISO format)
+  inboundDate: string; // date (ISO format)
+  status: "release" | "hold" | "receh" | "salah-cluster"; // varchar(20)
+  
+  // Receh tracking
+  isReceh: boolean; // boolean
+  parentStockId: string | null; // UUID - reference to stock_list.id for receh parent
+  
+  // Audit
+  createdBy: string | null; // UUID - reference to users.id
+  createdAt: string; // timestamp (ISO format)
+  updatedAt: string; // timestamp (ISO format)
 }
 
 // Helper function untuk generate random date berdasarkan hari ini (16 Des 2025)
@@ -53,9 +64,9 @@ function getInboundDate(): string {
   return date.toISOString().split('T')[0];
 }
 
-// Helper function untuk generate BB Pallet berdasarkan expired date
+// Helper function untuk generate BB Produk berdasarkan expired date
 // Format: YYMMDDXXXX (contoh: 2509010001)
-function generateBBPallet(expiredDate: string, plantCode: string): string {
+function generateBBProduk(expiredDate: string, plantCode: string): string {
   const expDate = new Date(expiredDate);
   const yy = String(expDate.getFullYear()).slice(-2); // 25 dari 2025
   const mm = String(expDate.getMonth() + 1).padStart(2, '0'); // 01-12
@@ -72,10 +83,10 @@ let idCounter = 1;
 
 // Helper untuk generate stock item
 function addStockItem(
-  cluster: string,
+  clusterChar: string,
   lorong: number,
   baris: number,
-  pallet: number,
+  level: number,
   productCode: string,
   expDaysFrom: number,
   expDaysTo: number
@@ -84,66 +95,60 @@ function addStockItem(
   if (!product) return;
 
   const qtyPallet = 1;
-  const qtyCarton = qtyPallet * product.qtyPerPallet;
-  const qtyPcs = qtyCarton * product.qtyPerCarton;
+  const qtyCarton = qtyPallet * product.qtyCartonPerPallet;
   
   const expiredDate = getRandomDate(expDaysFrom, expDaysTo);
   const plantCode = String(idCounter).padStart(4, '0');
-  const bbPallet = generateBBPallet(expiredDate, plantCode);
+  const bbProduk = generateBBProduk(expiredDate, plantCode);
   
-  const expDate = new Date(expiredDate);
-  const batchMonth = String(expDate.getMonth() + 1).padStart(2, '0');
-  const batchYear = expDate.getFullYear();
-  const batchSeq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
-  const batchNumber = `BATCH-${batchYear}${batchMonth}-${batchSeq}`;
-  const lotNumber = `LOT-${batchYear}${batchMonth}-${batchSeq}`;
+  const now = new Date().toISOString();
   
   stockListData.push({
-    id: `STK-${String(idCounter).padStart(5, '0')}`,
-    productCode: product.productCode,
-    productName: product.productName,
-    bbPallet,
-    batchNumber,
-    lotNumber,
-    location: {
-      cluster,
-      lorong: `L${lorong}`,
-      baris: `B${baris}`,
-      level: `P${pallet}`,
-    },
+    id: `stock-${String(idCounter).padStart(5, '0')}`, // UUID format in real DB
+    warehouseId: "wh-001-cikarang", // UUID reference
+    productId: product.id, // UUID reference from product master
+    bbProduk, // varchar(10) - YYMMDDXXXX format
+    cluster: clusterChar, // char(1)
+    lorong, // integer
+    baris, // integer
+    level, // integer (not "P1" string)
     qtyPallet,
     qtyCarton,
-    qtyPcs,
     expiredDate,
     inboundDate: getInboundDate(),
-    status: "available", // Will be updated dynamically
+    status: "release", // Will be updated dynamically
     isReceh: false, // Will be updated if partial pallet
+    parentStockId: null, // NULL for non-receh items
+    createdBy: "user-001-admin", // UUID reference to admin user
+    createdAt: now,
+    updatedAt: now,
   });
   
   idCounter++;
 }
 
 // Function to calculate dynamic status based on expired date and cluster validation
-const calculateDynamicStatus = (stock: StockItem): "available" | "hold" | "release" | "receh" | "salah-cluster" => {
-  const lorongNum = parseInt(stock.location.lorong.replace("L", ""));
+const calculateDynamicStatus = (stock: StockItem): "release" | "hold" | "receh" | "salah-cluster" => {
+  // Check if receh first
+  if (stock.isReceh) {
+    return "receh";
+  }
+  
+  // Get product info for validation
+  const product = productMasterData.find(p => p.id === stock.productId);
+  if (!product) return "hold";
   
   // Check if In Transit area
-  const inTransit = isInTransitLocation(stock.location.cluster, lorongNum);
+  const inTransit = isInTransitLocation(stock.cluster, stock.lorong);
   if (inTransit) {
-    return "salah-cluster"; // In Transit considered as wrong location for visual consistency
+    return "salah-cluster"; // In Transit considered as wrong location
   }
   
   // Check if product is in wrong cluster
-  const barisNum = parseInt(stock.location.baris.replace("B", ""));
-  const validation = validateProductLocation(stock.productCode, stock.location.cluster, lorongNum, barisNum);
+  const validation = validateProductLocation(product.productCode, stock.cluster, stock.lorong, stock.baris);
   
   if (!validation.isValid) {
-    return "salah-cluster";
-  }
-  
-  // Check if receh (partial pallet)
-  if (stock.isReceh) {
-    return "receh";
+    return "salah-cluster"; // Wrong location = salah-cluster status
   }
   
   // Calculate days to expiry for RELEASE vs HOLD
@@ -449,260 +454,283 @@ for (let baris = 1; baris <= 5; baris++) {
 
 // --- START: Manual Receh Data dengan Multiple BB ---
 // Tambahkan beberapa contoh receh dengan multiple BB untuk testing dan visualisasi
+// Note: In real database, multiple BB would be separate records with same parent_stock_id
 
-// Receh 1: Cluster A, L3, B1, P1 - Multiple BB dari batch berbeda (RELEASE - expired dekat)
-const receh1ExpDate = getRandomDate(20, 45); // 20-45 hari dari sekarang (VERY CLOSE)
-stockListData.push({
-  id: `STK-RECEH-001`,
-  productCode: "142009",
-  productName: "1100ML AQUA LOCAL 1X12 BARCODE ON CAP",
-  bbPallet: [
-    generateBBPallet(getRandomDate(20, 30), "0101"), 
-    generateBBPallet(getRandomDate(25, 35), "0102"), 
-    generateBBPallet(getRandomDate(30, 40), "0103")
-  ], // Multiple BB dengan expired berbeda
-  batchNumber: "BATCH-202602-101",
-  lotNumber: "LOT-202602-101",
-  location: {
+// Receh 1: Cluster A, L3, B1, Level 1 - RELEASE (expired dekat)
+const receh1ExpDate = getRandomDate(20, 45); // 20-45 hari dari sekarang
+const receh1Product = productMasterData.find(p => p.productCode === "142009");
+if (receh1Product) {
+  const now = new Date().toISOString();
+  const receh1ParentId = `stock-receh-001-parent`;
+  
+  // Parent stock (main receh pallet)
+  stockListData.push({
+    id: receh1ParentId,
+    warehouseId: "wh-001-cikarang",
+    productId: receh1Product.id,
+    bbProduk: generateBBProduk(getRandomDate(20, 30), "0101"),
     cluster: "A",
-    lorong: "L3",
-    baris: "B1",
-    level: "P1",
-  },
-  qtyPallet: 1,
-  qtyCarton: 25, // Kurang dari standard (42 karton per pallet)
-  qtyPcs: 300,
-  expiredDate: receh1ExpDate,
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: true,
-  notes: "Pallet receh dengan 3 BB berbeda (produk sama) - RELEASE",
-});
+    lorong: 3,
+    baris: 1,
+    level: 1,
+    qtyPallet: 1,
+    qtyCarton: 25, // Kurang dari standard (42 karton per pallet)
+    expiredDate: receh1ExpDate,
+    inboundDate: getInboundDate(),
+    status: "release",
+    isReceh: true,
+    parentStockId: null, // This is the parent
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
-// Receh 2: Cluster B, L3, B2, P2 - Multiple BB (HOLD - expired masih lama)
-const receh2ExpDate = getRandomDate(150, 180); // 150-180 hari dari sekarang (YELLOW)
-stockListData.push({
-  id: `STK-RECEH-002`,
-  productCode: "74553",
-  productName: "1500ML AQUA LOCAL 1X12",
-  bbPallet: [
-    generateBBPallet(getRandomDate(150, 160), "0201"), 
-    generateBBPallet(getRandomDate(160, 170), "0202")
-  ], // Multiple BB
-  batchNumber: "BATCH-202605-201",
-  lotNumber: "LOT-202605-201",
-  location: {
+// Receh 2: Cluster B, L3, B2, Level 2 - HOLD (expired masih lama)
+const receh2ExpDate = getRandomDate(150, 180); // 150-180 hari dari sekarang
+const receh2Product = productMasterData.find(p => p.productCode === "74553");
+if (receh2Product) {
+  const now = new Date().toISOString();
+  
+  stockListData.push({
+    id: `stock-receh-002`,
+    warehouseId: "wh-001-cikarang",
+    productId: receh2Product.id,
+    bbProduk: generateBBProduk(getRandomDate(150, 160), "0201"),
     cluster: "B",
-    lorong: "L3",
-    baris: "B2",
-    level: "P2",
-  },
-  qtyPallet: 1,
-  qtyCarton: 50, // Kurang dari standard (70 karton per pallet)
-  qtyPcs: 600,
-  expiredDate: receh2ExpDate,
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: true,
-  notes: "Pallet receh dengan 2 BB berbeda (produk sama) - HOLD",
-});
+    lorong: 3,
+    baris: 2,
+    level: 2,
+    qtyPallet: 1,
+    qtyCarton: 50, // Kurang dari standard (70 karton per pallet)
+    expiredDate: receh2ExpDate,
+    inboundDate: getInboundDate(),
+    status: "hold",
+    isReceh: true,
+    parentStockId: null,
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
-// Receh 3: Cluster C, L3, B3, P1 - Single BB (RELEASE - expired dekat)
-const receh3ExpDate = getRandomDate(90, 120); // 90-120 hari dari sekarang (GREEN)
-stockListData.push({
-  id: `STK-RECEH-003`,
-  productCode: "74589",
-  productName: "1500ML AQUA LOCAL MULTIPACK 1X6",
-  bbPallet: generateBBPallet(receh3ExpDate, "0301"), // Single BB
-  batchNumber: "BATCH-202603-301",
-  lotNumber: "LOT-202603-301",
-  location: {
+// Receh 3: Cluster C, L3, B3, Level 1 - RELEASE (expired dekat)
+const receh3ExpDate = getRandomDate(90, 120); // 90-120 hari dari sekarang
+const receh3Product = productMasterData.find(p => p.productCode === "74589");
+if (receh3Product) {
+  const now = new Date().toISOString();
+  
+  stockListData.push({
+    id: `stock-receh-003`,
+    warehouseId: "wh-001-cikarang",
+    productId: receh3Product.id,
+    bbProduk: generateBBProduk(receh3ExpDate, "0301"),
     cluster: "C",
-    lorong: "L3",
-    baris: "B3",
-    level: "P1",
-  },
-  qtyPallet: 1,
-  qtyCarton: 80, // Kurang dari standard (112 karton per pallet)
-  qtyPcs: 480,
-  expiredDate: receh3ExpDate,
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: true,
-  notes: "Pallet receh dengan single BB - RELEASE",
-});
+    lorong: 3,
+    baris: 3,
+    level: 1,
+    qtyPallet: 1,
+    qtyCarton: 80, // Kurang dari standard (112 karton per pallet)
+    expiredDate: receh3ExpDate,
+    inboundDate: getInboundDate(),
+    status: "release",
+    isReceh: true,
+    parentStockId: null,
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 // --- END: Manual Receh Data ---
 
 // --- START: Data untuk Produk Baru ---
 // TISSUE AQUA V.4 (10481618) - Qty/Pallet = 0 (tidak ada setting cluster, letakkan di Cluster B)
-stockListData.push({
-  id: `STK-NEW-001`,
-  productCode: "10481618",
-  productName: "TISSUE AQUA V.4",
-  bbPallet: generateBBPallet(getRandomDate(180, 365), "1001"),
-  batchNumber: "BATCH-202512-001",
-  lotNumber: "LOT-202512-001",
-  location: {
+const newProduct1 = productMasterData.find(p => p.productCode === "10481618");
+if (newProduct1) {
+  const now = new Date().toISOString();
+  stockListData.push({
+    id: `stock-new-001`,
+    warehouseId: "wh-001-cikarang",
+    productId: newProduct1.id,
+    bbProduk: generateBBProduk(getRandomDate(180, 365), "1001"),
     cluster: "B",
-    lorong: "L26",
-    baris: "B7",
-    level: "P1",
-  },
-  qtyPallet: 1,
-  qtyCarton: 0, // Belum diketahui
-  qtyPcs: 0,
-  expiredDate: getRandomDate(180, 365),
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: false,
-  notes: "Produk baru - Qty/Pallet belum ditentukan",
-});
+    lorong: 26,
+    baris: 7,
+    level: 1,
+    qtyPallet: 1,
+    qtyCarton: 0, // Belum diketahui
+    expiredDate: getRandomDate(180, 365),
+    inboundDate: getInboundDate(),
+    status: "release",
+    isReceh: false,
+    parentStockId: null,
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 // JUG AQUA 19L PC 55 MM (10516937) - Qty = 48
-stockListData.push({
-  id: `STK-NEW-002`,
-  productCode: "10516937",
-  productName: "JUG AQUA 19L PC 55 MM",
-  bbPallet: generateBBPallet(getRandomDate(90, 180), "1002"),
-  batchNumber: "BATCH-202512-002",
-  lotNumber: "LOT-202512-002",
-  location: {
+const newProduct2 = productMasterData.find(p => p.productCode === "10516937");
+if (newProduct2) {
+  const now = new Date().toISOString();
+  stockListData.push({
+    id: `stock-new-002`,
+    warehouseId: "wh-001-cikarang",
+    productId: newProduct2.id,
+    bbProduk: generateBBProduk(getRandomDate(90, 180), "1002"),
     cluster: "D",
-    lorong: "L3",
-    baris: "B1",
-    level: "P1",
-  },
-  qtyPallet: 1,
-  qtyCarton: 48,
-  qtyPcs: 48,
-  expiredDate: getRandomDate(90, 180),
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: false,
-  notes: "JUG AQUA 19L - Qty 48 per pallet",
-});
+    lorong: 3,
+    baris: 1,
+    level: 1,
+    qtyPallet: 1,
+    qtyCarton: 48,
+    expiredDate: getRandomDate(90, 180),
+    inboundDate: getInboundDate(),
+    status: "release",
+    isReceh: false,
+    parentStockId: null,
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 // JUG VIT 19L PC 55 MM (10516939) - Qty = 48
-stockListData.push({
-  id: `STK-NEW-003`,
-  productCode: "10516939",
-  productName: "JUG VIT 19L PC 55 MM",
-  bbPallet: generateBBPallet(getRandomDate(90, 180), "1003"),
-  batchNumber: "BATCH-202512-003",
-  lotNumber: "LOT-202512-003",
-  location: {
+const newProduct3 = productMasterData.find(p => p.productCode === "10516939");
+if (newProduct3) {
+  const now = new Date().toISOString();
+  stockListData.push({
+    id: `stock-new-003`,
+    warehouseId: "wh-001-cikarang",
+    productId: newProduct3.id,
+    bbProduk: generateBBProduk(getRandomDate(90, 180), "1003"),
     cluster: "E",
-    lorong: "L3",
-    baris: "B1",
-    level: "P1",
-  },
-  qtyPallet: 1,
-  qtyCarton: 48,
-  qtyPcs: 48,
-  expiredDate: getRandomDate(90, 180),
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: false,
-  notes: "JUG VIT 19L - Qty 48 per pallet",
-});
+    lorong: 3,
+    baris: 1,
+    level: 1,
+    qtyPallet: 1,
+    qtyCarton: 48,
+    expiredDate: getRandomDate(90, 180),
+    inboundDate: getInboundDate(),
+    status: "release",
+    isReceh: false,
+    parentStockId: null,
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 // 380ML AQUA SPARKLING BAL 1X12 (174137) - Produk duplikat
-stockListData.push({
-  id: `STK-NEW-004`,
-  productCode: "174137",
-  productName: "380ML AQUA SPARKLING BAL 1X12",
-  bbPallet: generateBBPallet(getRandomDate(150, 360), "1004"),
-  batchNumber: "BATCH-202512-004",
-  lotNumber: "LOT-202512-004",
-  location: {
+const newProduct4 = productMasterData.find(p => p.productCode === "174137");
+if (newProduct4) {
+  const now = new Date().toISOString();
+  stockListData.push({
+    id: `stock-new-004`,
+    warehouseId: "wh-001-cikarang",
+    productId: newProduct4.id,
+    bbProduk: generateBBProduk(getRandomDate(150, 360), "1004"),
     cluster: "B",
-    lorong: "L26",
-    baris: "B8",
-    level: "P1",
-  },
-  qtyPallet: 1,
-  qtyCarton: 90,
-  qtyPcs: 1080,
-  expiredDate: getRandomDate(150, 360),
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: false,
-});
+    lorong: 26,
+    baris: 8,
+    level: 1,
+    qtyPallet: 1,
+    qtyCarton: 90,
+    expiredDate: getRandomDate(150, 360),
+    inboundDate: getInboundDate(),
+    status: "release",
+    isReceh: false,
+    parentStockId: null,
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 // --- END: Data untuk Produk Baru ---
 
 // --- START: Manual Wrong Cluster Data (Salah Cluster) ---
-// Add some products in wrong clusters for testing status "salah-cluster"
+// Add some products in wrong clusters for testing status validation
 
 // 1. Put 600ML (should be in Cluster A L6-11) in Cluster B
-stockListData.push({
-  id: `STK-WRONG-001`,
-  productCode: "74561",
-  productName: "600ML AQUA LOCAL 1X24",
-  bbPallet: generateBBPallet(getRandomDate(80, 120), "0102"),
-  batchNumber: "BATCH-202603-102",
-  lotNumber: "LOT-202603-102",
-  location: {
+const wrongProduct1 = productMasterData.find(p => p.productCode === "74561");
+if (wrongProduct1) {
+  const now = new Date().toISOString();
+  stockListData.push({
+    id: `stock-wrong-001`,
+    warehouseId: "wh-001-cikarang",
+    productId: wrongProduct1.id,
+    bbProduk: generateBBProduk(getRandomDate(80, 120), "0102"),
     cluster: "B", // Wrong! Should be in A L6-11
-    lorong: "L4",
-    baris: "B5",
-    level: "P1",
-  },
-  qtyPallet: 1,
-  qtyCarton: 40,
-  qtyPcs: 960,
-  expiredDate: getRandomDate(80, 120),
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: false,
-});
+    lorong: 4,
+    baris: 5,
+    level: 1,
+    qtyPallet: 1,
+    qtyCarton: 40,
+    expiredDate: getRandomDate(80, 120),
+    inboundDate: getInboundDate(),
+    status: "hold", // Will be validated
+    isReceh: false,
+    parentStockId: null,
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 // 2. Put 1500ML (should be in Cluster B) in Cluster C
-stockListData.push({
-  id: `STK-WRONG-002`,
-  productCode: "74553",
-  productName: "1500ML AQUA LOCAL 1X12",
-  bbPallet: generateBBPallet(getRandomDate(60, 90), "0203"),
-  batchNumber: "BATCH-202602-203",
-  lotNumber: "LOT-202602-203",
-  location: {
+const wrongProduct2 = productMasterData.find(p => p.productCode === "74553");
+if (wrongProduct2) {
+  const now = new Date().toISOString();
+  stockListData.push({
+    id: `stock-wrong-002`,
+    warehouseId: "wh-001-cikarang",
+    productId: wrongProduct2.id,
+    bbProduk: generateBBProduk(getRandomDate(60, 90), "0203"),
     cluster: "C", // Wrong! Should be in B
-    lorong: "L2",
-    baris: "B3",
-    level: "P2",
-  },
-  qtyPallet: 1,
-  qtyCarton: 70,
-  qtyPcs: 840,
-  expiredDate: getRandomDate(60, 90),
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: false,
-});
+    lorong: 2,
+    baris: 3,
+    level: 2,
+    qtyPallet: 1,
+    qtyCarton: 70,
+    expiredDate: getRandomDate(60, 90),
+    inboundDate: getInboundDate(),
+    status: "hold", // Will be validated
+    isReceh: false,
+    parentStockId: null,
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 // 3. Put Mizone ACTIV (should be in Cluster C) in Cluster A
-stockListData.push({
-  id: `STK-WRONG-003`,
-  productCode: "145141",
-  productName: "500ML MIZONE ACTIV LYCHEE LEMON 1X12",
-  bbPallet: generateBBPallet(getRandomDate(100, 150), "0301"),
-  batchNumber: "BATCH-202604-301",
-  lotNumber: "LOT-202604-301",
-  location: {
+const wrongProduct3 = productMasterData.find(p => p.productCode === "145141");
+if (wrongProduct3) {
+  const now = new Date().toISOString();
+  stockListData.push({
+    id: `stock-wrong-003`,
+    warehouseId: "wh-001-cikarang",
+    productId: wrongProduct3.id,
+    bbProduk: generateBBProduk(getRandomDate(100, 150), "0301"),
     cluster: "A", // Wrong! Should be in C
-    lorong: "L5",
-    baris: "B8",
-    level: "P2",
-  },
-  qtyPallet: 1,
-  qtyCarton: 84,
-  qtyPcs: 1008,
-  expiredDate: getRandomDate(100, 150),
-  inboundDate: getInboundDate(),
-  status: "available",
-  isReceh: false,
-});
+    lorong: 5,
+    baris: 8,
+    level: 2,
+    qtyPallet: 1,
+    qtyCarton: 84,
+    expiredDate: getRandomDate(100, 150),
+    inboundDate: getInboundDate(),
+    status: "hold", // Will be validated
+    isReceh: false,
+    parentStockId: null,
+    createdBy: "user-001-admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 // --- END: Manual Wrong Cluster Data ---
 
@@ -711,34 +739,34 @@ updateStockStatuses();
 
 export { stockListData };
 
-// Helper functions (Tidak perlu diubah)
+// Helper functions - Updated for new schema
 
-export const getStockByLocation = (cluster: string, lorong: string, baris: string, level: string): StockItem | undefined => {
+export const getStockByLocation = (cluster: string, lorong: number, baris: number, level: number): StockItem | undefined => {
   return stockListData.find(
-    s => s.location.cluster === cluster && 
-         s.location.lorong === lorong && 
-         s.location.baris === baris && 
-         s.location.level === level
+    s => s.cluster === cluster && 
+         s.lorong === lorong && 
+         s.baris === baris && 
+         s.level === level
   );
 };
 
-export const getStockByProduct = (productCode: string): StockItem[] => {
-  return stockListData.filter(s => s.productCode === productCode);
+export const getStockByProductId = (productId: string): StockItem[] => {
+  return stockListData.filter(s => s.productId === productId);
 };
 
 export const getStockByCluster = (cluster: string): StockItem[] => {
-  return stockListData.filter(s => s.location.cluster === cluster);
+  return stockListData.filter(s => s.cluster === cluster);
 };
 
 // Get available stock sorted by FEFO (First Expired First Out)
-// Available means: release, hold, or receh (excluding salah-cluster)
-export const getAvailableStockFEFO = (productCode?: string): StockItem[] => {
+// Available means: release, hold (excluding damaged and expired)
+export const getAvailableStockFEFO = (productId?: string): StockItem[] => {
   let stocks = stockListData.filter(s => 
-    s.status === "release" || s.status === "hold" || s.status === "receh"
+    s.status === "release" || s.status === "hold"
   );
   
-  if (productCode) {
-    stocks = stocks.filter(s => s.productCode === productCode);
+  if (productId) {
+    stocks = stocks.filter(s => s.productId === productId);
   }
   
   return stocks.sort((a, b) => {
@@ -753,21 +781,21 @@ export const getStockStats = () => {
   const totalItems = stockListData.length;
   const totalPallets = stockListData.reduce((sum, s) => sum + s.qtyPallet, 0);
   const totalCartons = stockListData.reduce((sum, s) => sum + s.qtyCarton, 0);
-  const totalPcs = stockListData.reduce((sum, s) => sum + s.qtyPcs, 0);
   
   const statusCount = {
-    available: stockListData.filter(s => s.status === "available").length,
-    hold: stockListData.filter(s => s.status === "hold").length,
     release: stockListData.filter(s => s.status === "release").length,
+    hold: stockListData.filter(s => s.status === "hold").length,
     receh: stockListData.filter(s => s.status === "receh").length,
     salahCluster: stockListData.filter(s => s.status === "salah-cluster").length,
   };
+  
+  const recehCount = stockListData.filter(s => s.isReceh).length;
   
   return {
     totalItems,
     totalPallets,
     totalCartons,
-    totalPcs,
     statusCount,
+    recehCount,
   };
 };

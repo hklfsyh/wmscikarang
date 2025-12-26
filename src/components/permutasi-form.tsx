@@ -3,9 +3,9 @@
 
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { stockListData, StockItem } from "@/lib/mock/stocklistmock";
-import { getProductByCode } from "@/lib/mock/product-master";
+import { getProductByCode, productMasterData } from "@/lib/mock/product-master";
 import {
   getClusterConfig,
   getBarisCountForLorong,
@@ -24,20 +24,21 @@ interface WrongLocationStock extends StockItem {
 }
 
 interface RecommendedLocation {
-  cluster: string;
+  clusterChar: string;
   lorong: string;
   baris: string;
   level: string;
 }
 
 export function PermutasiForm() {
+  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"salah-cluster" | "in-transit" | "history">("salah-cluster");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [itemToMove, setItemToMove] = useState<WrongLocationStock | null>(null);
   const [recommendedLocation, setRecommendedLocation] = useState<RecommendedLocation | null>(null);
   const [autoRecommend, setAutoRecommend] = useState(true);
-  const [manualLocation, setManualLocation] = useState({ cluster: "", lorong: "", baris: "", pallet: "" });
+  const [manualLocation, setManualLocation] = useState({ clusterChar: "", lorong: "", baris: "", pallet: "" });
   const [moveReason, setMoveReason] = useState("");
 
   // Modal states
@@ -58,20 +59,30 @@ export function PermutasiForm() {
   const success = (message: string) => showNotification("✅ Berhasil", message, "success");
   const error = (message: string) => showNotification("❌ Error", message, "error");
 
+  // Load warehouse context
+  useEffect(() => {
+    const userStr = localStorage.getItem("user");
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      setCurrentWarehouseId(user.warehouseId || null);
+    }
+  }, []);
+
   // Get wrong location stocks
   const wrongLocationStocks = useMemo((): WrongLocationStock[] => {
     const result: WrongLocationStock[] = [];
 
     stockListData.forEach((stock) => {
-      const lorongNum = parseInt(stock.location.lorong.replace("L", ""));
-      const barisNum = parseInt(stock.location.baris.replace("B", ""));
+      const lorongNum = stock.lorong;
+      const barisNum = stock.baris;
 
       // Check if In Transit
-      const inTransit = isInTransitLocation(stock.location.cluster, lorongNum);
+      const inTransit = isInTransitLocation(stock.cluster, lorongNum);
 
-      // Get product home
-      const productHome = getValidLocationsForProduct(stock.productCode);
-      const homeCluster = productHome?.cluster || getProductByCode(stock.productCode)?.defaultCluster || "?";
+      // Get product info
+      const product = productMasterData.find(p => p.id === stock.productId);
+      const productCode = product?.productCode || "UNKNOWN";
+      const homeCluster = product?.defaultCluster || "?";
 
       if (inTransit) {
         result.push({
@@ -81,7 +92,7 @@ export function PermutasiForm() {
         });
       } else {
         // Check if wrong cluster
-        const validation = validateProductLocation(stock.productCode, stock.location.cluster, lorongNum, barisNum);
+        const validation = validateProductLocation(productCode, stock.cluster, lorongNum, barisNum);
         if (!validation.isValid) {
           result.push({
             ...stock,
@@ -106,35 +117,35 @@ export function PermutasiForm() {
   }, [wrongLocationStocks, activeTab]);
 
   // Cluster & Location Options
-  const clusterOptions = useMemo(() => clusterConfigs.filter((c) => c.isActive).map((c) => c.cluster), []);
+  const clusterOptions = useMemo(() => clusterConfigs.filter((c) => c.isActive).map((c) => c.clusterChar), []);
 
   const lorongOptions = useMemo(() => {
-    if (!manualLocation.cluster) return [];
-    const config = getClusterConfig(manualLocation.cluster);
+    if (!manualLocation.clusterChar) return [];
+    const config = getClusterConfig(manualLocation.clusterChar);
     if (!config) return [];
     return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
-  }, [manualLocation.cluster]);
+  }, [manualLocation.clusterChar]);
 
   const barisOptions = useMemo(() => {
-    if (!manualLocation.cluster || !manualLocation.lorong) return [];
+    if (!manualLocation.clusterChar || !manualLocation.lorong) return [];
     const lorongNum = parseInt(manualLocation.lorong.replace("L", ""));
-    const barisCount = getBarisCountForLorong(manualLocation.cluster, lorongNum);
+    const barisCount = getBarisCountForLorong(manualLocation.clusterChar, lorongNum);
     return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
-  }, [manualLocation.cluster, manualLocation.lorong]);
+  }, [manualLocation.clusterChar, manualLocation.lorong]);
 
   const palletOptions = useMemo(() => {
-    if (!manualLocation.cluster || !manualLocation.lorong || !manualLocation.baris) return [];
+    if (!manualLocation.clusterChar || !manualLocation.lorong || !manualLocation.baris) return [];
     const lorongNum = parseInt(manualLocation.lorong.replace("L", ""));
     const barisNum = parseInt(manualLocation.baris.replace("B", ""));
-    const palletCapacity = getPalletCapacityForCell(manualLocation.cluster, lorongNum, barisNum);
+    const palletCapacity = getPalletCapacityForCell(manualLocation.clusterChar, lorongNum, barisNum);
     return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
-  }, [manualLocation.cluster, manualLocation.lorong, manualLocation.baris]);
+  }, [manualLocation.clusterChar, manualLocation.lorong, manualLocation.baris]);
 
   // Find recommended location for a product
   const findRecommendedLocation = (productCode: string): RecommendedLocation | null => {
     const productHome = getValidLocationsForProduct(productCode);
     const product = getProductByCode(productCode);
-    const cluster = productHome?.cluster || product?.defaultCluster || "";
+    const cluster = productHome?.clusterChar || product?.defaultCluster || "";
 
     if (!cluster) return null;
 
@@ -163,14 +174,14 @@ export function PermutasiForm() {
 
           const locationExists = stockListData.some(
             (item) =>
-              item.location.cluster === cluster &&
-              item.location.lorong === lorong &&
-              item.location.baris === baris &&
-              item.location.level === level
+              item.cluster === cluster &&
+              item.lorong === parseInt(lorong.replace('L', '')) &&
+              item.baris === parseInt(baris.replace('B', '')) &&
+              item.level === parseInt(level.replace('P', ''))
           );
 
           if (!locationExists) {
-            return { cluster, lorong, baris, level };
+            return { clusterChar: cluster, lorong, baris, level };
           }
         }
       }
@@ -203,7 +214,7 @@ export function PermutasiForm() {
   const openMoveModal = (stock: WrongLocationStock) => {
     setItemToMove(stock);
     setAutoRecommend(true);
-    setManualLocation({ cluster: stock.homeCluster, lorong: "", baris: "", pallet: "" });
+    setManualLocation({ clusterChar: stock.homeCluster, lorong: "", baris: "", pallet: "" });
     setMoveReason(stock.reason === "in-transit" ? "Relokasi dari In Transit" : "Koreksi cluster");
     setRecommendedLocation(null);
     setShowMoveModal(true);
@@ -212,22 +223,24 @@ export function PermutasiForm() {
   // Handle recommend button
   const handleRecommend = () => {
     if (!itemToMove) return;
-    const recommended = findRecommendedLocation(itemToMove.productCode);
+    const product = productMasterData.find(p => p.id === itemToMove.productId);
+    const productCode = product?.productCode || "UNKNOWN";
+    const recommended = findRecommendedLocation(productCode);
     if (recommended) {
       // Verify it's not occupied
       const isOccupied = stockListData.some(
         (s) =>
-          s.location.cluster === recommended.cluster &&
-          s.location.lorong === recommended.lorong &&
-          s.location.baris === recommended.baris &&
-          s.location.level === recommended.level
+          s.cluster === recommended.clusterChar &&
+          s.lorong === parseInt(recommended.lorong.replace('L', '')) &&
+          s.baris === parseInt(recommended.baris.replace('B', '')) &&
+          s.level === parseInt(recommended.level.replace('P', ''))
       );
       if (isOccupied) {
         error("Lokasi yang ditemukan sudah terisi. Coba lagi.");
         setRecommendedLocation(null);
       } else {
         setRecommendedLocation(recommended);
-        success(`Lokasi ditemukan: ${recommended.cluster}-${recommended.lorong}-${recommended.baris}-${recommended.level}`);
+        success(`Lokasi ditemukan: ${recommended.clusterChar}-${recommended.lorong}-${recommended.baris}-${recommended.level}`);
       }
     } else {
       error("Tidak ada lokasi kosong yang sesuai dengan product home.");
@@ -250,17 +263,17 @@ export function PermutasiForm() {
         return;
       }
     } else {
-      if (!manualLocation.cluster || !manualLocation.lorong || !manualLocation.baris || !manualLocation.pallet) {
+      if (!manualLocation.clusterChar || !manualLocation.lorong || !manualLocation.baris || !manualLocation.pallet) {
         error("Mohon lengkapi lokasi tujuan.");
         return;
       }
       // Check if manual location is occupied
       const isOccupied = stockListData.some(
         (s) =>
-          s.location.cluster === manualLocation.cluster &&
-          s.location.lorong === manualLocation.lorong &&
-          s.location.baris === manualLocation.baris &&
-          s.location.level === manualLocation.pallet
+          s.cluster === manualLocation.clusterChar &&
+          s.lorong === parseInt(manualLocation.lorong.replace('L', '')) &&
+          s.baris === parseInt(manualLocation.baris.replace('B', '')) &&
+          s.level === parseInt(manualLocation.pallet.replace('P', ''))
       );
       if (isOccupied) {
         error("Lokasi tujuan sudah terisi!");
@@ -275,13 +288,13 @@ export function PermutasiForm() {
   const confirmMove = () => {
     if (!itemToMove) return;
 
-    let targetLocation: { cluster: string; lorong: string; baris: string; level: string };
+    let targetLocation: { clusterChar: string; lorong: string; baris: string; level: string };
 
     if (autoRecommend) {
       targetLocation = recommendedLocation!;
     } else {
       targetLocation = {
-        cluster: manualLocation.cluster,
+        clusterChar: manualLocation.clusterChar,
         lorong: manualLocation.lorong,
         baris: manualLocation.baris,
         level: manualLocation.pallet,
@@ -291,24 +304,36 @@ export function PermutasiForm() {
     // Find and update stock
     const stockIndex = stockListData.findIndex((s) => s.id === itemToMove.id);
     if (stockIndex !== -1) {
-      const oldLocation = `${stockListData[stockIndex].location.cluster}-${stockListData[stockIndex].location.lorong}-${stockListData[stockIndex].location.baris}-${stockListData[stockIndex].location.level}`;
-      const newLocation = `${targetLocation.cluster}-${targetLocation.lorong}-${targetLocation.baris}-${targetLocation.level}`;
+      const stock = stockListData[stockIndex];
+      const oldLocation = `${stock.cluster}-L${stock.lorong}-B${stock.baris}-P${stock.level}`;
+      const newLocation = `${targetLocation.clusterChar}-${targetLocation.lorong}-${targetLocation.baris}-${targetLocation.level}`;
 
       // Update stock location
-      stockListData[stockIndex].location = targetLocation;
+      stockListData[stockIndex].cluster = targetLocation.clusterChar;
+      stockListData[stockIndex].lorong = parseInt(targetLocation.lorong.replace('L', ''));
+      stockListData[stockIndex].baris = parseInt(targetLocation.baris.replace('B', ''));
+      stockListData[stockIndex].level = parseInt(targetLocation.level.replace('P', ''));
 
       // Add to permutasi history
       const newPermutasi: PermutasiHistory = {
-        id: `PMT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + 1).padStart(4, "0")}`,
-        tanggal: new Date().toISOString().slice(0, 10),
-        productCode: itemToMove.productCode,
-        productName: itemToMove.productName,
-        qtyCarton: itemToMove.qtyCarton,
-        fromLocation: oldLocation,
-        toLocation: newLocation,
+        id: `pmt-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + 1).padStart(3, "0")}`,
+        warehouse_id: "wh-001-cikarang",
+        transaction_code: `PMT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + 1).padStart(4, "0")}`,
+        stock_id: `stk-${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`,
+        product_id: itemToMove.productId,
+        qty_carton: itemToMove.qtyCarton,
+        from_cluster: itemToMove.cluster,
+        from_lorong: itemToMove.lorong,
+        from_baris: itemToMove.baris,
+        from_level: itemToMove.level,
+        to_cluster: targetLocation.clusterChar,
+        to_lorong: parseInt(targetLocation.lorong.replace('L', '')),
+        to_baris: parseInt(targetLocation.baris.replace('B', '')),
+        to_level: parseInt(targetLocation.level.replace('P', '')),
         reason: moveReason,
-        movedBy: "Admin Warehouse",
-        createdAt: new Date().toISOString(),
+        moved_by: "usr-003", // Dewi Lestari (admin_warehouse)
+        moved_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
       };
       permutasiHistoryData.unshift(newPermutasi);
 
@@ -341,36 +366,46 @@ export function PermutasiForm() {
       const stock = filteredStocks.find((s) => s.id === id);
       if (!stock) return;
 
-      const recommended = findRecommendedLocation(stock.productCode);
+      const product = productMasterData.find(p => p.id === stock.productId);
+      const productCode = product?.productCode || "UNKNOWN";
+      const recommended = findRecommendedLocation(productCode);
       if (recommended) {
         // Verify not occupied
         const isOccupied = stockListData.some(
           (s) =>
-            s.location.cluster === recommended.cluster &&
-            s.location.lorong === recommended.lorong &&
-            s.location.baris === recommended.baris &&
-            s.location.level === recommended.level
+            s.cluster === recommended.clusterChar &&
+            s.lorong === parseInt(recommended.lorong.replace('L', '')) &&
+            s.baris === parseInt(recommended.baris.replace('B', '')) &&
+            s.level === parseInt(recommended.level.replace('P', ''))
         );
 
         if (!isOccupied) {
           const stockIndex = stockListData.findIndex((s) => s.id === id);
           if (stockIndex !== -1) {
-            const oldLocation = `${stockListData[stockIndex].location.cluster}-${stockListData[stockIndex].location.lorong}-${stockListData[stockIndex].location.baris}-${stockListData[stockIndex].location.level}`;
-            const newLocation = `${recommended.cluster}-${recommended.lorong}-${recommended.baris}-${recommended.level}`;
-
-            stockListData[stockIndex].location = recommended;
+            stockListData[stockIndex].cluster = recommended.clusterChar;
+            stockListData[stockIndex].lorong = parseInt(recommended.lorong.replace('L', ''));
+            stockListData[stockIndex].baris = parseInt(recommended.baris.replace('B', ''));
+            stockListData[stockIndex].level = parseInt(recommended.level.replace('P', ''));
 
             const newPermutasi: PermutasiHistory = {
-              id: `PMT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + 1).padStart(4, "0")}`,
-              tanggal: new Date().toISOString().slice(0, 10),
-              productCode: stock.productCode,
-              productName: stock.productName,
-              qtyCarton: stock.qtyCarton,
-              fromLocation: oldLocation,
-              toLocation: newLocation,
+              id: `pmt-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + movedCount + 1).padStart(3, "0")}`,
+              warehouse_id: "wh-001-cikarang",
+              transaction_code: `PMT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + movedCount + 1).padStart(4, "0")}`,
+              stock_id: `stk-${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`,
+              product_id: stock.productId,
+              qty_carton: stock.qtyCarton,
+              from_cluster: stock.cluster,
+              from_lorong: stock.lorong,
+              from_baris: stock.baris,
+              from_level: stock.level,
+              to_cluster: recommended.clusterChar,
+              to_lorong: parseInt(recommended.lorong.replace('L', '')),
+              to_baris: parseInt(recommended.baris.replace('B', '')),
+              to_level: parseInt(recommended.level.replace('P', '')),
               reason: stock.reason === "in-transit" ? "Relokasi dari In Transit (batch)" : "Koreksi cluster (batch)",
-              movedBy: "Admin Warehouse",
-              createdAt: new Date().toISOString(),
+              moved_by: "usr-003",
+              moved_at: new Date().toISOString(),
+              created_at: new Date().toISOString(),
             };
             permutasiHistoryData.unshift(newPermutasi);
 
@@ -398,7 +433,7 @@ export function PermutasiForm() {
   // Today's history
   const todayHistory = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return permutasiHistoryData.filter((h) => h.tanggal === todayStr);
+    return permutasiHistoryData.filter((h) => h.moved_at.startsWith(todayStr));
   }, []);
 
   // Modal backdrop click handler
@@ -540,11 +575,11 @@ export function PermutasiForm() {
                             />
                           </td>
                           <td className="px-3 py-3">
-                            <div className="font-medium text-gray-900 text-sm">{stock.productCode}</div>
-                            <div className="text-gray-500 text-xs truncate max-w-[150px] md:max-w-[200px]">{stock.productName}</div>
+                            <div className="font-medium text-gray-900 text-sm">{productMasterData.find(p => p.id === stock.productId)?.productCode || 'UNKNOWN'}</div>
+                            <div className="text-gray-500 text-xs truncate max-w-[150px] md:max-w-[200px]">{productMasterData.find(p => p.id === stock.productId)?.productName || 'Unknown Product'}</div>
                           </td>
                           <td className="px-3 py-3 text-xs font-mono text-gray-600 hidden md:table-cell">
-                            {Array.isArray(stock.bbPallet) ? stock.bbPallet.join(", ") : stock.bbPallet}
+                            {stock.bbProduk}
                           </td>
                           <td className="px-3 py-3 text-center">
                             <span className="font-bold text-gray-900">{stock.qtyCarton}</span>
@@ -556,7 +591,7 @@ export function PermutasiForm() {
                                 stock.reason === "in-transit" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800"
                               }`}
                             >
-                              {stock.location.cluster}-{stock.location.lorong}-{stock.location.baris}-{stock.location.level}
+                              {stock.cluster}-L{stock.lorong}-B{stock.baris}-P{stock.level}
                             </span>
                           </td>
                           <td className="px-3 py-3 text-center hidden sm:table-cell">
@@ -602,29 +637,34 @@ export function PermutasiForm() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {todayHistory.map((h) => (
+                      {todayHistory.map((h) => {
+                        const product = productMasterData.find(p => p.id === h.product_id);
+                        const fromLocation = `${h.from_cluster}-L${h.from_lorong}-B${h.from_baris}-P${h.from_level}`;
+                        const toLocation = `${h.to_cluster}-L${h.to_lorong}-B${h.to_baris}-P${h.to_level}`;
+                        return (
                         <tr key={h.id} className="hover:bg-violet-50 transition-colors">
                           <td className="px-3 py-3 text-sm text-gray-900">
-                            {new Date(h.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                            {new Date(h.moved_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
                           </td>
                           <td className="px-3 py-3">
-                            <div className="font-medium text-gray-900 text-sm">{h.productCode}</div>
-                            <div className="text-gray-500 text-xs truncate max-w-[150px]">{h.productName}</div>
+                            <div className="font-medium text-gray-900 text-sm">{product?.productCode || "UNKNOWN"}</div>
+                            <div className="text-gray-500 text-xs truncate max-w-[150px]">{product?.productName || "Unknown Product"}</div>
                           </td>
-                          <td className="px-3 py-3 text-center font-bold text-gray-900">{h.qtyCarton} ctn</td>
+                          <td className="px-3 py-3 text-center font-bold text-gray-900">{h.qty_carton} ctn</td>
                           <td className="px-3 py-3 text-center">
                             <span className="inline-block px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-mono">
-                              {h.fromLocation}
+                              {fromLocation}
                             </span>
                           </td>
                           <td className="px-3 py-3 text-center">
                             <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-mono">
-                              {h.toLocation}
+                              {toLocation}
                             </span>
                           </td>
                           <td className="px-3 py-3 text-sm text-gray-600">{h.reason}</td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -696,11 +736,11 @@ export function PermutasiForm() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Produk:</span>
-                    <span className="font-semibold text-gray-900">{itemToMove.productCode}</span>
+                    <span className="font-semibold text-gray-900">{productMasterData.find(p => p.id === itemToMove.productId)?.productCode || 'UNKNOWN'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Nama:</span>
-                    <span className="font-semibold text-gray-900 text-right max-w-[200px] truncate">{itemToMove.productName}</span>
+                    <span className="font-semibold text-gray-900 text-right max-w-[200px] truncate">{productMasterData.find(p => p.id === itemToMove.productId)?.productName || 'Unknown Product'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Qty:</span>
@@ -709,7 +749,7 @@ export function PermutasiForm() {
                   <div className="flex justify-between">
                     <span className="text-gray-600">Lokasi Saat Ini:</span>
                     <span className="font-semibold text-red-600">
-                      {itemToMove.location.cluster}-{itemToMove.location.lorong}-{itemToMove.location.baris}-{itemToMove.location.level}
+                      {itemToMove.cluster}-L{itemToMove.lorong}-B{itemToMove.baris}-P{itemToMove.level}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -772,7 +812,7 @@ export function PermutasiForm() {
                         <p className="text-sm text-green-800">
                           <strong>Lokasi Tersedia:</strong>{" "}
                           <span className="font-mono">
-                            {recommendedLocation.cluster}-{recommendedLocation.lorong}-{recommendedLocation.baris}-{recommendedLocation.level}
+                            {recommendedLocation.clusterChar}-{recommendedLocation.lorong}-{recommendedLocation.baris}-{recommendedLocation.level}
                           </span>
                         </p>
                       </div>
@@ -783,8 +823,8 @@ export function PermutasiForm() {
                     <div>
                       <label className="block text-xs font-semibold text-gray-700 mb-1">Cluster</label>
                       <select
-                        value={manualLocation.cluster}
-                        onChange={(e) => setManualLocation({ ...manualLocation, cluster: e.target.value, lorong: "", baris: "", pallet: "" })}
+                        value={manualLocation.clusterChar}
+                        onChange={(e) => setManualLocation({ ...manualLocation, clusterChar: e.target.value, lorong: "", baris: "", pallet: "" })}
                         className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
                       >
                         <option value="">Pilih</option>
@@ -880,20 +920,20 @@ export function PermutasiForm() {
               <p className="text-gray-700 text-center mb-4">Yakin ingin memindahkan stock ini?</p>
               <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm space-y-1">
                 <p>
-                  <strong>Produk:</strong> {itemToMove.productCode}
+                  <strong>Produk:</strong> {productMasterData.find(p => p.id === itemToMove.productId)?.productCode || 'UNKNOWN'}
                 </p>
                 <p>
                   <strong>Dari:</strong>{" "}
                   <span className="text-red-600">
-                    {itemToMove.location.cluster}-{itemToMove.location.lorong}-{itemToMove.location.baris}-{itemToMove.location.level}
+                    {itemToMove.cluster}-L{itemToMove.lorong}-B{itemToMove.baris}-P{itemToMove.level}
                   </span>
                 </p>
                 <p>
                   <strong>Ke:</strong>{" "}
                   <span className="text-green-600">
                     {autoRecommend
-                      ? `${recommendedLocation?.cluster}-${recommendedLocation?.lorong}-${recommendedLocation?.baris}-${recommendedLocation?.level}`
-                      : `${manualLocation.cluster}-${manualLocation.lorong}-${manualLocation.baris}-${manualLocation.pallet}`}
+                      ? `${recommendedLocation?.clusterChar}-${recommendedLocation?.lorong}-${recommendedLocation?.baris}-${recommendedLocation?.level}`
+                      : `${manualLocation.clusterChar}-${manualLocation.lorong}-${manualLocation.baris}-${manualLocation.pallet}`}
                   </span>
                 </p>
                 <p>

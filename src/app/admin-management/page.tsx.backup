@@ -29,12 +29,12 @@ export default function AdminManagementPage() {
   // Form states
   const [formData, setFormData] = useState({
     username: "",
-    fullName: "",
+    full_name: "",
     email: "",
     phone: "",
     password: "",
     role: "admin_warehouse" as "developer" | "admin_cabang" | "admin_warehouse",
-    warehouseId: "wh-001-cikarang",
+    warehouse_id: "wh-001-cikarang",
   });
 
   // Load user role and check access
@@ -73,7 +73,7 @@ export default function AdminManagementPage() {
     if (userRole === "admin_cabang" && currentWarehouseId) {
       // Admin cabang only sees admin_warehouse in their warehouse
       const filtered = allUsers.filter(
-        (user: User) => user.role === "admin_warehouse" && user.warehouseId === currentWarehouseId
+        (user: User) => user.role === "admin_warehouse" && user.warehouse_id === currentWarehouseId
       );
       setUsers(filtered);
     } else if (userRole === "developer") {
@@ -85,18 +85,18 @@ export default function AdminManagementPage() {
   const resetForm = () => {
     setFormData({
       username: "",
-      fullName: "",
+      full_name: "",
       email: "",
       phone: "",
       password: "",
       role: "admin_warehouse",
-      warehouseId: currentWarehouseId || "wh-001-cikarang",
+      warehouse_id: currentWarehouseId || "wh-001-cikarang",
     });
     setSelectedUser(null);
   };
 
   const handleAddUser = () => {
-    if (!formData.username || !formData.fullName || !formData.email || !formData.password) {
+    if (!formData.username || !formData.full_name || !formData.email || !formData.password) {
       setConfirmModal({
         isOpen: true,
         type: "error",
@@ -135,7 +135,7 @@ export default function AdminManagementPage() {
         });
         return;
       }
-      if (formData.warehouseId !== currentWarehouseId) {
+      if (formData.warehouse_id !== currentWarehouseId) {
         setConfirmModal({
           isOpen: true,
           type: "error",
@@ -147,23 +147,23 @@ export default function AdminManagementPage() {
       }
     }
 
-    const warehouseName = formData.warehouseId === "wh-001-cikarang" ? "Cikarang" : 
-                         formData.warehouseId === "wh-002-bandung" ? "Bandung" : "Semua Gudang";
+    const warehouseName = formData.warehouse_id === "wh-001-cikarang" ? "Cikarang" : 
+                         formData.warehouse_id === "wh-002-bandung" ? "Bandung" : "Semua Gudang";
 
     const newUser: User = {
       id: `usr-${String(allUsers.length + 1).padStart(3, '0')}`,
       username: formData.username,
       password: formData.password,
-      fullName: formData.fullName,
+      full_name: formData.full_name,
       role: formData.role,
       email: formData.email,
       phone: formData.phone,
-      warehouseId: formData.role === "developer" ? null : formData.warehouseId,
-      warehouseName: formData.role === "developer" ? "Semua Gudang" : warehouseName,
-      isActive: true,
-      lastLogin: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      warehouse_id: formData.role === "developer" ? null : formData.warehouse_id,
+      warehouse_name: formData.role === "developer" ? "Semua Gudang" : warehouseName,
+      is_active: true,
+      last_login: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
 
     const updatedUsers = [...allUsers, newUser];
@@ -172,7 +172,7 @@ export default function AdminManagementPage() {
     // Update displayed users based on role
     if (userRole === "admin_cabang" && currentWarehouseId) {
       const filtered = updatedUsers.filter(
-        (user: User) => user.role === "admin_warehouse" && user.warehouseId === currentWarehouseId
+        (user: User) => user.role === "admin_warehouse" && user.warehouse_id === currentWarehouseId
       );
       setUsers(filtered);
     } else {
@@ -187,7 +187,7 @@ export default function AdminManagementPage() {
       isOpen: true,
       type: "success",
       title: "Berhasil!",
-      message: `User ${formData.fullName} berhasil ditambahkan.`,
+      message: `User ${formData.full_name} berhasil ditambahkan.`,
       onConfirm: () => {},
     });
   };
@@ -195,7 +195,7 @@ export default function AdminManagementPage() {
   const handleEditUser = () => {
     if (!selectedUser) return;
 
-    if (!formData.username || !formData.fullName || !formData.email) {
+    if (!formData.username || !formData.full_name || !formData.email) {
       setConfirmModal({
         isOpen: true,
         type: "error",
@@ -235,20 +235,20 @@ export default function AdminManagementPage() {
       }
     }
 
-    const warehouseName = formData.warehouseId === "wh-001-cikarang" ? "Cikarang" : 
-                         formData.warehouseId === "wh-002-bandung" ? "Bandung" : "Semua Gudang";
+    const warehouseName = formData.warehouse_id === "wh-001-cikarang" ? "Cikarang" : 
+                         formData.warehouse_id === "wh-002-bandung" ? "Bandung" : "Semua Gudang";
 
     const updatedUser: User = {
       ...selectedUser,
       username: formData.username,
       password: formData.password || selectedUser.password, // Keep old password if not changed
-      fullName: formData.fullName,
+      full_name: formData.full_name,
       role: formData.role,
       email: formData.email,
       phone: formData.phone,
-      warehouseId: formData.role === "developer" ? null : formData.warehouseId,
-      warehouseName: formData.role === "developer" ? "Semua Gudang" : warehouseName,
-      updatedAt: new Date().toISOString(),
+      warehouse_id: formData.role === "developer" ? null : formData.warehouse_id,
+      warehouse_name: formData.role === "developer" ? "Semua Gudang" : warehouseName,
+      updated_at: new Date().toISOString(),
     };
 
     const updatedUsers = allUsers.map((user: User) =>
@@ -259,7 +259,7 @@ export default function AdminManagementPage() {
     // Update displayed users based on role
     if (userRole === "admin_cabang" && currentWarehouseId) {
       const filtered = updatedUsers.filter(
-        (user: User) => user.role === "admin_warehouse" && user.warehouseId === currentWarehouseId
+        (user: User) => user.role === "admin_warehouse" && user.warehouse_id === currentWarehouseId
       );
       setUsers(filtered);
     } else {
@@ -274,7 +274,7 @@ export default function AdminManagementPage() {
       isOpen: true,
       type: "success",
       title: "Berhasil!",
-      message: `Data user ${formData.fullName} berhasil diupdate.`,
+      message: `Data user ${formData.full_name} berhasil diupdate.`,
       onConfirm: () => {},
     });
   };
@@ -282,14 +282,14 @@ export default function AdminManagementPage() {
   const handleToggleStatus = (user: User) => {
     const allUsers = JSON.parse(localStorage.getItem("users_data") || "[]");
     const updatedUsers = allUsers.map((u: User) =>
-      u.id === user.id ? { ...u, isActive: !u.isActive, updatedAt: new Date().toISOString() } : u
+      u.id === user.id ? { ...u, is_active: !u.is_active, updated_at: new Date().toISOString() } : u
     );
     localStorage.setItem("users_data", JSON.stringify(updatedUsers));
     
     // Update displayed users based on role
     if (userRole === "admin_cabang" && currentWarehouseId) {
       const filtered = updatedUsers.filter(
-        (u: User) => u.role === "admin_warehouse" && u.warehouseId === currentWarehouseId
+        (u: User) => u.role === "admin_warehouse" && u.warehouse_id === currentWarehouseId
       );
       setUsers(filtered);
     } else {
@@ -302,7 +302,7 @@ export default function AdminManagementPage() {
       isOpen: true,
       type: "confirm",
       title: "Konfirmasi Hapus",
-      message: `Apakah Anda yakin ingin menghapus user ${user.fullName}? Tindakan ini tidak dapat dibatalkan.`,
+      message: `Apakah Anda yakin ingin menghapus user ${user.full_name}? Tindakan ini tidak dapat dibatalkan.`,
       onConfirm: () => {
         const allUsers = JSON.parse(localStorage.getItem("users_data") || "[]");
         const updatedUsers = allUsers.filter((u: User) => u.id !== user.id);
@@ -311,7 +311,7 @@ export default function AdminManagementPage() {
         // Update displayed users based on role
         if (userRole === "admin_cabang" && currentWarehouseId) {
           const filtered = updatedUsers.filter(
-            (u: User) => u.role === "admin_warehouse" && u.warehouseId === currentWarehouseId
+            (u: User) => u.role === "admin_warehouse" && u.warehouse_id === currentWarehouseId
           );
           setUsers(filtered);
         } else {
@@ -322,7 +322,7 @@ export default function AdminManagementPage() {
           isOpen: true,
           type: "success",
           title: "Berhasil!",
-          message: `User ${user.fullName} berhasil dihapus.`,
+          message: `User ${user.full_name} berhasil dihapus.`,
           onConfirm: () => {},
         });
       },
@@ -333,12 +333,12 @@ export default function AdminManagementPage() {
     setSelectedUser(user);
     setFormData({
       username: user.username,
-      fullName: user.fullName,
+      full_name: user.full_name,
       email: user.email,
       phone: user.phone,
       password: "", // Don't populate password for security
       role: user.role,
-      warehouseId: user.warehouseId || "wh-001-cikarang",
+      warehouse_id: user.warehouse_id || "wh-001-cikarang",
     });
     setShowEditModal(true);
   };
@@ -422,7 +422,7 @@ export default function AdminManagementPage() {
                 <div className="text-center sm:text-left">
                   <p className="text-xs sm:text-sm text-gray-600">Aktif</p>
                   <p className="text-lg sm:text-2xl font-bold text-green-600">
-                    {users.filter(u => u.isActive).length}
+                    {users.filter(u => u.is_active).length}
                   </p>
                 </div>
               </div>
@@ -435,7 +435,7 @@ export default function AdminManagementPage() {
                 <div className="text-center sm:text-left">
                   <p className="text-xs sm:text-sm text-gray-600">Nonaktif</p>
                   <p className="text-lg sm:text-2xl font-bold text-red-600">
-                    {users.filter(u => !u.isActive).length}
+                    {users.filter(u => !u.is_active).length}
                   </p>
                 </div>
               </div>
@@ -472,7 +472,7 @@ export default function AdminManagementPage() {
                           {user.username}
                         </td>
                         <td className="px-4 py-3 text-sm font-semibold text-gray-800">
-                          {user.fullName}
+                          {user.full_name}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600 hidden sm:table-cell">
                           {user.email}
@@ -490,19 +490,19 @@ export default function AdminManagementPage() {
                         )}
                         {userRole === "developer" && (
                           <td className="px-4 py-3 text-sm text-gray-700 hidden md:table-cell">
-                            {user.warehouseName}
+                            {user.warehouse_name}
                           </td>
                         )}
                         <td className="px-4 py-3 text-center">
                           <button
                             onClick={() => handleToggleStatus(user)}
                             className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-bold ${
-                              user.isActive
+                              user.is_active
                                 ? "bg-green-100 text-green-700"
                                 : "bg-red-100 text-red-700"
                             }`}
                           >
-                            {user.isActive ? "✓ Aktif" : "✗ Nonaktif"}
+                            {user.is_active ? "✓ Aktif" : "✗ Nonaktif"}
                           </button>
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -591,8 +591,8 @@ export default function AdminManagementPage() {
                   </label>
                   <input
                     type="text"
-                    value={formData.fullName}
-                    onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                    value={formData.full_name}
+                    onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
                     placeholder="Masukkan nama lengkap"
                     className="w-full px-3 sm:px-4 py-2 sm:py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-blue-500 transition-colors text-sm sm:text-base"
                   />
@@ -660,8 +660,8 @@ export default function AdminManagementPage() {
                           Gudang <span className="text-red-500">*</span>
                         </label>
                         <select
-                          value={formData.warehouseId}
-                          onChange={(e) => setFormData({ ...formData, warehouseId: e.target.value })}
+                          value={formData.warehouse_id}
+                          onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value })}
                           className="w-full px-3 sm:px-4 py-2 sm:py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-blue-500 transition-colors text-sm sm:text-base"
                         >
                           <option value="wh-001-cikarang">Cikarang</option>

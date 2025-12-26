@@ -2,7 +2,8 @@
 
 // Inbound History Component for Superadmin
 import { useState, useMemo } from "react";
-import { inboundHistoryData } from "@/lib/mock/transaction-history";
+import { inboundHistoryData, InboundHistory } from "@/lib/mock/transaction-history";
+import { productMasterData } from "@/lib/mock/product-master";
 import { Search, Calendar, TruckIcon, FileDown } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -11,7 +12,7 @@ export function InboundHistoryPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<"all" | "completed" | "partial">("all");
-  const [selectedItem, setSelectedItem] = useState<typeof inboundHistoryData[0] | null>(null);
+  const [selectedItem, setSelectedItem] = useState<InboundHistory | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Filter data
@@ -19,23 +20,24 @@ export function InboundHistoryPage() {
     return inboundHistoryData.filter((item) => {
       // Search filter
       const searchLower = searchQuery.toLowerCase();
+      const product = productMasterData.find(p => p.id === item.productId);
       const matchesSearch =
         searchQuery === "" ||
-        item.id.toLowerCase().includes(searchLower) ||
-        item.productName.toLowerCase().includes(searchLower) ||
-        item.productCode.toLowerCase().includes(searchLower) ||
-        item.namaPengemudi.toLowerCase().includes(searchLower) ||
-        item.nomorPolisi.toLowerCase().includes(searchLower) ||
-        item.noDN.toLowerCase().includes(searchLower) ||
-        item.ekspedisi.toLowerCase().includes(searchLower);
+        item.transactionCode.toLowerCase().includes(searchLower) ||
+        (product?.productName.toLowerCase().includes(searchLower) || false) ||
+        (product?.productCode.toLowerCase().includes(searchLower) || false) ||
+        item.driverName.toLowerCase().includes(searchLower) ||
+        item.vehicleNumber.toLowerCase().includes(searchLower) ||
+        item.dnNumber.toLowerCase().includes(searchLower) ||
+        (item.expeditionId?.toLowerCase().includes(searchLower) || false);
 
       // Date filter
-      const itemDate = new Date(item.tanggal);
+      const itemDate = new Date(item.arrivalTime);
       const matchesStartDate = !startDate || itemDate >= new Date(startDate);
       const matchesEndDate = !endDate || itemDate <= new Date(endDate);
 
-      // Status filter
-      const matchesStatus = selectedStatus === "all" || item.status === selectedStatus;
+      // Status filter (all transactions are completed in new schema)
+      const matchesStatus = selectedStatus === "all" || selectedStatus === "completed";
 
       return matchesSearch && matchesStartDate && matchesEndDate && matchesStatus;
     });
@@ -72,7 +74,7 @@ export function InboundHistoryPage() {
   };
 
   // Open detail modal
-  const handleViewDetail = (item: typeof inboundHistoryData[0]) => {
+  const handleViewDetail = (item: InboundHistory) => {
     setSelectedItem(item);
     setShowDetailModal(true);
   };
@@ -86,25 +88,29 @@ export function InboundHistoryPage() {
   // Export to Excel
   const exportToExcel = () => {
     // Prepare data for export
-    const exportData = filteredData.map((item, index) => ({
-      'No': index + 1,
-      'ID Transaksi': item.id,
-      'Tanggal': formatDate(item.tanggal),
-      'Ekspedisi': item.ekspedisi,
-      'Pengemudi': item.namaPengemudi,
-      'No. Polisi': item.nomorPolisi,
-      'No. DN': item.noDN,
-      'Kode Produk': item.productCode,
-      'Nama Produk': item.productName,
-      'Qty Pallet': item.qtyPallet,
-      'Qty Carton': item.qtyCarton,
-      'Total Pcs': item.totalPcs,
-      'BB Produk': item.bbProduk,
-      'Expired Date': formatDate(item.expiredDate),
-      'Lokasi': item.location,
-      'Status': item.status === 'completed' ? 'Selesai' : 'Partial',
-      'Waktu Input': formatDateTime(item.createdAt),
-    }));
+    const exportData = filteredData.map((item, index) => {
+      const product = productMasterData.find(p => p.id === item.productId);
+      const totalPcs = (product?.qtyPerCarton || 0) * item.qtyCarton;
+      return {
+        'No': index + 1,
+        'Kode Transaksi': item.transactionCode,
+        'Tanggal': formatDate(item.arrivalTime),
+        'Ekspedisi': item.expeditionId || '-',
+        'Pengemudi': item.driverName,
+        'No. Polisi': item.vehicleNumber,
+        'No. DN': item.dnNumber,
+        'Kode Produk': product?.productCode || '-',
+        'Nama Produk': product?.productName || '-',
+        'Qty Lokasi': item.locations.length,
+        'Qty Carton': item.qtyCarton,
+        'Total Pcs': totalPcs,
+        'BB Produk': item.bbProduk,
+        'Expired Date': formatDate(item.expiredDate),
+        'Lokasi': item.locations.map(loc => `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`).join(', '),
+        'Diterima Oleh': item.receivedBy,
+        'Waktu Kedatangan': formatDateTime(item.arrivalTime),
+      };
+    });
 
     // Create worksheet
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -292,54 +298,51 @@ export function InboundHistoryPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredData.map((item) => (
-                    <tr key={item.id} className="hover:bg-blue-50 transition-colors">
-                      <td className="px-2 py-1.5 text-[10px] sm:text-xs text-gray-700 whitespace-nowrap">
-                        {formatDate(item.tanggal)}
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <span className="inline-block px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-[10px] sm:text-xs font-bold">
-                          {item.ekspedisi}
-                        </span>
-                      </td>
-                      <td className="px-2 py-1.5 text-[10px] sm:text-xs font-semibold text-gray-800 whitespace-nowrap max-w-[100px] truncate">
-                        {item.namaPengemudi}
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <div className="text-[10px] sm:text-xs max-w-[150px]">
-                          <div className="font-mono text-blue-600">{item.productCode}</div>
-                          <div className="font-semibold text-gray-800 truncate" title={item.productName}>
-                            {item.productName}
+                  filteredData.map((item) => {
+                    const product = productMasterData.find(p => p.id === item.productId);
+                    return (
+                      <tr key={item.id} className="hover:bg-blue-50 transition-colors">
+                        <td className="px-2 py-1.5 text-[10px] sm:text-xs text-gray-700 whitespace-nowrap">
+                          {formatDate(item.arrivalTime)}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <span className="inline-block px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-[10px] sm:text-xs font-bold">
+                            {item.expeditionId || '-'}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-[10px] sm:text-xs font-semibold text-gray-800 whitespace-nowrap max-w-[100px] truncate">
+                          {item.driverName}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <div className="text-[10px] sm:text-xs max-w-[150px]">
+                            <div className="font-mono text-blue-600">{product?.productCode || '-'}</div>
+                            <div className="font-semibold text-gray-800 truncate" title={product?.productName || '-'}>
+                              {product?.productName || '-'}
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-1 py-1.5 text-center text-[10px] sm:text-xs font-bold text-green-600">
-                        {item.qtyPallet}
-                      </td>
-                      <td className="px-1 py-1.5 text-center text-[10px] sm:text-xs font-bold text-blue-600">
-                        {item.qtyCarton}
-                      </td>
-                      <td className="px-1 py-1.5 text-center">
-                        {item.status === "completed" ? (
+                        </td>
+                        <td className="px-1 py-1.5 text-center text-[10px] sm:text-xs font-bold text-green-600">
+                          {item.locations.length}
+                        </td>
+                        <td className="px-1 py-1.5 text-center text-[10px] sm:text-xs font-bold text-blue-600">
+                          {item.qtyCarton}
+                        </td>
+                        <td className="px-1 py-1.5 text-center">
                           <span className="inline-block px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px] sm:text-xs font-bold">
                             ✓
                           </span>
-                        ) : (
-                          <span className="inline-block px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-[10px] sm:text-xs font-bold">
-                            ⚠
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-center">
-                        <button
-                          onClick={() => handleViewDetail(item)}
-                          className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] sm:text-xs font-semibold hover:bg-blue-700 transition-colors"
-                        >
-                          Detail
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="px-2 py-1.5 text-center">
+                          <button
+                            onClick={() => handleViewDetail(item)}
+                            className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] sm:text-xs font-semibold hover:bg-blue-700 transition-colors"
+                          >
+                            Detail
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -362,7 +365,7 @@ export function InboundHistoryPage() {
                   <div>
                     <h2 className="text-2xl font-bold">Detail Transaksi Inbound</h2>
                     <p className="text-sm opacity-90 mt-1">
-                      {formatDate(selectedItem.tanggal)} - {selectedItem.ekspedisi}
+                      {formatDate(selectedItem.arrivalTime)} - {selectedItem.expeditionId || '-'}
                     </p>
                   </div>
                   <button
@@ -386,38 +389,28 @@ export function InboundHistoryPage() {
                   </h3>
                   <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl">
                     <div>
-                      <p className="text-xs text-gray-600">Ekspedisi</p>
-                      <p className="font-semibold text-gray-800">{selectedItem.ekspedisi}</p>
+                      <p className="text-xs text-gray-600">Kode Transaksi</p>
+                      <p className="font-mono font-semibold text-gray-800">{selectedItem.transactionCode}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600">Tanggal</p>
-                      <p className="font-semibold text-gray-800">{formatDate(selectedItem.tanggal)}</p>
+                      <p className="font-semibold text-gray-800">{formatDate(selectedItem.arrivalTime)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Ekspedisi</p>
+                      <p className="font-semibold text-gray-800">{selectedItem.expeditionId || '-'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600">Pengemudi</p>
-                      <p className="font-semibold text-gray-800">{selectedItem.namaPengemudi}</p>
+                      <p className="font-semibold text-gray-800">{selectedItem.driverName}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600">No. Polisi</p>
-                      <p className="font-mono font-semibold text-gray-800">{selectedItem.nomorPolisi}</p>
+                      <p className="font-mono font-semibold text-gray-800">{selectedItem.vehicleNumber}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600">No. DN</p>
-                      <p className="font-mono font-semibold text-gray-800">{selectedItem.noDN}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600">Status</p>
-                      <p>
-                        {selectedItem.status === "completed" ? (
-                          <span className="inline-block px-3 py-1 bg-green-100 text-green-700 rounded-lg font-bold">
-                            ✓ Completed
-                          </span>
-                        ) : (
-                          <span className="inline-block px-3 py-1 bg-yellow-100 text-yellow-700 rounded-lg font-bold">
-                            ⚠ Partial
-                          </span>
-                        )}
-                      </p>
+                      <p className="font-mono font-semibold text-gray-800">{selectedItem.dnNumber}</p>
                     </div>
                   </div>
                 </div>
@@ -431,16 +424,16 @@ export function InboundHistoryPage() {
                   <div className="bg-blue-50 p-4 rounded-xl space-y-3">
                     <div>
                       <p className="text-xs text-gray-600">Kode Produk</p>
-                      <p className="font-mono font-bold text-blue-600 text-lg">{selectedItem.productCode}</p>
+                      <p className="font-mono font-bold text-blue-600 text-lg">{productMasterData.find(p => p.id === selectedItem.productId)?.productCode || '-'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600">Nama Produk</p>
-                      <p className="font-semibold text-gray-800">{selectedItem.productName}</p>
+                      <p className="font-semibold text-gray-800">{productMasterData.find(p => p.id === selectedItem.productId)?.productName || '-'}</p>
                     </div>
                     <div className="grid grid-cols-3 gap-4 pt-3 border-t border-blue-200">
                       <div className="text-center">
-                        <p className="text-xs text-gray-600 mb-1">Qty Pallet</p>
-                        <p className="text-2xl font-bold text-green-600">{selectedItem.qtyPallet}</p>
+                        <p className="text-xs text-gray-600 mb-1">Qty Lokasi</p>
+                        <p className="text-2xl font-bold text-green-600">{selectedItem.locations.length}</p>
                       </div>
                       <div className="text-center">
                         <p className="text-xs text-gray-600 mb-1">Qty Carton</p>
@@ -448,7 +441,7 @@ export function InboundHistoryPage() {
                       </div>
                       <div className="text-center">
                         <p className="text-xs text-gray-600 mb-1">Total Pcs</p>
-                        <p className="text-2xl font-bold text-purple-600">{selectedItem.totalPcs.toLocaleString()}</p>
+                        <p className="text-2xl font-bold text-purple-600">{((productMasterData.find(p => p.id === selectedItem.productId)?.qtyPerCarton || 0) * selectedItem.qtyCarton).toLocaleString()}</p>
                       </div>
                     </div>
                   </div>
@@ -478,21 +471,43 @@ export function InboundHistoryPage() {
                     <span className="text-2xl">📍</span>
                     Lokasi Penyimpanan
                   </h3>
-                  <div className="bg-green-50 p-4 rounded-xl">
-                    <p className="font-mono text-sm text-green-700 leading-relaxed">
-                      {selectedItem.location}
-                    </p>
+                  <div className="space-y-2">
+                    {selectedItem.locations.map((loc, idx) => (
+                      <div key={idx} className="bg-green-50 p-3 rounded-xl border border-green-200">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <p className="text-xs text-gray-600">Lokasi</p>
+                            <p className="font-mono font-semibold text-green-700">{loc.cluster}-L{loc.lorong}-B{loc.baris}-P{loc.level}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-600">Qty</p>
+                            <p className="font-semibold text-gray-800">{loc.qtyCarton} carton{loc.isReceh ? ' (Receh)' : ''}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* Waktu Input */}
+                {/* Waktu & Metadata */}
                 <div>
                   <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
                     <span className="text-2xl">⏰</span>
-                    Waktu Input
+                    Waktu & Metadata
                   </h3>
-                  <div className="bg-gray-50 p-4 rounded-xl">
-                    <p className="font-semibold text-gray-800">{formatDateTime(selectedItem.createdAt)}</p>
+                  <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl">
+                    <div>
+                      <p className="text-xs text-gray-600">Waktu Kedatangan</p>
+                      <p className="font-semibold text-gray-800">{formatDateTime(selectedItem.arrivalTime)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Diterima Oleh</p>
+                      <p className="font-semibold text-gray-800">{selectedItem.receivedBy}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-xs text-gray-600">Catatan</p>
+                      <p className="font-semibold text-gray-800">{selectedItem.notes || '-'}</p>
+                    </div>
                   </div>
                 </div>
               </div>

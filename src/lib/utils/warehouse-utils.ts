@@ -30,10 +30,10 @@ export function isLocationOccupied(
 ): boolean {
   return stockListData.some(
     (stock: StockItem) =>
-      stock.location.cluster === cluster &&
-      stock.location.lorong === lorong &&
-      stock.location.baris === baris &&
-      stock.location.level === level
+      stock.cluster === cluster &&
+      stock.lorong === parseInt(lorong.replace('L', '')) &&
+      stock.baris === parseInt(baris.replace('B', '')) &&
+      stock.level === parseInt(level.replace('P', ''))
   );
 }
 
@@ -54,10 +54,10 @@ export function getAllSlotsInCluster(cluster: "A" | "B" | "C" | "D"): LocationSl
         const isEmpty = !isLocationOccupied(cluster, lorong, baris, level);
         const occupiedBy = stockListData.find(
           (stock: StockItem) =>
-            stock.location.cluster === cluster &&
-            stock.location.lorong === lorong &&
-            stock.location.baris === baris &&
-            stock.location.level === level
+            stock.cluster === cluster &&
+            stock.lorong === parseInt(lorong.replace('L', '')) &&
+            stock.baris === parseInt(baris.replace('B', '')) &&
+            stock.level === parseInt(level.replace('P', ''))
         );
 
         slots.push({

@@ -2,22 +2,30 @@
 // File: src/lib/mock/npl-history.ts
 
 export interface NplHistory {
-  id: string;
-  tanggal: string;
-  namaPengemudi: string;
-  nomorPolisi: string;
-  productCode: string;
-  productName: string;
-  qtyPallet: number;
-  qtyCarton: number;
-  totalPcs: number;
-  location: string;
-  status: "completed" | "partial";
-  createdAt: string;
+  id: string; // UUID
+  warehouse_id: string; // UUID
+  transaction_code: string; // NPL-YYYYMMDD-XXXX
+  product_id: string; // UUID
+  bb_produk: string; // 10 digit: YYMMDDXXXX
+  qty_carton: number;
+  expired_date: string; // YYYY-MM-DD
+  locations: Array<{
+    cluster: string;
+    lorong: number;
+    baris: number;
+    level: number;
+    qty_carton: number;
+    is_receh: boolean;
+  }>;
+  driver_name: string;
+  vehicle_number: string;
+  returned_by: string; // UUID
+  return_time: string; // ISO timestamp
+  notes?: string;
+  created_at: string; // ISO timestamp
 }
 
 // Helper: Get today's date string
-const getTodayString = () => new Date().toISOString().slice(0, 10);
 const getTodayISOWithTime = (hour: number, minute: number) => {
   const today = new Date();
   today.setHours(hour, minute, 0, 0);
@@ -28,74 +36,129 @@ const getTodayISOWithTime = (hour: number, minute: number) => {
 export const nplHistoryData: NplHistory[] = [
   // --- DATA HARI INI (untuk testing fitur Edit & Batal) ---
   {
-    id: "NPL-TODAY-001",
-    tanggal: getTodayString(),
-    namaPengemudi: "Driver Return 1",
-    nomorPolisi: "B 1111 NPL",
-    productCode: "74561",
-    productName: "600ML AQUA LOCAL 1X24",
-    qtyPallet: 0,
-    qtyCarton: 5,
-    totalPcs: 120,
-    location: "A-L9-B1-P1",
-    status: "completed",
-    createdAt: getTodayISOWithTime(14, 30),
+    id: "npl-001",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "NPL-20251225-0001",
+    product_id: "prod-ckr-001", // 600ML AQUA LOCAL 1X24
+    bb_produk: "2512300001",
+    qty_carton: 5,
+    expired_date: "2025-12-30",
+    locations: [
+      {
+        cluster: "A",
+        lorong: 9,
+        baris: 1,
+        level: 1,
+        qty_carton: 5,
+        is_receh: false,
+      },
+    ],
+    driver_name: "Driver Return 1",
+    vehicle_number: "B 1111 NPL",
+    returned_by: "usr-003", // Dewi Lestari (admin_warehouse)
+    return_time: getTodayISOWithTime(14, 30),
+    notes: "Return stock dari lapangan",
+    created_at: getTodayISOWithTime(14, 30),
   },
   {
-    id: "NPL-TODAY-002",
-    tanggal: getTodayString(),
-    namaPengemudi: "Driver Return 2",
-    nomorPolisi: "B 2222 NPL",
-    productCode: "74553",
-    productName: "1500ML AQUA LOCAL 1X12",
-    qtyPallet: 1,
-    qtyCarton: 70,
-    totalPcs: 840,
-    location: "B-L7-B5-P1",
-    status: "completed",
-    createdAt: getTodayISOWithTime(15, 45),
+    id: "npl-002",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "NPL-20251225-0002",
+    product_id: "prod-ckr-002", // 1500ML AQUA LOCAL 1X12
+    bb_produk: "2512250002",
+    qty_carton: 70,
+    expired_date: "2025-12-25",
+    locations: [
+      {
+        cluster: "B",
+        lorong: 7,
+        baris: 5,
+        level: 1,
+        qty_carton: 70,
+        is_receh: false,
+      },
+    ],
+    driver_name: "Driver Return 2",
+    vehicle_number: "B 2222 NPL",
+    returned_by: "usr-003",
+    return_time: getTodayISOWithTime(15, 45),
+    notes: "Return stock tidak terjual",
+    created_at: getTodayISOWithTime(15, 45),
   },
   // --- DATA LAMA ---
   {
-    id: "NPL-2025-001",
-    tanggal: "2025-12-20",
-    namaPengemudi: "Andi Wijaya",
-    nomorPolisi: "B 3333 NPL",
-    productCode: "166126",
-    productName: "220ML AQUA CUBE MINI BOTTLE LOCAL 1X24",
-    qtyPallet: 0,
-    qtyCarton: 10,
-    totalPcs: 240,
-    location: "A-L3-B2-P1",
-    status: "completed",
-    createdAt: "2025-12-20T16:00:00",
+    id: "npl-003",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "NPL-20251220-0001",
+    product_id: "prod-ckr-003", // 500ML MIZONE ACTIV LYCHEE 1X12
+    bb_produk: "2512300003",
+    qty_carton: 10,
+    expired_date: "2025-12-30",
+    locations: [
+      {
+        cluster: "A",
+        lorong: 3,
+        baris: 2,
+        level: 1,
+        qty_carton: 10,
+        is_receh: false,
+      },
+    ],
+    driver_name: "Andi Wijaya",
+    vehicle_number: "B 3333 NPL",
+    returned_by: "usr-003",
+    return_time: "2025-12-20T16:00:00",
+    notes: "Return stock expired",
+    created_at: "2025-12-20T16:00:00",
   },
   {
-    id: "NPL-2025-002",
-    tanggal: "2025-12-19",
-    namaPengemudi: "Budi Hartono",
-    nomorPolisi: "B 4444 NPL",
-    productCode: "145141",
-    productName: "500ML MIZONE ACTIV LYCHEE LEMON 1X12",
-    qtyPallet: 0,
-    qtyCarton: 8,
-    totalPcs: 96,
-    location: "C-L4-B3-P2",
-    status: "completed",
-    createdAt: "2025-12-19T17:30:00",
+    id: "npl-004",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "NPL-20251219-0001",
+    product_id: "prod-ckr-004", // 19L AQUA GALON
+    bb_produk: "2512300004",
+    qty_carton: 8,
+    expired_date: "2025-12-30",
+    locations: [
+      {
+        cluster: "C",
+        lorong: 4,
+        baris: 3,
+        level: 2,
+        qty_carton: 8,
+        is_receh: false,
+      },
+    ],
+    driver_name: "Budi Hartono",
+    vehicle_number: "B 4444 NPL",
+    returned_by: "usr-004", // Budi Santoso (admin_warehouse)
+    return_time: "2025-12-19T17:30:00",
+    notes: "Return stock overstock",
+    created_at: "2025-12-19T17:30:00",
   },
   {
-    id: "NPL-2025-003",
-    tanggal: "2025-12-18",
-    namaPengemudi: "Candra Kusuma",
-    nomorPolisi: "B 5555 NPL",
-    productCode: "157095",
-    productName: "550ML VIT LOCAL 1X24",
-    qtyPallet: 0,
-    qtyCarton: 12,
-    totalPcs: 288,
-    location: "B-L22-B6-P1",
-    status: "completed",
-    createdAt: "2025-12-18T14:15:00",
+    id: "npl-005",
+    warehouse_id: "wh-001-cikarang",
+    transaction_code: "NPL-20251218-0001",
+    product_id: "prod-ckr-005", // BATU KERIKIL
+    bb_produk: "2512300005",
+    qty_carton: 12,
+    expired_date: "2025-12-30",
+    locations: [
+      {
+        cluster: "B",
+        lorong: 22,
+        baris: 6,
+        level: 1,
+        qty_carton: 12,
+        is_receh: false,
+      },
+    ],
+    driver_name: "Candra Kusuma",
+    vehicle_number: "B 5555 NPL",
+    returned_by: "usr-003",
+    return_time: "2025-12-18T14:15:00",
+    notes: "Return stock damaged packaging",
+    created_at: "2025-12-18T14:15:00",
   },
 ];

@@ -271,8 +271,6 @@ Table stock_list {
   
   // Identifikasi - BB Produk WAJIB (10 digit, TIDAK BOLEH LEBIH)
   bb_produk varchar(10) [not null, note: 'BB Produk WAJIB 10 digit: YYMMDDXXXX (6 digit tanggal produksi + 4 digit KD Plant)']
-  batch_number varchar(50)
-  lot_number varchar(50)
   
   // Lokasi Fisik
   cluster char(1) [not null]
@@ -287,7 +285,7 @@ Table stock_list {
   // Status & Dates
   expired_date date [not null]
   inbound_date date [default: `now()`]
-  status varchar(20) [default: 'release', note: 'release, hold, damaged, expired']
+  status varchar(20) [default: 'release', note: 'release, hold, receh, salah-cluster']
   
   // Receh tracking
   is_receh boolean [default: false]
@@ -334,7 +332,6 @@ Table inbound_history {
   
   // Info pengiriman
   expedition_id uuid
-  sender_name varchar(100)
   driver_name varchar(100)
   vehicle_number varchar(20)
   dn_number varchar(50) [note: 'Nomor DN/Surat Jalan']
@@ -391,8 +388,6 @@ Table outbound_history {
   expedition_id uuid
   driver_name varchar(100)
   vehicle_number varchar(20)
-  destination varchar(255)
-  customer_name varchar(100)
   
   // Metadata
   processed_by uuid [not null]
@@ -710,6 +705,17 @@ Ref: stock_movements.product_id > products.id [delete: restrict]
 // --- Expedition Relations ---
 Ref: inbound_history.expedition_id > expeditions.id [delete: set null]
 Ref: outbound_history.expedition_id > expeditions.id [delete: set null]
+
+// --- NPL History Relations ---
+Ref: npl_history.warehouse_id > warehouses.id [delete: cascade]
+Ref: npl_history.product_id > products.id [delete: restrict]
+Ref: npl_history.returned_by > users.id [delete: restrict]
+
+// --- Permutasi History Relations ---
+Ref: permutasi_history.warehouse_id > warehouses.id [delete: cascade]
+Ref: permutasi_history.product_id > products.id [delete: restrict]
+Ref: permutasi_history.stock_id > stock_list.id [delete: restrict]
+Ref: permutasi_history.moved_by > users.id [delete: restrict]
 
 // --- User Relations ---
 Ref: inbound_history.received_by > users.id [delete: restrict]

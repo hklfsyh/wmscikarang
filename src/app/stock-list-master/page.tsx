@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { productMasterData, ekspedisiMaster, type ProductMaster } from "@/lib/mock/product-master";
-import { clusterConfigs, productHomes, type ClusterConfig, type ProductHome } from "@/lib/mock/warehouse-config";
+import { useState, useMemo, useEffect } from "react";
+import { productMasterData, ekspedisiMaster, expeditionsMock, getExpeditionsByWarehouse, type ProductMaster, type Expedition as Ekspedisi } from "@/lib/mock/product-master";
+import { clusterConfigs, productHomes, clusterCellOverrides, type ClusterConfig, type ProductHome, type ClusterCellOverride } from "@/lib/mock/warehouse-config";
 import ClusterConfigEditor from "@/components/cluster-config-editor";
 import ProductHomeEditor from "@/components/product-home-editor";
 import { useToast, ToastContainer } from "@/components/toast";
@@ -11,11 +11,29 @@ export default function StockListMasterPage() {
   const [activeTab, setActiveTab] = useState<"produk" | "ekspedisi" | "cluster" | "product-home">("produk");
   const { showToast, toasts, removeToast } = useToast();
 
+  // Warehouse context
+  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
+
   // State for data management
   const [products, setProducts] = useState<ProductMaster[]>(productMasterData);
-  const [ekspedisis, setEkspedisis] = useState(ekspedisiMaster);
+  const [ekspedisis, setEkspedisis] = useState<Ekspedisi[]>([]);
   const [clusters, setClusters] = useState<ClusterConfig[]>(clusterConfigs);
+  const [cellOverrides, setCellOverrides] = useState<ClusterCellOverride[]>(clusterCellOverrides);
   const [productHomesList, setProductHomesList] = useState<ProductHome[]>(productHomes);
+
+  // Load warehouse context and expeditions
+  useEffect(() => {
+    const userStr = localStorage.getItem("user");
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      const warehouseId = user.warehouseId || "wh-001-cikarang"; // Default to Cikarang
+      setCurrentWarehouseId(warehouseId);
+      
+      // Load expeditions for current warehouse
+      const warehouseExpeditions = getExpeditionsByWarehouse(warehouseId);
+      setEkspedisis(warehouseExpeditions);
+    }
+  }, []);
 
   // For Product tab
   const [searchQuery, setSearchQuery] = useState("");
@@ -25,20 +43,33 @@ export default function StockListMasterPage() {
   const [selectedProduct, setSelectedProduct] = useState<ProductMaster | null>(null);
   const [formProduct, setFormProduct] = useState<ProductMaster>({
     id: "",
+    warehouseId: "wh-001-cikarang",
     productCode: "",
     productName: "",
+    category: "",
+    unit: "carton",
     qtyPerCarton: 0,
-    qtyPerPallet: 0,
-    defaultCluster: "",
+    qtyCartonPerPallet: 0,
+    defaultCluster: null,
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   });
 
   // For Ekspedisi tab
   const [showAddEkspedisiModal, setShowAddEkspedisiModal] = useState(false);
   const [showEditEkspedisiModal, setShowEditEkspedisiModal] = useState(false);
-  const [selectedEkspedisi, setSelectedEkspedisi] = useState<{code: string; name: string} | null>(null);
-  const [formEkspedisi, setFormEkspedisi] = useState<{code: string; name: string}>({
-    code: "",
-    name: "",
+  const [selectedEkspedisi, setSelectedEkspedisi] = useState<Ekspedisi | null>(null);
+  const [formEkspedisi, setFormEkspedisi] = useState<Ekspedisi>({
+    id: "",
+    warehouseId: currentWarehouseId || "wh-001-cikarang",
+    expeditionCode: "",
+    expeditionName: "",
+    contactPerson: "",
+    phone: "",
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   });
 
   // Filter data produk
@@ -61,11 +92,17 @@ export default function StockListMasterPage() {
   const handleAddProduct = () => {
     setFormProduct({
       id: "",
+      warehouseId: "wh-001-cikarang",
       productCode: "",
       productName: "",
+      category: "",
+      unit: "carton",
       qtyPerCarton: 0,
-      qtyPerPallet: 0,
-      defaultCluster: "",
+      qtyCartonPerPallet: 0,
+      defaultCluster: null,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
     setShowAddProductModal(true);
   };
@@ -105,40 +142,56 @@ export default function StockListMasterPage() {
   };
 
   const handleAddEkspedisi = () => {
-    setFormEkspedisi({ code: "", name: "" });
+    setFormEkspedisi({
+      id: "",
+      warehouseId: currentWarehouseId || "wh-001-cikarang",
+      expeditionCode: "",
+      expeditionName: "",
+      contactPerson: "",
+      phone: "",
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
     setShowAddEkspedisiModal(true);
   };
 
-  const handleEditEkspedisi = (ekspedisi: {code: string; name: string}) => {
+  const handleEditEkspedisi = (ekspedisi: Ekspedisi) => {
     setSelectedEkspedisi(ekspedisi);
     setFormEkspedisi({ ...ekspedisi });
     setShowEditEkspedisiModal(true);
   };
 
   const handleSubmitAddEkspedisi = () => {
-    if (!formEkspedisi.code || !formEkspedisi.name) {
+    if (!formEkspedisi.expeditionCode || !formEkspedisi.expeditionName) {
       showToast("Kode dan nama ekspedisi harus diisi!", "error");
       return;
     }
-    setEkspedisis([...ekspedisis, formEkspedisi]);
+    
+    const newId = `exp-${currentWarehouseId?.split('-')[2] || 'ckr'}-${String(ekspedisis.length + 1).padStart(3, "0")}`;
+    const newEkspedisi = { ...formEkspedisi, id: newId };
+    
+    setEkspedisis([...ekspedisis, newEkspedisi]);
     setShowAddEkspedisiModal(false);
-    showToast(`✓ Ekspedisi "${formEkspedisi.name}" berhasil ditambahkan!`, "success");
+    showToast(`✓ Ekspedisi "${formEkspedisi.expeditionName}" berhasil ditambahkan!`, "success");
   };
 
   const handleSubmitEditEkspedisi = () => {
-    if (!formEkspedisi.code || !formEkspedisi.name) {
+    if (!formEkspedisi.expeditionCode || !formEkspedisi.expeditionName) {
       showToast("Kode dan nama ekspedisi harus diisi!", "error");
       return;
     }
-    setEkspedisis(ekspedisis.map((e) => (e.code === selectedEkspedisi?.code ? formEkspedisi : e)));
+    
+    const updatedEkspedisi = { ...formEkspedisi, updatedAt: new Date().toISOString() };
+    setEkspedisis(ekspedisis.map((e) => (e.id === selectedEkspedisi?.id ? updatedEkspedisi : e)));
     setShowEditEkspedisiModal(false);
     setSelectedEkspedisi(null);
-    showToast(`✓ Ekspedisi "${formEkspedisi.name}" berhasil diperbarui!`, "success");
+    showToast(`✓ Ekspedisi "${formEkspedisi.expeditionName}" berhasil diperbarui!`, "success");
   };
 
-  const handleDeleteEkspedisi = (code: string) => {
+  const handleDeleteEkspedisi = (id: string) => {
     if (confirm("Apakah Anda yakin ingin menghapus ekspedisi ini?")) {
-      setEkspedisis(ekspedisis.filter((e) => e.code !== code));
+      setEkspedisis(ekspedisis.filter((e) => e.id !== id));
     }
   };
 
@@ -278,7 +331,7 @@ export default function StockListMasterPage() {
                           {product.qtyPerCarton}
                         </td>
                         <td className="px-6 py-4 text-center text-sm font-semibold text-green-600">
-                          {product.qtyPerPallet === -1 ? "-" : product.qtyPerPallet}
+                          {product.qtyCartonPerPallet === -1 ? "-" : product.qtyCartonPerPallet}
                         </td>
                         <td className="px-6 py-4 text-center">
                           {product.defaultCluster ? (
@@ -340,14 +393,28 @@ export default function StockListMasterPage() {
                     <tr>
                       <th className="px-6 py-4 text-left text-sm font-bold">Kode</th>
                       <th className="px-6 py-4 text-left text-sm font-bold">Nama Ekspedisi</th>
+                      <th className="px-6 py-4 text-left text-sm font-bold">Contact Person</th>
+                      <th className="px-6 py-4 text-left text-sm font-bold">Phone</th>
+                      <th className="px-6 py-4 text-center text-sm font-bold">Status</th>
                       <th className="px-6 py-4 text-center text-sm font-bold">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {ekspedisis.map((ekspedisi) => (
-                      <tr key={ekspedisi.code} className="hover:bg-green-50 transition-colors">
-                        <td className="px-6 py-4 text-sm font-mono text-gray-700">{ekspedisi.code}</td>
-                        <td className="px-6 py-4 text-sm font-semibold text-gray-800">{ekspedisi.name}</td>
+                      <tr key={ekspedisi.id} className="hover:bg-green-50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-mono text-gray-700">{ekspedisi.expeditionCode}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-gray-800">{ekspedisi.expeditionName}</td>
+                        <td className="px-6 py-4 text-sm text-gray-700">{ekspedisi.contactPerson}</td>
+                        <td className="px-6 py-4 text-sm text-gray-700">{ekspedisi.phone}</td>
+                        <td className="px-6 py-4 text-center">
+                          <span className={`inline-block px-2 py-1 rounded-full text-xs font-semibold ${
+                            ekspedisi.isActive 
+                              ? "bg-green-100 text-green-700" 
+                              : "bg-red-100 text-red-700"
+                          }`}>
+                            {ekspedisi.isActive ? "Aktif" : "Non-Aktif"}
+                          </span>
+                        </td>
                         <td className="px-6 py-4">
                           <div className="flex gap-2 justify-center">
                             <button
@@ -357,7 +424,7 @@ export default function StockListMasterPage() {
                               ✏️ Edit
                             </button>
                             <button
-                              onClick={() => handleDeleteEkspedisi(ekspedisi.code)}
+                              onClick={() => handleDeleteEkspedisi(ekspedisi.id)}
                               className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700"
                             >
                               🗑️ Hapus
@@ -381,10 +448,15 @@ export default function StockListMasterPage() {
 
         {activeTab === "cluster" && (
           <div className="space-y-6">
-            <ClusterConfigEditor clusters={clusters} onUpdate={setClusters} />
+            <ClusterConfigEditor 
+              clusters={clusters} 
+              onUpdate={setClusters}
+              cellOverrides={cellOverrides}
+              onUpdateOverrides={setCellOverrides}
+            />
             
             {/* Informasi Konfigurasi */}
-            <div className="bg-gradient-to-r from-blue-50 to-slate-50 border-2 border-blue-200 rounded-xl p-6">
+            <div className="bg-linear-to-r from-blue-50 to-slate-50 border-2 border-blue-200 rounded-xl p-6">
               <div className="flex items-start gap-3 mb-4">
                 <div className="text-3xl">📚</div>
                 <div>
@@ -405,39 +477,39 @@ export default function StockListMasterPage() {
                   </p>
                 </div>
 
-                {/* Custom Lorong Config */}
+                {/* Cell Overrides */}
                 <div className="bg-white rounded-lg p-4 border border-purple-200">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-lg">🔧</span>
-                    <h4 className="font-semibold text-purple-900">Custom Lorong Config</h4>
+                    <h4 className="font-semibold text-purple-900">Cell Overrides</h4>
                   </div>
                   <p className="text-sm text-slate-700">
-                    Untuk lorong tertentu yang memiliki jumlah baris berbeda dari default. 
-                    <span className="block mt-1 text-purple-700 font-medium">Contoh: Lorong 1-3 punya 15 baris, sedangkan default 10 baris.</span>
+                    Override konfigurasi untuk area tertentu yang berbeda dari default. Bisa untuk custom baris count, pallet level, transit area, atau disable lokasi.
+                    <span className="block mt-1 text-purple-700 font-medium">Contoh: Lorong 1-3 hanya 2 pallet, Lorong 5 disabled karena tiang penyangga.</span>
                   </p>
                 </div>
 
-                {/* Custom Cell Config */}
-                <div className="bg-white rounded-lg p-4 border border-green-200">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-lg">🎯</span>
-                    <h4 className="font-semibold text-green-900">Custom Cell Config</h4>
-                  </div>
-                  <p className="text-sm text-slate-700">
-                    Untuk sel spesifik yang kapasitas palletnya berbeda dari default.
-                    <span className="block mt-1 text-green-700 font-medium">Contoh: Lorong 5 Baris 1-3 hanya muat 2 pallet, padahal default 3 pallet.</span>
-                  </p>
-                </div>
-
-                {/* In Transit Area */}
+                {/* Transit Area */}
                 <div className="bg-white rounded-lg p-4 border border-orange-200">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-lg">🚚</span>
-                    <h4 className="font-semibold text-orange-900">In Transit Area</h4>
+                    <h4 className="font-semibold text-orange-900">Transit Area</h4>
                   </div>
                   <p className="text-sm text-slate-700">
-                    Area khusus untuk menampung overflow produk yang tidak muat di lokasi home-nya. Bersifat fleksibel dan bisa menerima produk dari cluster manapun.
-                    <span className="block mt-1 text-orange-700 font-medium">Contoh: Lorong 11-12 dijadikan In Transit untuk semua cluster.</span>
+                    Area khusus untuk overflow produk yang tidak muat di lokasi home. Dikonfigurasi sebagai Cell Override dengan flag &ldquo;Transit Area&rdquo;.
+                    <span className="block mt-1 text-orange-700 font-medium">Contoh: Lorong 11-12 dijadikan Transit Area untuk semua cluster.</span>
+                  </p>
+                </div>
+
+                {/* Disabled Areas */}
+                <div className="bg-white rounded-lg p-4 border border-red-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🚫</span>
+                    <h4 className="font-semibold text-red-900">Disabled Areas</h4>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Area yang tidak bisa digunakan untuk penyimpanan karena ada penghalang fisik atau alasan safety.
+                    <span className="block mt-1 text-red-700 font-medium">Contoh: Area dekat pintu emergency, tiang penyangga, atau area maintenance.</span>
                   </p>
                 </div>
               </div>
@@ -506,8 +578,8 @@ export default function StockListMasterPage() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Qty per Pallet</label>
                     <input
                       type="number"
-                      value={formProduct.qtyPerPallet}
-                      onChange={(e) => setFormProduct({ ...formProduct, qtyPerPallet: parseInt(e.target.value) || 0 })}
+                      value={formProduct.qtyCartonPerPallet}
+                      onChange={(e) => setFormProduct({...formProduct, qtyCartonPerPallet: Number(e.target.value)})}
                       className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
                     />
                   </div>
@@ -515,16 +587,15 @@ export default function StockListMasterPage() {
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Default Cluster</label>
                   <select
-                    value={formProduct.defaultCluster}
-                    onChange={(e) => setFormProduct({ ...formProduct, defaultCluster: e.target.value })}
+                    value={formProduct.defaultCluster || ""}
+                    onChange={(e) => setFormProduct({ ...formProduct, defaultCluster: e.target.value || null })}
                     className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
                   >
-                    <option value="">-- Pilih Cluster --</option>
-                    {clusters.map((cluster) => (
-                      <option key={cluster.id} value={cluster.cluster}>
-                        Cluster {cluster.cluster}
-                      </option>
-                    ))}
+                    <option value="">Pilih Cluster</option>
+                    <option value="A">Cluster A</option>
+                    <option value="B">Cluster B</option>
+                    <option value="C">Cluster C</option>
+                    <option value="D">Cluster D</option>
                   </select>
                 </div>
               </div>
@@ -574,8 +645,8 @@ export default function StockListMasterPage() {
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Kode Ekspedisi *</label>
                   <input
                     type="text"
-                    value={formEkspedisi.code}
-                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, code: e.target.value })}
+                    value={formEkspedisi.expeditionCode}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, expeditionCode: e.target.value })}
                     className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
                     disabled={showEditEkspedisiModal}
                   />
@@ -584,10 +655,40 @@ export default function StockListMasterPage() {
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Nama Ekspedisi *</label>
                   <input
                     type="text"
-                    value={formEkspedisi.name}
-                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, name: e.target.value })}
+                    value={formEkspedisi.expeditionName}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, expeditionName: e.target.value })}
                     className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Person *</label>
+                  <input
+                    type="text"
+                    value={formEkspedisi.contactPerson}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, contactPerson: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Phone *</label>
+                  <input
+                    type="text"
+                    value={formEkspedisi.phone}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, phone: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
+                  />
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="isActiveEkspedisi"
+                    checked={formEkspedisi.isActive}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, isActive: e.target.checked })}
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="isActiveEkspedisi" className="ml-2 block text-sm text-gray-700">
+                    Aktif
+                  </label>
                 </div>
               </div>
 

@@ -1,325 +1,225 @@
-// Mock data untuk Pre-Stock Opname History
-// Data ini akan digunakan oleh halaman superadmin untuk rekonsel
+// Mock data untuk Pre-Stock Opname sesuai skema database
+// File: src/lib/mock/prestock-opname-history.ts
 
-export type PrestockOpnameItem = {
+import { productMasterData } from './product-master';
+
+export interface PrestockOpnameItem {
+  id: string; // UUID
+  opname_id: string; // UUID reference to prestock_opname.id
+  product_id: string; // UUID
+  bb_produk?: string; // BB Produk 10 digit: YYMMDDXXXX (optional)
+  audit_qty: number; // Hasil hitung fisik
+  system_qty?: number; // Dari audit sebelumnya, diisi saat rekonsel
+  difference?: number; // Selisih = audit - system
+  reconciliation_reason?: string; // Alasan rekonsel
+  is_reconciled: boolean; // Status rekonsel per item
+  created_at: string;
+}
+
+export interface PrestockOpname {
+  id: string; // UUID
+  warehouse_id: string; // UUID
+  opname_code: string; // OPN-YYYYMMDD-XXXX
+  auditor_id: string; // UUID admin_warehouse
+  audit_date: string; // YYYY-MM-DD
+  audit_time: string; // HH:MM:SS
+  reconciliation_status: 'pending' | 'reconciled';
+  reconciled_by?: string; // UUID admin_cabang
+  reconciled_at?: string; // ISO timestamp
+  reconciliation_notes?: string; // Catatan rekonsel
+  created_at: string;
+  updated_at: string;
+  // Items akan di-query terpisah dari prestock_opname_items
+  items?: PrestockOpnameItem[];
+}
+
+// Interface untuk history view (gabungan data untuk UI)
+export interface PrestockOpnameHistoryItem {
   productCode: string;
   productName: string;
   auditQty: number;
-};
+  systemQty?: number;
+  difference?: number;
+  reconciliationReason?: string;
+}
 
-export type ReconciliationNote = {
+export interface ReconciliationNote {
   productCode: string;
   reason: string;
   reconciledAt: string;
   reconciledBy: string;
-};
+}
 
-export type PrestockOpnameHistory = {
+export interface PrestockOpnameHistory {
   id: string;
   auditorName: string;
   auditDate: string;
   auditTime: string;
-  items: PrestockOpnameItem[];
+  items: PrestockOpnameHistoryItem[];
   reconciliationStatus: 'pending' | 'reconciled';
   reconciliationNotes: ReconciliationNote[];
   reconciledAt?: string;
   reconciledBy?: string;
-};
+}
 
-// Initial mock data - akan digantikan dengan data dari localStorage
-// Array diurutkan dari TERBARU ke TERLAMA (index 0 = paling baru)
-export const prestockOpnameHistoryData: PrestockOpnameHistory[] = [
-  // Data hari ini (17 Des 2025) - BELUM DIREKONSEL
+// Mock data untuk Pre-Stock Opname sesuai skema database
+export const prestockOpnameData: PrestockOpname[] = [
+  // Data hari ini (26 Des 2025) - BELUM DIREKONSEL
   {
-    id: 'AUDIT-1734486400000',
-    auditorName: 'Admin Warehouse B',
-    auditDate: '2025-12-17',
-    auditTime: '08:45',
-    items: [
-      { productCode: '166126', productName: '220ML AQUA CUBE MINI BOTTLE LOCAL 1X24', auditQty: 35 },
-      { productCode: '204579', productName: '200ML AQUA LOCAL 1X48', auditQty: 48 },
-      { productCode: '74561', productName: '600ML AQUA LOCAL 1X24', auditQty: 75 },
-      { productCode: '74553', productName: '1500ML AQUA LOCAL 1X12', auditQty: 45 },
-      { productCode: '74556', productName: '330ML AQUA LOCAL 1X24', auditQty: 62 },
-      { productCode: '81681', productName: '750ML AQUA LOCAL 1X18', auditQty: 38 },
-      { productCode: '142009', productName: '1100ML AQUA LOCAL 1X12 BARCODE ON CAP', auditQty: 20 },
-      { productCode: '74589', productName: '1500ML AQUA LOCAL MULTIPACK 1X6', auditQty: 15 },
-      { productCode: '145141', productName: '500ML MIZONE ACTIV LYCHEE LEMON 1X12', auditQty: 24 },
-      { productCode: '206774', productName: '500ML MIZONE COCO BOOST 1X12', auditQty: 18 },
-    ],
-    reconciliationStatus: 'pending',
-    reconciliationNotes: [],
+    id: "opn-001",
+    warehouse_id: "wh-001-cikarang",
+    opname_code: "OPN-20251226-0001",
+    auditor_id: "usr-003", // Dewi Lestari (admin_warehouse)
+    audit_date: "2025-12-26",
+    audit_time: "08:45:00",
+    reconciliation_status: "pending",
+    created_at: "2025-12-26T08:45:00.000Z",
+    updated_at: "2025-12-26T08:45:00.000Z",
   },
-  
-  // Data kemarin (16 Des 2025) - SUDAH DIREKONSEL
+  // Data kemarin (25 Des 2025) - SUDAH DIREKONSEL
   {
-    id: 'AUDIT-1734400000000',
-    auditorName: 'Admin Warehouse A',
-    auditDate: '2025-12-16',
-    auditTime: '08:30',
-    items: [
-      { productCode: '166126', productName: '220ML AQUA CUBE MINI BOTTLE LOCAL 1X24', auditQty: 20 },
-      { productCode: '204579', productName: '200ML AQUA LOCAL 1X48', auditQty: 48 },
-      { productCode: '74561', productName: '600ML AQUA LOCAL 1X24', auditQty: 80 },
-      { productCode: '74553', productName: '1500ML AQUA LOCAL 1X12', auditQty: 45 },
-      { productCode: '74556', productName: '330ML AQUA LOCAL 1X24', auditQty: 65 },
-      { productCode: '81681', productName: '750ML AQUA LOCAL 1X18', auditQty: 40 },
-      { productCode: '142009', productName: '1100ML AQUA LOCAL 1X12 BARCODE ON CAP', auditQty: 22 },
-      { productCode: '74589', productName: '1500ML AQUA LOCAL MULTIPACK 1X6', auditQty: 15 },
-      { productCode: '145141', productName: '500ML MIZONE ACTIV LYCHEE LEMON 1X12', auditQty: 30 },
-      { productCode: '206774', productName: '500ML MIZONE COCO BOOST 1X12', auditQty: 18 },
-    ],
-    reconciliationStatus: 'reconciled',
-    reconciliationNotes: [
-      {
-        productCode: '166126',
-        reason: 'Produk baru masuk dari supplier pada shift malam',
-        reconciledAt: '2025-12-16 10:15',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '74561',
-        reason: 'Terjadi pengambilan untuk outbound urgent dari customer priority',
-        reconciledAt: '2025-12-16 10:15',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '74556',
-        reason: 'Penyesuaian stock akibat kerusakan packaging saat handling',
-        reconciledAt: '2025-12-16 10:15',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '81681',
-        reason: 'Outbound ke cabang lain untuk replenishment stock',
-        reconciledAt: '2025-12-16 10:15',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '142009',
-        reason: 'Return dari customer karena mendekati expired date',
-        reconciledAt: '2025-12-16 10:15',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '145141',
-        reason: 'Penjualan langsung ke walk-in customer saat shift malam',
-        reconciledAt: '2025-12-16 10:15',
-        reconciledBy: 'Superadmin 1',
-      },
-    ],
-    reconciledAt: '2025-12-16 10:15',
-    reconciledBy: 'Superadmin 1',
+    id: "opn-002",
+    warehouse_id: "wh-001-cikarang",
+    opname_code: "OPN-20251225-0001",
+    auditor_id: "usr-004", // Budi Santoso (admin_warehouse)
+    audit_date: "2025-12-25",
+    audit_time: "08:30:00",
+    reconciliation_status: "reconciled",
+    reconciled_by: "usr-002", // Andi Pratama (admin_cabang)
+    reconciled_at: "2025-12-25T10:15:00.000Z",
+    reconciliation_notes: "Rekonsel selesai. Beberapa selisih dapat dijelaskan dengan transaksi antar shift.",
+    created_at: "2025-12-25T08:30:00.000Z",
+    updated_at: "2025-12-25T10:15:00.000Z",
   },
-  
-  // Data 15 Des 2025 - SUDAH DIREKONSEL
+];
+
+// Mock data untuk Pre-Stock Opname Items
+export const prestockOpnameItemsData: PrestockOpnameItem[] = [
+  // Items untuk opn-001 (hari ini - pending)
   {
-    id: 'AUDIT-1734313600000',
-    auditorName: 'Admin Warehouse C',
-    auditDate: '2025-12-15',
-    auditTime: '09:00',
-    items: [
-      { productCode: '166126', productName: '220ML AQUA CUBE MINI BOTTLE LOCAL 1X24', auditQty: 25 },
-      { productCode: '204579', productName: '200ML AQUA LOCAL 1X48', auditQty: 50 },
-      { productCode: '74561', productName: '600ML AQUA LOCAL 1X24', auditQty: 85 },
-      { productCode: '74553', productName: '1500ML AQUA LOCAL 1X12', auditQty: 40 },
-      { productCode: '74556', productName: '330ML AQUA LOCAL 1X24', auditQty: 60 },
-      { productCode: '81681', productName: '750ML AQUA LOCAL 1X18', auditQty: 35 },
-      { productCode: '142009', productName: '1100ML AQUA LOCAL 1X12 BARCODE ON CAP', auditQty: 25 },
-      { productCode: '74589', productName: '1500ML AQUA LOCAL MULTIPACK 1X6', auditQty: 18 },
-      { productCode: '145141', productName: '500ML MIZONE ACTIV LYCHEE LEMON 1X12', auditQty: 28 },
-      { productCode: '206774', productName: '500ML MIZONE COCO BOOST 1X12', auditQty: 20 },
-    ],
-    reconciliationStatus: 'reconciled',
-    reconciliationNotes: [
-      {
-        productCode: '204579',
-        reason: 'Penerimaan stock baru dari pabrik',
-        reconciledAt: '2025-12-15 11:00',
-        reconciledBy: 'Superadmin 2',
-      },
-      {
-        productCode: '74561',
-        reason: 'Stock opname manual menemukan selisih dengan sistem',
-        reconciledAt: '2025-12-15 11:00',
-        reconciledBy: 'Superadmin 2',
-      },
-      {
-        productCode: '74553',
-        reason: 'Distribusi ke outlet modern trade',
-        reconciledAt: '2025-12-15 11:00',
-        reconciledBy: 'Superadmin 2',
-      },
-      {
-        productCode: '74556',
-        reason: 'Koreksi stock akibat kesalahan input sebelumnya',
-        reconciledAt: '2025-12-15 11:00',
-        reconciledBy: 'Superadmin 2',
-      },
-      {
-        productCode: '81681',
-        reason: 'Pengambilan untuk event promosi perusahaan',
-        reconciledAt: '2025-12-15 11:00',
-        reconciledBy: 'Superadmin 2',
-      },
-      {
-        productCode: '142009',
-        reason: 'Inbound dari gudang pusat',
-        reconciledAt: '2025-12-15 11:00',
-        reconciledBy: 'Superadmin 2',
-      },
-      {
-        productCode: '74589',
-        reason: 'Penyesuaian akibat damaged goods yang belum dicatat',
-        reconciledAt: '2025-12-15 11:00',
-        reconciledBy: 'Superadmin 2',
-      },
-      {
-        productCode: '145141',
-        reason: 'Return dari distributor karena over stock',
-        reconciledAt: '2025-12-15 11:00',
-        reconciledBy: 'Superadmin 2',
-      },
-      {
-        productCode: '206774',
-        reason: 'Koreksi manual setelah cycle count',
-        reconciledAt: '2025-12-15 11:00',
-        reconciledBy: 'Superadmin 2',
-      },
-    ],
-    reconciledAt: '2025-12-15 11:00',
-    reconciledBy: 'Superadmin 2',
+    id: "opi-001-001",
+    opname_id: "opn-001",
+    product_id: "prod-ckr-008", // 220ML AQUA CUBE MINI BOTTLE LOCAL 1X24
+    audit_qty: 35,
+    is_reconciled: false,
+    created_at: "2025-12-26T08:45:00.000Z",
   },
-  
-  // Data 14 Des 2025 - SUDAH DIREKONSEL
   {
-    id: 'AUDIT-1734227200000',
-    auditorName: 'Admin Warehouse A',
-    auditDate: '2025-12-14',
-    auditTime: '08:15',
-    items: [
-      { productCode: '166126', productName: '220ML AQUA CUBE MINI BOTTLE LOCAL 1X24', auditQty: 30 },
-      { productCode: '204579', productName: '200ML AQUA LOCAL 1X48', auditQty: 45 },
-      { productCode: '74561', productName: '600ML AQUA LOCAL 1X24', auditQty: 90 },
-      { productCode: '74553', productName: '1500ML AQUA LOCAL 1X12', auditQty: 38 },
-      { productCode: '74556', productName: '330ML AQUA LOCAL 1X24', auditQty: 55 },
-      { productCode: '81681', productName: '750ML AQUA LOCAL 1X18', auditQty: 42 },
-      { productCode: '142009', productName: '1100ML AQUA LOCAL 1X12 BARCODE ON CAP', auditQty: 28 },
-      { productCode: '74589', productName: '1500ML AQUA LOCAL MULTIPACK 1X6', auditQty: 20 },
-      { productCode: '145141', productName: '500ML MIZONE ACTIV LYCHEE LEMON 1X12', auditQty: 25 },
-      { productCode: '206774', productName: '500ML MIZONE COCO BOOST 1X12', auditQty: 22 },
-    ],
-    reconciliationStatus: 'reconciled',
-    reconciliationNotes: [
-      {
-        productCode: '166126',
-        reason: 'Transfer stock antar warehouse untuk balance inventory',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '204579',
-        reason: 'Penjualan bulk order ke corporate client',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '74561',
-        reason: 'Koreksi hasil audit fisik yang tidak sesuai dengan sistem WMS',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '74553',
-        reason: 'Pengiriman urgent ke customer VIP tanpa input sistem',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '74556',
-        reason: 'Stock adjustment setelah physical count',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '81681',
-        reason: 'Penyesuaian karena ditemukan produk rusak saat loading',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '142009',
-        reason: 'Penambahan stock dari retur yang baru diproses',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '74589',
-        reason: 'Penyesuaian stock akibat damaged goods yang belum tercatat',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '145141',
-        reason: 'Produk sample untuk marketing campaign',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-      {
-        productCode: '206774',
-        reason: 'Inbound dari return customer (produk masih bagus)',
-        reconciledAt: '2025-12-14 10:30',
-        reconciledBy: 'Superadmin 1',
-      },
-    ],
-    reconciledAt: '2025-12-14 10:30',
-    reconciledBy: 'Superadmin 1',
+    id: "opi-001-002",
+    opname_id: "opn-001",
+    product_id: "prod-ckr-009", // 200ML AQUA LOCAL 1X48
+    audit_qty: 48,
+    is_reconciled: false,
+    created_at: "2025-12-26T08:45:00.000Z",
   },
-  
-  // Data 13 Des 2025 - BELUM DIREKONSEL (oldest pending)
   {
-    id: 'AUDIT-1734140800000',
-    auditorName: 'Admin Warehouse B',
-    auditDate: '2025-12-13',
-    auditTime: '09:15',
-    items: [
-      { productCode: '166126', productName: '220ML AQUA CUBE MINI BOTTLE LOCAL 1X24', auditQty: 28 },
-      { productCode: '204579', productName: '200ML AQUA LOCAL 1X48', auditQty: 52 },
-      { productCode: '74561', productName: '600ML AQUA LOCAL 1X24', auditQty: 88 },
-      { productCode: '74553', productName: '1500ML AQUA LOCAL 1X12', auditQty: 35 },
-      { productCode: '74556', productName: '330ML AQUA LOCAL 1X24', auditQty: 58 },
-      { productCode: '81681', productName: '750ML AQUA LOCAL 1X18', auditQty: 44 },
-      { productCode: '142009', productName: '1100ML AQUA LOCAL 1X12 BARCODE ON CAP', auditQty: 26 },
-      { productCode: '74589', productName: '1500ML AQUA LOCAL MULTIPACK 1X6', auditQty: 22 },
-      { productCode: '145141', productName: '500ML MIZONE ACTIV LYCHEE LEMON 1X12', auditQty: 27 },
-      { productCode: '206774', productName: '500ML MIZONE COCO BOOST 1X12', auditQty: 25 },
-    ],
-    reconciliationStatus: 'pending',
-    reconciliationNotes: [],
+    id: "opi-001-003",
+    opname_id: "opn-001",
+    product_id: "prod-ckr-001", // 600ML AQUA LOCAL 1X24
+    audit_qty: 75,
+    is_reconciled: false,
+    created_at: "2025-12-26T08:45:00.000Z",
+  },
+  {
+    id: "opi-001-004",
+    opname_id: "opn-001",
+    product_id: "prod-ckr-002", // 1500ML AQUA LOCAL 1X12
+    audit_qty: 45,
+    is_reconciled: false,
+    created_at: "2025-12-26T08:45:00.000Z",
+  },
+  {
+    id: "opi-001-005",
+    opname_id: "opn-001",
+    product_id: "prod-ckr-007", // 330ML AQUA LOCAL 1X24
+    audit_qty: 62,
+    is_reconciled: false,
+    created_at: "2025-12-26T08:45:00.000Z",
+  },
+
+  // Items untuk opn-002 (kemarin - reconciled)
+  {
+    id: "opi-002-001",
+    opname_id: "opn-002",
+    product_id: "prod-ckr-008", // 220ML AQUA CUBE MINI BOTTLE LOCAL 1X24
+    audit_qty: 20,
+    system_qty: 15,
+    difference: 5,
+    reconciliation_reason: "Produk baru masuk dari supplier pada shift malam",
+    is_reconciled: true,
+    created_at: "2025-12-25T08:30:00.000Z",
+  },
+  {
+    id: "opi-002-002",
+    opname_id: "opn-002",
+    product_id: "prod-ckr-009", // 200ML AQUA LOCAL 1X48
+    audit_qty: 48,
+    system_qty: 48,
+    difference: 0,
+    is_reconciled: true,
+    created_at: "2025-12-25T08:30:00.000Z",
+  },
+  {
+    id: "opi-002-003",
+    opname_id: "opn-002",
+    product_id: "prod-ckr-001", // 600ML AQUA LOCAL 1X24
+    audit_qty: 80,
+    system_qty: 85,
+    difference: -5,
+    reconciliation_reason: "Terjadi pengambilan untuk outbound urgent dari customer priority",
+    is_reconciled: true,
+    created_at: "2025-12-25T08:30:00.000Z",
+  },
+  {
+    id: "opi-002-004",
+    opname_id: "opn-002",
+    product_id: "prod-ckr-002", // 1500ML AQUA LOCAL 1X12
+    audit_qty: 45,
+    system_qty: 45,
+    difference: 0,
+    is_reconciled: true,
+    created_at: "2025-12-25T08:30:00.000Z",
+  },
+  {
+    id: "opi-002-005",
+    opname_id: "opn-002",
+    product_id: "prod-ckr-007", // 330ML AQUA LOCAL 1X24
+    audit_qty: 65,
+    system_qty: 68,
+    difference: -3,
+    reconciliation_reason: "Penyesuaian stock akibat kerusakan packaging saat handling",
+    is_reconciled: true,
+    created_at: "2025-12-25T08:30:00.000Z",
   },
 ];
 
 // Helper function untuk mendapatkan data dari localStorage atau fallback ke mock
 export const getPrestockOpnameHistory = (): PrestockOpnameHistory[] => {
-  if (typeof window === 'undefined') return prestockOpnameHistoryData;
-  
-  const saved = localStorage.getItem('wms_prestock_opname_history');
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      // Pastikan setiap item memiliki reconciliationStatus dan reconciliationNotes
-      return parsed.map((item: Partial<PrestockOpnameHistory>) => ({
-        ...item,
-        reconciliationStatus: item.reconciliationStatus || 'pending',
-        reconciliationNotes: item.reconciliationNotes || [],
-      }));
-    } catch (e) {
-      console.error('Error parsing prestock opname history:', e);
-      return prestockOpnameHistoryData;
-    }
-  }
-  
-  return prestockOpnameHistoryData;
+  return prestockOpnameData.map(opname => {
+    const items = prestockOpnameItemsData.filter(item => item.opname_id === opname.id);
+    return {
+      id: opname.id,
+      auditorName: 'Admin Warehouse', // TODO: Get from users data
+      auditDate: opname.audit_date,
+      auditTime: opname.audit_time,
+      items: items.map(item => {
+        // Cari produk berdasarkan product_id (UUID)
+        const product = productMasterData.find(p => p.id === item.product_id);
+        return {
+          productCode: product?.productCode || item.product_id, // Fallback ke product_id jika tidak ditemukan
+          productName: product?.productName || 'Product Name', // Fallback jika tidak ditemukan
+          auditQty: item.audit_qty,
+          systemQty: item.system_qty,
+          difference: item.difference,
+          reconciliationReason: item.reconciliation_reason,
+        };
+      }),
+      reconciliationStatus: opname.reconciliation_status,
+      reconciliationNotes: [], // TODO: Build from items reconciliation
+      reconciledAt: opname.reconciled_at,
+      reconciledBy: opname.reconciled_by,
+    };
+  });
 };
 
 // Helper function untuk save history ke localStorage
@@ -349,4 +249,14 @@ export const updateReconciliation = (
   });
   savePrestockOpnameHistory(updated);
   return updated;
+};
+
+// Helper function untuk mendapatkan data opname berdasarkan ID
+export const getPrestockOpnameById = (id: string): PrestockOpname | undefined => {
+  return prestockOpnameData.find(opname => opname.id === id);
+};
+
+// Helper function untuk mendapatkan items opname berdasarkan opname ID
+export const getPrestockOpnameItemsByOpnameId = (opnameId: string): PrestockOpnameItem[] => {
+  return prestockOpnameItemsData.filter(item => item.opname_id === opnameId);
 };

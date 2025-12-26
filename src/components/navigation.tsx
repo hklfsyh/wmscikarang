@@ -4,12 +4,13 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
-type UserRole = "admin_warehouse" | "superadmin";
+type UserRole = "admin_warehouse" | "admin_cabang" | "developer";
 
 interface User {
   username: string;
   role: UserRole;
   name: string;
+  warehouseId?: string | null;
 }
 
 export function Navigation() {
@@ -70,29 +71,80 @@ export function Navigation() {
   if (!user || pathname === "/login") return null;
 
   const menuItems = [
+    // Developer Only
+    {
+      label: "Management Warehouse",
+      path: "/warehouse-management",
+      icon: "🏢",
+      roles: ["developer"],
+    },
+    {
+      label: "Management User",
+      path: "/admin-management",
+      icon: "👥",
+      roles: ["developer", "admin_cabang"],
+    },
+    // Admin Cabang Only
     {
       label: "Warehouse Layout",
       path: "/warehouse-layout",
       icon: "🏢",
-      roles: ["admin_warehouse", "superadmin"],
+      roles: ["admin_cabang"],
     },
     {
       label: "Stock List",
       path: "/stock-list",
       icon: "📋",
-      roles: ["admin_warehouse", "superadmin"],
+      roles: ["admin_cabang"],
+    },
+    {
+      label: "Inbound History",
+      path: "/inbound",
+      icon: "📥",
+      roles: ["admin_cabang"],
+    },
+    {
+      label: "Outbound History",
+      path: "/outbound",
+      icon: "📤",
+      roles: ["admin_cabang"],
+    },
+    {
+      label: "Pre-Stock Opname History",
+      path: "/prestock-opname-history",
+      icon: "📊",
+      roles: ["admin_cabang"],
+    },
+    {
+      label: "Master Data Stock",
+      path: "/stock-list-master",
+      icon: "🗄️",
+      roles: ["admin_cabang"],
+    },
+    // Admin Warehouse Only
+    {
+      label: "Warehouse Layout",
+      path: "/warehouse-layout",
+      icon: "🏢",
+      roles: ["admin_warehouse"],
+    },
+    {
+      label: "Stock List",
+      path: "/stock-list",
+      icon: "📋",
+      roles: ["admin_warehouse"],
     },
     {
       label: "Inbound",
       path: "/inbound",
       icon: "📥",
-      roles: ["admin_warehouse", "superadmin"],
+      roles: ["admin_warehouse"],
     },
     {
       label: "Outbound",
       path: "/outbound",
       icon: "📤",
-      roles: ["admin_warehouse", "superadmin"],
+      roles: ["admin_warehouse"],
     },
     {
       label: "NPL (Return)",
@@ -111,24 +163,6 @@ export function Navigation() {
       path: "/stock-opname",
       icon: "📊",
       roles: ["admin_warehouse"],
-    },
-    {
-      label: "Pre-Stock Opname",
-      path: "/prestock-opname-history",
-      icon: "📊",
-      roles: ["superadmin"],
-    },
-    {
-      label: "Master Data Stock",
-      path: "/stock-list-master",
-      icon: "🗄️",
-      roles: ["superadmin"],
-    },
-    {
-      label: "Manajemen Admin",
-      path: "/admin-management",
-      icon: "👥",
-      roles: ["superadmin"],
     },
   ];
 
@@ -149,7 +183,7 @@ export function Navigation() {
             <div>
               <h1 className="text-lg font-bold text-white">WMS Lite</h1>
               <p className="text-xs text-slate-400">
-                {user.role === "superadmin" ? "Super Admin" : "Admin Warehouse"}
+                {user.role === "developer" ? "Developer" : user.role === "admin_cabang" ? "Admin Cabang" : "Admin Warehouse"}
               </p>
             </div>
           </div>
@@ -233,6 +267,12 @@ export function Navigation() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                     </svg>
                   );
+                case '/warehouse-management':
+                  return (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                  );
                 case '/cluster-config':
                   return (
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -268,7 +308,7 @@ export function Navigation() {
             <div>
               <p className="text-sm font-semibold text-white">{user.name}</p>
               <p className="text-xs text-slate-400">
-                {user.role === "superadmin" ? "Super Admin" : "Admin Warehouse"}
+                {user.role === "developer" ? "Developer" : user.role === "admin_cabang" ? "Admin Cabang" : "Admin Warehouse"}
               </p>
             </div>
           </div>
@@ -301,7 +341,7 @@ export function Navigation() {
               <div>
                 <h1 className="text-lg font-bold text-white">WMS Lite</h1>
                 <p className="text-xs text-slate-400">
-                  {user.role === "superadmin" ? "Super Admin" : "Admin Warehouse"}
+                  {user.role === "developer" ? "Developer" : user.role === "admin_cabang" ? "Admin Cabang" : "Admin Warehouse"}
                 </p>
               </div>
             </div>
@@ -392,6 +432,12 @@ export function Navigation() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                     </svg>
                   );
+                case '/warehouse-management':
+                  return (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                  );
                 case '/cluster-config':
                   return (
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -428,7 +474,7 @@ export function Navigation() {
             <div>
               <p className="text-sm font-semibold text-white">{user.name}</p>
               <p className="text-xs text-slate-400">
-                {user.role === "superadmin" ? "Super Admin" : "Admin Warehouse"}
+                {user.role === "developer" ? "Developer" : user.role === "admin_cabang" ? "Admin Cabang" : "Admin Warehouse"}
               </p>
             </div>
           </div>

@@ -5,8 +5,9 @@
 import { useState, useEffect, useMemo } from "react"; 
 import { 
   productMasterData, 
-  getProductByCode, 
-  ekspedisiMaster 
+  getProductByCode,
+  getExpeditionsByWarehouse,
+  type Expedition
 } from "@/lib/mock/product-master";
 import { stockListData, StockItem } from "@/lib/mock/stocklistmock";
 import {
@@ -19,13 +20,13 @@ import {
   isInTransitLocation,
   clusterConfigs,
 } from "@/lib/mock/warehouse-config";
-import { inboundHistoryData } from "@/lib/mock/transaction-history";
+import { inboundHistoryData, InboundHistory } from "@/lib/mock/transaction-history";
 import { QRScanner, QRData } from "./qr-scanner";
 import { CheckCircle, XCircle } from "lucide-react";
 import { useToast, ToastContainer } from "./toast";
 
 interface RecommendedLocation {
-  cluster: string;
+  clusterChar: string;
   lorong: string;
   baris: string;
   level: string;
@@ -51,7 +52,7 @@ type InboundFormState = {
   qtyPalletInput: string; 
   qtyCartonInput: string;
   bbReceh: string[]; 
-  cluster: string;
+  clusterChar: string;
   lorong: string;
   baris: string;
   pallet: string;
@@ -76,14 +77,14 @@ const RECEH_THRESHOLD = 5; // If remaining cartons <= 5, attach to last full pal
 
 // Interface untuk manual location input (multi-location)
 interface ManualLocationInput {
-  cluster: string;
+  clusterChar: string;
   lorong: string;
   baris: string;
   pallet: string;
 }
 
 interface ManualLocationRange {
-  cluster: string;
+  clusterChar: string;
   lorong: string;
   barisStart: string;
   barisEnd: string;
@@ -110,7 +111,7 @@ const initialState: InboundFormState = {
   qtyPalletInput: "", 
   qtyCartonInput: "",
   bbReceh: [], 
-  cluster: "",
+  clusterChar: "",
   lorong: "",
   baris: "",
   pallet: "",
@@ -141,6 +142,8 @@ const parseBBProduk = (bb: string): { expiredDate: string, kdPlant: string, isVa
 };
 
 export function InboundForm() {
+  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
+  const [warehouseExpeditions, setWarehouseExpeditions] = useState<Expedition[]>([]);
   const { toasts, removeToast } = useToast();
   
   // Modal notification helpers (pengganti toast)
@@ -183,17 +186,17 @@ export function InboundForm() {
   
   // --- HISTORY DETAIL MODAL STATE ---
   const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(false);
-  const [selectedHistoryItem, setSelectedHistoryItem] = useState<typeof inboundHistoryData[0] | null>(null);
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<InboundHistory | null>(null);
   
   // --- EDIT & BATAL MODAL STATE ---
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showBatalConfirmModal, setShowBatalConfirmModal] = useState(false);
-  const [selectedItemForAction, setSelectedItemForAction] = useState<typeof inboundHistoryData[0] | null>(null);
+  const [selectedItemForAction, setSelectedItemForAction] = useState<InboundHistory | null>(null);
 
   // --- MANUAL MULTI-LOCATION INPUT STATE ---
   const [manualLocations, setManualLocations] = useState<ManualLocationInput[]>([]);
   const [manualRange, setManualRange] = useState<ManualLocationRange>({
-    cluster: '',
+    clusterChar: '',
     lorong: '',
     barisStart: '',
     barisEnd: '',
@@ -211,9 +214,15 @@ export function InboundForm() {
   const [notificationMessage, setNotificationMessage] = useState('');
   const [notificationType, setNotificationType] = useState<'success' | 'error' | 'warning'>('success');
 
-  // Load history from localStorage on mount
+  // Load warehouse context and history from localStorage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        setCurrentWarehouseId(user.warehouseId || null);
+      }
+      
       const savedDrivers = localStorage.getItem('wms_driver_history');
       const savedDNs = localStorage.getItem('wms_dn_history');
       const savedPoliceNos = localStorage.getItem('wms_police_no_history');
@@ -223,6 +232,20 @@ export function InboundForm() {
       if (savedPoliceNos) setPoliceNoHistory(JSON.parse(savedPoliceNos));
     }
   }, []);
+
+  // Load expeditions based on current warehouse
+  useEffect(() => {
+    if (currentWarehouseId) {
+      const warehouseExpeditions = getExpeditionsByWarehouse(currentWarehouseId);
+      setWarehouseExpeditions(warehouseExpeditions);
+    }
+  }, [currentWarehouseId]);
+
+  // Filter products by warehouse
+  const filteredProducts = useMemo(() => {
+    if (!currentWarehouseId) return productMasterData;
+    return productMasterData.filter(p => p.warehouseId === currentWarehouseId);
+  }, [currentWarehouseId]);
 
   // Save to history helper
   const saveToHistory = (key: string, value: string, currentHistory: string[], setHistory: (val: string[]) => void) => {
@@ -239,7 +262,7 @@ export function InboundForm() {
 
   // --- LOGIKA QTY DINAMIS (CALCULATED VALUES) ---
   const selectedProduct = form.productCode ? getProductByCode(form.productCode) : null;
-  const qtyPerPalletStd = selectedProduct?.qtyPerPallet || 0; 
+  const qtyPerPalletStd = selectedProduct?.qtyCartonPerPallet || 0; 
   
   const { totalPallets, remainingCartons, totalCartons, shouldAttachReceh } = useMemo(() => {
     const palletInput = Number(form.qtyPalletInput) || 0;
@@ -286,7 +309,7 @@ export function InboundForm() {
             newLocations.push(manualLocations[i]);
           } else {
             // Add new empty location
-            newLocations.push({ cluster: "", lorong: "", baris: "", pallet: "" });
+            newLocations.push({ clusterChar: "", lorong: "", baris: "", pallet: "" });
           }
         }
         
@@ -304,17 +327,17 @@ export function InboundForm() {
   
   // Cluster options - ambil dari clusterConfigs yang aktif
   const clusterOptions = useMemo(() => {
-    return clusterConfigs.filter(c => c.isActive).map(c => c.cluster);
+    return clusterConfigs.filter(c => c.isActive).map(c => c.clusterChar);
   }, []);
   
   // Generate dynamic lorong options
   const lorongOptions = useMemo(() => {
-    if (!form.cluster) {
-      const config = getClusterConfig(form.cluster || _autoCluster);
+    if (!form.clusterChar) {
+      const config = getClusterConfig(form.clusterChar || _autoCluster);
       if (!config) return Array.from({ length: 11 }, (_, i) => `L${i + 1}`);
       return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
     }
-    const config = getClusterConfig(form.cluster);
+    const config = getClusterConfig(form.clusterChar);
     if (!config) return [];
     
     // MANUAL MODE: User bebas pilih semua lorong tanpa batasan product home
@@ -323,19 +346,19 @@ export function InboundForm() {
     }
     
     // AUTO MODE: If product has home assignment, limit to allowed lorong range
-    if (productValidLocations && productValidLocations.cluster === form.cluster) {
+    if (productValidLocations && productValidLocations.clusterChar === form.clusterChar) {
       const [start, end] = productValidLocations.lorongRange;
       return Array.from({ length: end - start + 1 }, (_, i) => `L${start + i}`);
     }
     
     return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
-  }, [form.cluster, form.productCode, productValidLocations, _autoCluster, autoRecommend]);
+  }, [form.clusterChar, form.productCode, productValidLocations, _autoCluster, autoRecommend]);
   
   // Generate dynamic baris options
   const barisOptions = useMemo(() => {
-    if (!form.cluster || !form.lorong) return Array.from({ length: 9 }, (_, i) => `B${i + 1}`);
+    if (!form.clusterChar || !form.lorong) return Array.from({ length: 9 }, (_, i) => `B${i + 1}`);
     const lorongNum = parseInt(form.lorong.replace("L", ""));
-    const barisCount = getBarisCountForLorong(form.cluster, lorongNum);
+    const barisCount = getBarisCountForLorong(form.clusterChar, lorongNum);
     
     // MANUAL MODE: User bebas pilih semua baris tanpa batasan product home
     if (!autoRecommend) {
@@ -343,21 +366,21 @@ export function InboundForm() {
     }
     
     // AUTO MODE: If product has home assignment, limit to allowed baris range
-    if (productValidLocations && productValidLocations.cluster === form.cluster) {
+    if (productValidLocations && productValidLocations.clusterChar === form.clusterChar) {
       const [start, end] = productValidLocations.barisRange;
       const maxBaris = Math.min(end, barisCount);
       return Array.from({ length: maxBaris - start + 1 }, (_, i) => `B${start + i}`);
     }
     
     return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
-  }, [form.cluster, form.lorong, form.productCode, productValidLocations, autoRecommend]);
+  }, [form.clusterChar, form.lorong, form.productCode, productValidLocations, autoRecommend]);
   
   // Generate dynamic pallet options
   const palletOptions = useMemo(() => {
-    if (!form.cluster || !form.lorong || !form.baris) return Array.from({ length: 3 }, (_, i) => `P${i + 1}`);
+    if (!form.clusterChar || !form.lorong || !form.baris) return Array.from({ length: 3 }, (_, i) => `P${i + 1}`);
     const lorongNum = parseInt(form.lorong.replace("L", ""));
     const barisNum = parseInt(form.baris.replace("B", ""));
-    const palletCapacity = getPalletCapacityForCell(form.cluster, lorongNum, barisNum);
+    const palletCapacity = getPalletCapacityForCell(form.clusterChar, lorongNum, barisNum);
     
     // MANUAL MODE: User bebas pilih semua pallet level tanpa batasan product max pallet
     if (!autoRecommend) {
@@ -370,17 +393,17 @@ export function InboundForm() {
       : palletCapacity;
     
     return Array.from({ length: maxPallet }, (_, i) => `P${i + 1}`);
-  }, [form.cluster, form.lorong, form.baris, form.productCode, productValidLocations, autoRecommend]); 
+  }, [form.clusterChar, form.lorong, form.baris, form.productCode, productValidLocations, autoRecommend]); 
 
   const findMultipleRecommendedLocations = (
-    cluster: string,
+    clusterChar: string,
     palletsNeeded: number
   ): MultiLocationRecommendation => {
     const locations: RecommendedLocation[] = [];
     let remainingPallets = palletsNeeded;
 
     // Get cluster config untuk dynamic lorong/baris count
-    const clusterConfig = getClusterConfig(cluster);
+    const clusterConfig = getClusterConfig(form.clusterChar);
     if (!clusterConfig) {
       return { locations: [], totalPalletsPlaced: 0, needsMultipleLocations: false };
     }
@@ -389,8 +412,8 @@ export function InboundForm() {
     const validLocs = form.productCode ? getValidLocationsForProduct(form.productCode) : null;
     
     // PHASE 1: Try to fill primary product home locations
-    const lorongStart = validLocs && validLocs.cluster === cluster ? validLocs.lorongRange[0] : 1;
-    const lorongEnd = validLocs && validLocs.cluster === cluster 
+    const lorongStart = validLocs && validLocs.clusterChar === form.clusterChar ? validLocs.lorongRange[0] : 1;
+    const lorongEnd = validLocs && validLocs.clusterChar === form.clusterChar 
       ? validLocs.lorongRange[1] 
       : clusterConfig.defaultLorongCount;
     
@@ -398,14 +421,14 @@ export function InboundForm() {
       if (remainingPallets === 0) break;
       
       // Skip In Transit area in primary phase
-      if (isInTransitLocation(cluster, lorongNum)) continue;
+      if (isInTransitLocation(form.clusterChar, lorongNum)) continue;
       
       // Get baris count for this lorong (dynamic)
-      const maxBaris = getBarisCountForLorong(cluster, lorongNum);
+      const maxBaris = getBarisCountForLorong(form.clusterChar, lorongNum);
       
       // Determine baris range
-      const barisStart = validLocs && validLocs.cluster === cluster ? validLocs.barisRange[0] : 1;
-      const barisEnd = validLocs && validLocs.cluster === cluster 
+      const barisStart = validLocs && validLocs.clusterChar === form.clusterChar ? validLocs.barisRange[0] : 1;
+      const barisEnd = validLocs && validLocs.clusterChar === form.clusterChar 
         ? Math.min(validLocs.barisRange[1], maxBaris)
         : maxBaris;
       
@@ -413,7 +436,7 @@ export function InboundForm() {
         if (remainingPallets === 0) break;
         
         // Get pallet capacity for this cell (dynamic)
-        const maxPallet = getPalletCapacityForCell(cluster, lorongNum, barisNum);
+        const maxPallet = getPalletCapacityForCell(form.clusterChar, lorongNum, barisNum);
         const productMaxPallet = validLocs ? validLocs.maxPalletPerLocation : 999;
         const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
         
@@ -426,22 +449,22 @@ export function InboundForm() {
           
           // Validate product can be placed here
           if (form.productCode) {
-            const validation = validateProductLocation(form.productCode, cluster, lorongNum, barisNum);
+            const validation = validateProductLocation(form.productCode, form.clusterChar, lorongNum, barisNum);
             if (!validation.isValid) continue;
           }
           
           // Check if location is empty
           const locationExists = stockListData.some(
             (item: StockItem) =>
-              item.location.cluster === cluster &&
-              item.location.lorong === lorong &&
-              item.location.baris === baris &&
-              item.location.level === level
+              item.cluster === form.clusterChar &&
+              item.lorong === parseInt(lorong.replace('L', '')) &&
+              item.baris === parseInt(baris.replace('B', '')) &&
+              item.level === parseInt(level.replace('P', ''))
           );
           
           if (!locationExists) {
             emptySlotsInBaris.push({
-              cluster,
+              clusterChar,
               lorong,
               baris,
               level,
@@ -463,7 +486,7 @@ export function InboundForm() {
     // CROSS-CLUSTER IN TRANSIT: Search Cluster C In Transit for ALL products (global overflow buffer)
     if (remainingPallets > 0) {
       // First, try In Transit in the same cluster (if exists)
-      const inTransitRange = getInTransitRange(cluster);
+      const inTransitRange = getInTransitRange(form.clusterChar);
       
       if (inTransitRange) {
         const [transitStart, transitEnd] = inTransitRange;
@@ -471,12 +494,12 @@ export function InboundForm() {
         for (let lorongNum = transitStart; lorongNum <= transitEnd; lorongNum++) {
           if (remainingPallets === 0) break;
           
-          const maxBaris = getBarisCountForLorong(cluster, lorongNum);
+          const maxBaris = getBarisCountForLorong(form.clusterChar, lorongNum);
           
           for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
             if (remainingPallets === 0) break;
             
-            const maxPallet = getPalletCapacityForCell(cluster, lorongNum, barisNum);
+            const maxPallet = getPalletCapacityForCell(form.clusterChar, lorongNum, barisNum);
             
             for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
               if (remainingPallets === 0) break;
@@ -488,15 +511,15 @@ export function InboundForm() {
               // Check if location is empty
               const locationExists = stockListData.some(
                 (item: StockItem) =>
-                  item.location.cluster === cluster &&
-                  item.location.lorong === lorong &&
-                  item.location.baris === baris &&
-                  item.location.level === level
+                  item.cluster === form.clusterChar &&
+                  item.lorong === parseInt(lorong.replace('L', '')) &&
+                  item.baris === parseInt(baris.replace('B', '')) &&
+                  item.level === parseInt(level.replace('P', ''))
               );
               
               if (!locationExists) {
                 locations.push({
-                  cluster,
+                  clusterChar: form.clusterChar,
                   lorong,
                   baris,
                   level,
@@ -510,7 +533,7 @@ export function InboundForm() {
       }
       
       // PHASE 2B: If still have remaining pallets AND home cluster is NOT C, search Cluster C In Transit (cross-cluster overflow)
-      if (remainingPallets > 0 && cluster !== "C") {
+      if (remainingPallets > 0 && form.clusterChar !== "C") {
         const clusterCInTransitRange = getInTransitRange("C");
         
         if (clusterCInTransitRange) {
@@ -536,15 +559,15 @@ export function InboundForm() {
                 // Check if location is empty in Cluster C In Transit
                 const locationExists = stockListData.some(
                   (item: StockItem) =>
-                    item.location.cluster === "C" &&
-                    item.location.lorong === lorong &&
-                    item.location.baris === baris &&
-                    item.location.level === level
+                    item.cluster === "C" &&
+                    item.lorong === parseInt(lorong.replace('L', '')) &&
+                    item.baris === parseInt(baris.replace('B', '')) &&
+                    item.level === parseInt(level.replace('P', ''))
                 );
                 
                 if (!locationExists) {
                   locations.push({
-                    cluster: "C", // Cross-cluster overflow to Cluster C
+                    clusterChar: "C", // Cross-cluster overflow to Cluster C
                     lorong,
                     baris,
                     level,
@@ -568,8 +591,8 @@ export function InboundForm() {
 
   // Helper function for finding single location (kept for potential future use)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const _findRecommendedLocation = (cluster: string): RecommendedLocation | null => {
-    const multiRec = findMultipleRecommendedLocations(cluster, 1);
+  const _findRecommendedLocation = (clusterChar: string): RecommendedLocation | null => {
+    const multiRec = findMultipleRecommendedLocations(clusterChar, 1);
     if (multiRec.locations.length > 0) {
       return multiRec.locations[0];
     }
@@ -630,7 +653,7 @@ export function InboundForm() {
     const firstLoc = multiRec.locations[0];
     setForm(prev => ({
         ...prev,
-        cluster: firstLoc.cluster,
+        clusterChar: firstLoc.clusterChar,
         lorong: firstLoc.lorong,
         baris: firstLoc.baris,
         pallet: firstLoc.level,
@@ -638,25 +661,25 @@ export function InboundForm() {
     
     // Check if any location is in In Transit area
     const hasInTransit = multiRec.locations.some(loc => 
-      isInTransitLocation(loc.cluster, parseInt(loc.lorong.replace("L", "")))
+      isInTransitLocation(loc.clusterChar, parseInt(loc.lorong.replace("L", "")))
     );
     
     // Check if cross-cluster In Transit (overflow from other cluster to Cluster C)
     const hasCrossClusterInTransit = multiRec.locations.some(loc => 
-      loc.cluster !== cluster && isInTransitLocation(loc.cluster, parseInt(loc.lorong.replace("L", "")))
+      loc.clusterChar !== cluster && isInTransitLocation(loc.clusterChar, parseInt(loc.lorong.replace("L", "")))
     );
     
     // Show success toast with In Transit info if applicable
     if (multiRec.locations.length === 1) {
-      const isTransit = isInTransitLocation(firstLoc.cluster, parseInt(firstLoc.lorong.replace("L", "")));
-      const isCrossCluster = firstLoc.cluster !== cluster;
+      const isTransit = isInTransitLocation(firstLoc.clusterChar, parseInt(firstLoc.lorong.replace("L", "")));
+      const isCrossCluster = firstLoc.clusterChar !== cluster;
       const transitMsg = isTransit ? (isCrossCluster ? " (In Transit Cluster C - Cross-Cluster Overflow)" : " (In Transit - Overflow)") : "";
-      success(`Rekomendasi ditemukan!\nLokasi: ${firstLoc.cluster}-${firstLoc.lorong}-${firstLoc.baris}-${firstLoc.level}${transitMsg}`);
+      success(`Rekomendasi ditemukan!\nLokasi: ${firstLoc.clusterChar}-${firstLoc.lorong}-${firstLoc.baris}-${firstLoc.level}${transitMsg}`);
     } else {
       let transitInfo = "";
       if (hasCrossClusterInTransit) {
         const inTransitCount = multiRec.locations.filter(loc => 
-          loc.cluster !== cluster && isInTransitLocation(loc.cluster, parseInt(loc.lorong.replace("L", "")))
+          loc.clusterChar !== cluster && isInTransitLocation(loc.clusterChar, parseInt(loc.lorong.replace("L", "")))
         ).length;
         transitInfo = `\n⚠️ ${inTransitCount} pallet ditempatkan di Cluster C In Transit (cross-cluster overflow)`;
       } else if (hasInTransit) {
@@ -681,9 +704,9 @@ export function InboundForm() {
 
   // Function to expand range into individual locations
   const expandRangeToLocations = () => {
-    const { cluster, lorong, barisStart, barisEnd, palletStart, palletEnd } = manualRange;
+    const { clusterChar, lorong, barisStart, barisEnd, palletStart, palletEnd } = manualRange;
     
-    if (!cluster || !lorong || !barisStart || !barisEnd || !palletStart || !palletEnd) {
+    if (!clusterChar || !lorong || !barisStart || !barisEnd || !palletStart || !palletEnd) {
       error('Semua field range harus diisi!');
       return;
     }
@@ -709,7 +732,7 @@ export function InboundForm() {
     for (let b = barisStartNum; b <= barisEndNum; b++) {
       for (let p = palletStartNum; p <= palletEndNum; p++) {
         locations.push({
-          cluster,
+          clusterChar,
           lorong,
           baris: `B${b}`,
           pallet: `P${p}`
@@ -728,7 +751,7 @@ export function InboundForm() {
       : locations;
     
     if (locations.length > totalPalletsNeeded) {
-      warning(`Range menghasilkan ${locations.length} lokasi. Sistem akan menggunakan ${totalPalletsNeeded} lokasi pertama (${locationsToUse[0].cluster}-${locationsToUse[0].lorong}-${locationsToUse[0].baris}-${locationsToUse[0].pallet} s/d ${locationsToUse[locationsToUse.length-1].cluster}-${locationsToUse[locationsToUse.length-1].lorong}-${locationsToUse[locationsToUse.length-1].baris}-${locationsToUse[locationsToUse.length-1].pallet}).`);
+      warning(`Range menghasilkan ${locations.length} lokasi. Sistem akan menggunakan ${totalPalletsNeeded} lokasi pertama (${locationsToUse[0].clusterChar}-${locationsToUse[0].lorong}-${locationsToUse[0].baris}-${locationsToUse[0].pallet} s/d ${locationsToUse[locationsToUse.length-1].clusterChar}-${locationsToUse[locationsToUse.length-1].lorong}-${locationsToUse[locationsToUse.length-1].baris}-${locationsToUse[locationsToUse.length-1].pallet}).`);
     }
 
     // Check availability for selected locations
@@ -741,20 +764,22 @@ export function InboundForm() {
     const occupied: LocationAvailability[] = [];
 
     locations.forEach(loc => {
-      const locationKey = `${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
+      const locationKey = `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
       // FIXED: Gunakan struktur data yang sama seperti di handleSubmit
       const existingStock = stockListData.find(
-        s => s.location.cluster === loc.cluster && 
-             s.location.lorong === loc.lorong && 
-             s.location.baris === loc.baris && 
-             s.location.level === loc.pallet
+        s => s.cluster === loc.clusterChar && 
+             s.lorong === parseInt(loc.lorong.replace('L', '')) && 
+             s.baris === parseInt(loc.baris.replace('B', '')) && 
+             s.level === parseInt(loc.pallet.replace('P', ''))
       );
 
       const isOccupied = !!existingStock;
       const availabilityInfo: LocationAvailability = {
         location: locationKey,
         isOccupied,
-        occupiedBy: existingStock ? `${existingStock.productName} (${existingStock.qtyCarton} karton)` : undefined
+        occupiedBy: existingStock 
+          ? `${productMasterData.find(p => p.id === existingStock.productId)?.productName || 'Unknown'} (${existingStock.qtyCarton} karton)` 
+          : undefined
       };
 
       availability.push(availabilityInfo);
@@ -787,7 +812,7 @@ export function InboundForm() {
   // Reset manual range
   const resetManualRange = () => {
     setManualRange({
-      cluster: '',
+      clusterChar: '',
       lorong: '',
       barisStart: '',
       barisEnd: '',
@@ -837,7 +862,7 @@ export function InboundForm() {
         qtyPalletInput: data.qtyPallet, 
         qtyCartonInput: data.qtyCarton, 
         bbReceh: [], 
-        cluster: selectedProd.defaultCluster || "", 
+        clusterChar: selectedProd.defaultCluster || "", 
         lorong: "", 
         baris: "", 
         pallet: "",
@@ -872,7 +897,7 @@ export function InboundForm() {
       // Reset: location only (cluster, lorong, baris, pallet) and recommendations
       setForm(prev => ({
         ...prev,
-        cluster: prev.productCode ? getProductByCode(prev.productCode)?.defaultCluster || "" : "",
+        clusterChar: prev.productCode ? getProductByCode(prev.productCode)?.defaultCluster || "" : "",
         lorong: "",
         baris: "",
         pallet: "",
@@ -886,11 +911,11 @@ export function InboundForm() {
   // --- FILTER TRANSAKSI HARI INI ---
   const todayTransactions = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return inboundHistoryData.filter(item => item.tanggal === todayStr);
+    return inboundHistoryData.filter(item => item.arrivalTime.startsWith(todayStr));
   }, []);
 
   // --- HANDLE EDIT TRANSAKSI ---
-  const handleEditClick = (item: typeof inboundHistoryData[0]) => {
+  const handleEditClick = (item: InboundHistory) => {
     setSelectedItemForAction(item);
     setShowEditConfirmModal(true);
   };
@@ -898,25 +923,17 @@ export function InboundForm() {
   const confirmEdit = () => {
     if (!selectedItemForAction) return;
 
-    // 1. Parse lokasi dari string (format: "A-L1-B1-P1, A-L1-B2-P1, ...")
-    const locations = selectedItemForAction.location.split(', ').map(loc => {
-      const parts = loc.trim().split('-');
-      return {
-        cluster: parts[0],
-        lorong: parts[1],
-        baris: parts[2],
-        level: parts[3]
-      };
-    });
+    // 1. Access locations array directly (new structure)
+    const locations = selectedItemForAction.locations;
 
     // 2. Hapus stock dari lokasi-lokasi tersebut (simulasi pembatalan inbound)
     locations.forEach(loc => {
       const stockIndex = stockListData.findIndex(
-        s => s.location.cluster === loc.cluster &&
-             s.location.lorong === loc.lorong &&
-             s.location.baris === loc.baris &&
-             s.location.level === loc.level &&
-             s.productCode === selectedItemForAction.productCode
+        s => s.cluster === loc.cluster &&
+             s.lorong === loc.lorong &&
+             s.baris === loc.baris &&
+             s.level === loc.level &&
+             s.productId === selectedItemForAction.productId
       );
       if (stockIndex !== -1) {
         stockListData.splice(stockIndex, 1);
@@ -930,29 +947,29 @@ export function InboundForm() {
     }
 
     // 4. Load data ke form untuk di-edit
-    const selectedProd = getProductByCode(selectedItemForAction.productCode);
-    const qtyPerPallet = selectedProd?.qtyPerPallet || 1;
+    const selectedProd = productMasterData.find(p => p.id === selectedItemForAction.productId);
+    const qtyPerPallet = selectedProd?.qtyCartonPerPallet || 1;
     const totalCarton = selectedItemForAction.qtyCarton;
     const fullPallets = Math.floor(totalCarton / qtyPerPallet);
     const remainingCartons = totalCarton % qtyPerPallet;
 
     setForm({
-      ekspedisi: selectedItemForAction.ekspedisi,
-      tanggal: selectedItemForAction.tanggal,
-      namaPengemudi: selectedItemForAction.namaPengemudi,
-      noDN: selectedItemForAction.noDN,
-      nomorPolisi: selectedItemForAction.nomorPolisi,
-      productCode: selectedItemForAction.productCode,
+      ekspedisi: selectedItemForAction.expeditionId || '',
+      tanggal: selectedItemForAction.arrivalTime.slice(0, 10),
+      namaPengemudi: selectedItemForAction.driverName,
+      noDN: selectedItemForAction.dnNumber,
+      nomorPolisi: selectedItemForAction.vehicleNumber,
+      productCode: selectedProd?.productCode || '',
       bbProduk: selectedItemForAction.bbProduk,
       kdPlant: selectedItemForAction.bbProduk.substring(6, 10),
       expiredDate: selectedItemForAction.expiredDate,
       qtyPalletInput: String(fullPallets),
       qtyCartonInput: String(remainingCartons),
       bbReceh: [],
-      cluster: locations[0]?.cluster || "",
-      lorong: locations[0]?.lorong || "",
-      baris: locations[0]?.baris || "",
-      pallet: locations[0]?.level || "",
+      clusterChar: locations[0]?.cluster || "",
+      lorong: `L${locations[0]?.lorong || ''}`,
+      baris: `B${locations[0]?.baris || ''}`,
+      pallet: `P${locations[0]?.level || ''}`,
     });
 
     // 5. Reset state
@@ -961,11 +978,11 @@ export function InboundForm() {
     setMultiLocationRec(null);
     setRecommendedLocation(null);
 
-    success(`Data transaksi ${selectedItemForAction.id} telah dimuat ke form. Silakan edit dan submit ulang.`);
+    success(`Data transaksi ${selectedItemForAction.transactionCode} telah dimuat ke form. Silakan edit dan submit ulang.`);
   };
 
   // --- HANDLE BATAL TRANSAKSI ---
-  const handleBatalClick = (item: typeof inboundHistoryData[0]) => {
+  const handleBatalClick = (item: InboundHistory) => {
     setSelectedItemForAction(item);
     setShowBatalConfirmModal(true);
   };
@@ -973,25 +990,17 @@ export function InboundForm() {
   const confirmBatal = () => {
     if (!selectedItemForAction) return;
 
-    // 1. Parse lokasi dari string
-    const locations = selectedItemForAction.location.split(', ').map(loc => {
-      const parts = loc.trim().split('-');
-      return {
-        cluster: parts[0],
-        lorong: parts[1],
-        baris: parts[2],
-        level: parts[3]
-      };
-    });
+    // 1. Access locations array directly (new structure)
+    const locations = selectedItemForAction.locations;
 
     // 2. Hapus stock dari lokasi-lokasi tersebut
     locations.forEach(loc => {
       const stockIndex = stockListData.findIndex(
-        s => s.location.cluster === loc.cluster &&
-             s.location.lorong === loc.lorong &&
-             s.location.baris === loc.baris &&
-             s.location.level === loc.level &&
-             s.productCode === selectedItemForAction.productCode
+        s => s.cluster === loc.cluster &&
+             s.lorong === loc.lorong &&
+             s.baris === loc.baris &&
+             s.level === loc.level &&
+             s.productId === selectedItemForAction.productId
       );
       if (stockIndex !== -1) {
         stockListData.splice(stockIndex, 1);
@@ -1008,7 +1017,7 @@ export function InboundForm() {
     setShowBatalConfirmModal(false);
     setSelectedItemForAction(null);
 
-    success(`Transaksi ${selectedItemForAction.id} telah dibatalkan. Stock telah dikembalikan.`);
+    success(`Transaksi ${selectedItemForAction.transactionCode} telah dibatalkan. Stock telah dikembalikan.`);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1035,7 +1044,7 @@ export function InboundForm() {
         errorList.push("Qty (Pallet/Karton) harus diisi.");
     }
     
-    if (!form.cluster) { newErrors.cluster = "Cluster harus diisi"; errorList.push("Cluster harus diisi"); }
+    if (!form.clusterChar) { newErrors.clusterChar = "Cluster harus diisi"; errorList.push("Cluster harus diisi"); }
     
     // --- VALIDASI LOKASI FINAL SEBELUM SUBMISSION ---
     let locationsToSubmit: RecommendedLocation[] = [];
@@ -1050,13 +1059,14 @@ export function InboundForm() {
             const occupiedRecommendedLocs: string[] = [];
             multiLocationRec.locations.forEach(loc => {
               const existingStock = stockListData.find(
-                s => s.location.cluster === loc.cluster && 
-                     s.location.lorong === loc.lorong && 
-                     s.location.baris === loc.baris && 
-                     s.location.level === loc.level
+                s => s.cluster === loc.clusterChar && 
+                     s.lorong === parseInt(loc.lorong.replace('L', '')) && 
+                     s.baris === parseInt(loc.baris.replace('B', '')) && 
+                     s.level === parseInt(loc.level.replace('P', ''))
               );
               if (existingStock) {
-                occupiedRecommendedLocs.push(`${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.level} (${existingStock.productName})`);
+                const product = productMasterData.find(p => p.id === existingStock.productId);
+                occupiedRecommendedLocs.push(`${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.level} (${product?.productName || 'Unknown'})`);
               }
             });
             
@@ -1075,14 +1085,14 @@ export function InboundForm() {
         let hasEmptyLocation = false;
         
         manualLocations.forEach((loc, index) => {
-            if (!loc.cluster || !loc.lorong || !loc.baris || !loc.pallet) {
+            if (!loc.clusterChar || !loc.lorong || !loc.baris || !loc.pallet) {
                 hasEmptyLocation = true;
                 newErrors[`manualLoc${index}`] = `Lokasi ${index + 1} belum lengkap`;
                 errorList.push(`Lokasi ${index + 1} belum lengkap`);
                 return;
             }
             
-            const locationKey = `${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
+            const locationKey = `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
             
             // Check duplikat
             if (locationSet.has(locationKey)) {
@@ -1094,10 +1104,10 @@ export function InboundForm() {
             // Check apakah lokasi sudah terisi di stockList
             const locationIsOccupied = stockListData.some(
               (item) =>
-                item.location.cluster === loc.cluster &&
-                item.location.lorong === loc.lorong &&
-                item.location.baris === loc.baris &&
-                item.location.level === loc.pallet
+                item.cluster === loc.clusterChar &&
+                item.lorong === parseInt(loc.lorong.replace('L', '')) &&
+                item.baris === parseInt(loc.baris.replace('B', '')) &&
+                item.level === parseInt(loc.pallet.replace('P', ''))
             );
             
             if (locationIsOccupied) {
@@ -1108,7 +1118,7 @@ export function InboundForm() {
             
             locationSet.add(locationKey);
             locationsToSubmit.push({
-                cluster: loc.cluster,
+                clusterChar: loc.clusterChar,
                 lorong: loc.lorong,
                 baris: loc.baris,
                 level: loc.pallet,
@@ -1125,7 +1135,7 @@ export function InboundForm() {
     }
     // Case 3: Single pallet (auto recommend ON atau OFF)
     else if (totalPalletsNeeded === 1) {
-        const currentLoc = { cluster: form.cluster, lorong: form.lorong, baris: form.baris, level: form.pallet, palletsCanFit: 1 };
+        const currentLoc = { clusterChar: form.clusterChar, lorong: form.lorong, baris: form.baris, level: form.pallet, palletsCanFit: 1 };
         
         if (!form.lorong || !form.baris || !form.pallet) {
              newErrors.lorong = "Lokasi (Lorong, Baris, Pallet) harus diisi.";
@@ -1133,13 +1143,13 @@ export function InboundForm() {
         } else {
             const locationIsOccupied = stockListData.some(
               (item) =>
-                item.location.cluster === currentLoc.cluster &&
-                item.location.lorong === currentLoc.lorong &&
-                item.location.baris === currentLoc.baris &&
-                item.location.level === currentLoc.level
+                item.cluster === currentLoc.clusterChar &&
+                item.lorong === parseInt(currentLoc.lorong.replace('L', '')) &&
+                item.baris === parseInt(currentLoc.baris.replace('B', '')) &&
+                item.level === parseInt(currentLoc.level.replace('P', ''))
             );
             if (locationIsOccupied) {
-              newErrors.pallet = `Lokasi ${form.cluster}-${form.lorong}-${form.baris}-${form.pallet} sudah terisi.`;
+              newErrors.pallet = `Lokasi ${form.clusterChar}-${form.lorong}-${form.baris}-${form.pallet} sudah terisi.`;
               errorList.push(newErrors.pallet);
             } else {
                 locationsToSubmit.push(currentLoc);
@@ -1183,7 +1193,7 @@ export function InboundForm() {
 
         finalSubmissions.push({
             productCode: form.productCode,
-            location: `${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.level}`,
+            location: `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.level}`,
             qtyPallet: 1, // Selalu 1 pallet stack per lokasi
             qtyCarton: qtyToRecord,
             bbPallet: bbToRecord,
@@ -1622,7 +1632,11 @@ export function InboundForm() {
                   }`}
                 >
                   <option value="">-- Pilih Ekspedisi --</option>
-                  {ekspedisiMaster.map((opt) => (<option key={opt.code} value={opt.code}>{opt.name}</option>))}
+                  {warehouseExpeditions.map((exp) => (
+                    <option key={exp.id} value={exp.expeditionCode}>
+                      {exp.expeditionName} ({exp.expeditionCode})
+                    </option>
+                  ))}
                 </select>
                 {errors.ekspedisi && (
                   <p className="text-red-500 text-xs mt-1">{errors.ekspedisi}</p>
@@ -1798,7 +1812,7 @@ export function InboundForm() {
                 }`}
               >
                 <option value="">-- Pilih Produk --</option>
-                {productMasterData.map((product) => (
+                {filteredProducts.map((product) => (
                   <option key={product.id} value={product.productCode}>
                     {product.productName} ({product.productCode})
                   </option>
@@ -1950,8 +1964,8 @@ export function InboundForm() {
                       Cluster <span className="text-red-500">*</span>
                     </label>
                     <select
-                      value={form.cluster}
-                      onChange={(e) => handleChange("cluster", e.target.value)}
+                      value={form.clusterChar}
+                      onChange={(e) => handleChange("clusterChar", e.target.value)}
                       className="w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-gray-100 border-gray-200"
                       disabled={autoRecommend}
                     >
@@ -1960,8 +1974,8 @@ export function InboundForm() {
                         <option key={opt} value={opt}>{opt}</option>
                       ))}
                     </select>
-                    {errors.cluster && (
-                      <p className="text-red-500 text-xs mt-1">{errors.cluster}</p>
+                    {errors.clusterChar && (
+                      <p className="text-red-500 text-xs mt-1">{errors.clusterChar}</p>
                     )}
                   </div>
 
@@ -1976,7 +1990,7 @@ export function InboundForm() {
                     className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                       errors.lorong ? "border-red-500" : "border-gray-200"
                     } ${autoRecommend ? "bg-gray-100" : ""}`}
-                    disabled={autoRecommend || !form.cluster}
+                    disabled={autoRecommend || !form.clusterChar}
                   >
                     <option value="">-- Pilih --</option>
                     {lorongOptions.map((lorong) => (
@@ -2000,7 +2014,7 @@ export function InboundForm() {
                     className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                       errors.baris ? "border-red-500" : "border-gray-200"
                     } ${autoRecommend ? "bg-gray-100" : ""}`}
-                    disabled={autoRecommend || !form.cluster || !form.lorong}
+                    disabled={autoRecommend || !form.clusterChar || !form.lorong}
                   >
                     <option value="">-- Pilih --</option>
                     {barisOptions.map((baris) => (
@@ -2024,7 +2038,7 @@ export function InboundForm() {
                     className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                       errors.pallet ? "border-red-500" : "border-gray-200"
                     } ${autoRecommend ? "bg-gray-100" : ""}`}
-                    disabled={autoRecommend || !form.cluster || !form.lorong || !form.baris}
+                    disabled={autoRecommend || !form.clusterChar || !form.lorong || !form.baris}
                   >
                     <option value="">-- Pilih --</option>
                     {palletOptions.map((pallet) => (
@@ -2064,10 +2078,10 @@ export function InboundForm() {
                         Cluster <span className="text-red-500">*</span>
                       </label>
                       <select
-                        value={form.cluster}
-                        onChange={(e) => handleChange("cluster", e.target.value)}
+                        value={form.clusterChar}
+                        onChange={(e) => handleChange("clusterChar", e.target.value)}
                         className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
-                          errors.cluster ? "border-red-500" : "border-gray-200"
+                          errors.clusterChar ? "border-red-500" : "border-gray-200"
                         }`}
                       >
                         <option value="">-- Pilih --</option>
@@ -2075,8 +2089,8 @@ export function InboundForm() {
                           <option key={opt} value={opt}>{opt}</option>
                         ))}
                       </select>
-                      {errors.cluster && (
-                        <p className="text-red-500 text-xs mt-1">{errors.cluster}</p>
+                      {errors.clusterChar && (
+                        <p className="text-red-500 text-xs mt-1">{errors.clusterChar}</p>
                       )}
                     </div>
 
@@ -2090,7 +2104,7 @@ export function InboundForm() {
                         className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                           errors.lorong ? "border-red-500" : "border-gray-200"
                         }`}
-                        disabled={!form.cluster}
+                        disabled={!form.clusterChar}
                       >
                         <option value="">-- Pilih --</option>
                         {lorongOptions.map((opt) => (
@@ -2112,7 +2126,7 @@ export function InboundForm() {
                         className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                           errors.baris ? "border-red-500" : "border-gray-200"
                         }`}
-                        disabled={!form.cluster || !form.lorong}
+                        disabled={!form.clusterChar || !form.lorong}
                       >
                         <option value="">-- Pilih --</option>
                         {barisOptions.map((opt) => (
@@ -2134,7 +2148,7 @@ export function InboundForm() {
                         className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
                           errors.pallet ? "border-red-500" : "border-gray-200"
                         }`}
-                        disabled={!form.cluster || !form.lorong || !form.baris}
+                        disabled={!form.clusterChar || !form.lorong || !form.baris}
                       >
                         <option value="">-- Pilih --</option>
                         {palletOptions.map((opt) => (
@@ -2165,8 +2179,8 @@ export function InboundForm() {
                             Cluster <span className="text-red-500">*</span>
                           </label>
                           <select
-                            value={manualRange.cluster}
-                            onChange={(e) => setManualRange(prev => ({ ...prev, cluster: e.target.value }))}
+                            value={manualRange.clusterChar}
+                            onChange={(e) => setManualRange(prev => ({ ...prev, clusterChar: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
                           >
                             <option value="">-- Pilih --</option>
@@ -2184,11 +2198,11 @@ export function InboundForm() {
                             value={manualRange.lorong}
                             onChange={(e) => setManualRange(prev => ({ ...prev, lorong: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
-                            disabled={!manualRange.cluster}
+                            disabled={!manualRange.clusterChar}
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.cluster && (() => {
-                              const config = getClusterConfig(manualRange.cluster);
+                            {manualRange.clusterChar && (() => {
+                              const config = getClusterConfig(manualRange.clusterChar);
                               if (!config) return null;
                               const options = Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
                               return options.map((opt) => (
@@ -2222,12 +2236,12 @@ export function InboundForm() {
                             value={manualRange.barisStart}
                             onChange={(e) => setManualRange(prev => ({ ...prev, barisStart: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
-                            disabled={!manualRange.cluster || !manualRange.lorong}
+                            disabled={!manualRange.clusterChar || !manualRange.lorong}
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.cluster && manualRange.lorong && (() => {
+                            {manualRange.clusterChar && manualRange.lorong && (() => {
                               const lorongNum = parseInt(manualRange.lorong.replace('L', ''));
-                              const barisCount = getBarisCountForLorong(manualRange.cluster, lorongNum);
+                              const barisCount = getBarisCountForLorong(manualRange.clusterChar, lorongNum);
                               const options = Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
                               return options.map((opt) => (
                                 <option key={opt} value={opt}>{opt}</option>
@@ -2243,12 +2257,12 @@ export function InboundForm() {
                             value={manualRange.barisEnd}
                             onChange={(e) => setManualRange(prev => ({ ...prev, barisEnd: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
-                            disabled={!manualRange.cluster || !manualRange.lorong}
+                            disabled={!manualRange.clusterChar || !manualRange.lorong}
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.cluster && manualRange.lorong && (() => {
+                            {manualRange.clusterChar && manualRange.lorong && (() => {
                               const lorongNum = parseInt(manualRange.lorong.replace('L', ''));
-                              const barisCount = getBarisCountForLorong(manualRange.cluster, lorongNum);
+                              const barisCount = getBarisCountForLorong(manualRange.clusterChar, lorongNum);
                               const options = Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
                               return options.map((opt) => (
                                 <option key={opt} value={opt}>{opt}</option>
@@ -2268,13 +2282,13 @@ export function InboundForm() {
                             value={manualRange.palletStart}
                             onChange={(e) => setManualRange(prev => ({ ...prev, palletStart: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
-                            disabled={!manualRange.cluster || !manualRange.lorong || !manualRange.barisStart}
+                            disabled={!manualRange.clusterChar || !manualRange.lorong || !manualRange.barisStart}
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.cluster && manualRange.lorong && manualRange.barisStart && (() => {
+                            {manualRange.clusterChar && manualRange.lorong && manualRange.barisStart && (() => {
                               const lorongNum = parseInt(manualRange.lorong.replace('L', ''));
                               const barisNum = parseInt(manualRange.barisStart.replace('B', ''));
-                              const palletCapacity = getPalletCapacityForCell(manualRange.cluster, lorongNum, barisNum);
+                              const palletCapacity = getPalletCapacityForCell(manualRange.clusterChar, lorongNum, barisNum);
                               const options = Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
                               return options.map((opt) => (
                                 <option key={opt} value={opt}>{opt}</option>
@@ -2290,13 +2304,13 @@ export function InboundForm() {
                             value={manualRange.palletEnd}
                             onChange={(e) => setManualRange(prev => ({ ...prev, palletEnd: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
-                            disabled={!manualRange.cluster || !manualRange.lorong || !manualRange.barisStart}
+                            disabled={!manualRange.clusterChar || !manualRange.lorong || !manualRange.barisStart}
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.cluster && manualRange.lorong && manualRange.barisStart && (() => {
+                            {manualRange.clusterChar && manualRange.lorong && manualRange.barisStart && (() => {
                               const lorongNum = parseInt(manualRange.lorong.replace('L', ''));
                               const barisNum = parseInt(manualRange.barisStart.replace('B', ''));
-                              const palletCapacity = getPalletCapacityForCell(manualRange.cluster, lorongNum, barisNum);
+                              const palletCapacity = getPalletCapacityForCell(manualRange.clusterChar, lorongNum, barisNum);
                               const options = Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
                               return options.map((opt) => (
                                 <option key={opt} value={opt}>{opt}</option>
@@ -2330,7 +2344,7 @@ export function InboundForm() {
                         </div>
                         <div className="max-h-48 overflow-y-auto space-y-1">
                           {manualLocations.map((loc, idx) => {
-                            const locationKey = `${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
+                            const locationKey = `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
                             const availInfo = locationAvailability.find(a => a.location === locationKey);
                             return (
                               <div key={idx} className={`flex items-center justify-between p-2 rounded-lg text-sm ${
@@ -2438,8 +2452,8 @@ export function InboundForm() {
                     </span>
                     <span className="ml-4 text-slate-600">Lokasi:</span>{" "}
                     <span className="font-bold text-slate-900">
-                      {form.cluster && form.lorong && form.baris && form.pallet
-                        ? `${form.cluster}-${form.lorong}-${form.baris}-${form.pallet}`
+                      {form.clusterChar && form.lorong && form.baris && form.pallet
+                        ? `${form.clusterChar}-${form.lorong}-${form.baris}-${form.pallet}`
                         : "-"}
                     </span>
                     {autoRecommend && (
@@ -2479,12 +2493,12 @@ export function InboundForm() {
                         <div className="grid grid-cols-2 gap-2">
                             {multiLocationRec.locations.map((loc, idx) => {
                                 const lorongNum = parseInt(loc.lorong.replace("L", ""));
-                                const isTransit = isInTransitLocation(form.cluster, lorongNum);
+                                const isTransit = isInTransitLocation(form.clusterChar, lorongNum);
                                 return (
                                   <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg ${idx === 0 ? 'bg-green-600 text-white' : isTransit ? 'bg-red-100 text-red-800 border-2 border-red-300' : 'bg-green-100 text-green-800'}`}>
                                       <span className="text-xs font-bold">#{idx + 1}</span>
                                       <span className="font-bold text-sm">
-                                          {loc.cluster}-{loc.lorong}-{loc.baris}-{loc.level}
+                                          {loc.clusterChar}-{loc.lorong}-{loc.baris}-{loc.level}
                                       </span>
                                       {isTransit && (
                                         <span className="text-xs bg-red-600 text-white px-2 py-0.5 rounded-full font-bold">
@@ -2500,7 +2514,7 @@ export function InboundForm() {
                     <div className="flex items-center gap-2">
                         <span className="text-green-700">Lokasi:</span>
                         <span className="px-4 py-2 bg-green-600 text-white rounded-lg font-bold text-lg">
-                            {form.cluster}-{form.lorong}-{form.baris}-{form.pallet}
+                            {form.clusterChar}-{form.lorong}-{form.baris}-{form.pallet}
                         </span>
                     </div>
                 )}
@@ -2549,27 +2563,23 @@ export function InboundForm() {
                         {todayTransactions.map((item) => (
                           <tr key={item.id} className="hover:bg-blue-50 transition-colors">
                             <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
-                              {new Date(item.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                              {new Date(item.arrivalTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
                             </td>
-                            <td className="px-3 py-3 text-sm text-gray-900">{item.ekspedisi}</td>
-                            <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">{item.namaPengemudi}</td>
+                            <td className="px-3 py-3 text-sm text-gray-900">{item.expeditionId || '-'}</td>
+                            <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">{item.driverName}</td>
                             <td className="px-3 py-3 text-sm">
-                              <div className="font-medium text-gray-900">{item.productCode}</div>
-                              <div className="text-gray-500 text-xs truncate max-w-[150px]">{item.productName}</div>
+                              <div className="font-medium text-gray-900">{productMasterData.find(p => p.id === item.productId)?.productCode || '-'}</div>
+                              <div className="text-gray-500 text-xs truncate max-w-[150px]">{productMasterData.find(p => p.id === item.productId)?.productName || '-'}</div>
                             </td>
                             <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
-                              {item.qtyPallet}
+                              {item.locations.length}
                             </td>
                             <td className="px-2 py-3 text-sm text-center font-bold text-blue-600">
                               {item.qtyCarton}
                             </td>
                             <td className="px-2 py-3 text-center">
-                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                item.status === "completed"
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-yellow-100 text-yellow-800"
-                              }`}>
-                                {item.status === "completed" ? "✓" : "⚠"}
+                              <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                ✓
                               </span>
                             </td>
                             <td className="px-3 py-3">
@@ -2644,7 +2654,7 @@ export function InboundForm() {
                       <div>
                         <span className="text-gray-600">Tanggal:</span>
                         <p className="font-semibold text-gray-900">
-                          {new Date(selectedHistoryItem.tanggal).toLocaleDateString("id-ID", {
+                          {new Date(selectedHistoryItem.arrivalTime).toLocaleDateString("id-ID", {
                             weekday: "long",
                             year: "numeric",
                             month: "long",
@@ -2653,20 +2663,24 @@ export function InboundForm() {
                         </p>
                       </div>
                       <div>
+                        <span className="text-gray-600">Kode Transaksi:</span>
+                        <p className="font-semibold text-gray-900 font-mono">{selectedHistoryItem.transactionCode}</p>
+                      </div>
+                      <div>
                         <span className="text-gray-600">Ekspedisi:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.ekspedisi}</p>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.expeditionId || '-'}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Nama Pengemudi:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.namaPengemudi}</p>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.driverName}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">No. Polisi:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.nomorPolisi}</p>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.vehicleNumber}</p>
                       </div>
-                      <div className="col-span-2">
+                      <div>
                         <span className="text-gray-600">No. DN/Surat Jalan:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.noDN}</p>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.dnNumber}</p>
                       </div>
                     </div>
                   </div>
@@ -2679,19 +2693,19 @@ export function InboundForm() {
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div className="col-span-2">
                         <span className="text-gray-600">Nama Produk:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.productName}</p>
+                        <p className="font-semibold text-gray-900">{productMasterData.find(p => p.id === selectedHistoryItem.productId)?.productName || '-'}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Kode Produk:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.productCode}</p>
+                        <p className="font-semibold text-gray-900">{productMasterData.find(p => p.id === selectedHistoryItem.productId)?.productCode || '-'}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Total PCS:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.totalPcs.toLocaleString()} pcs</p>
+                        <p className="font-semibold text-gray-900">{((productMasterData.find(p => p.id === selectedHistoryItem.productId)?.qtyPerCarton || 0) * selectedHistoryItem.qtyCarton).toLocaleString()} pcs</p>
                       </div>
                       <div>
-                        <span className="text-gray-600">Qty Pallet:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.qtyPallet} pallet</p>
+                        <span className="text-gray-600">Qty Lokasi:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.locations.length} lokasi</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Qty Carton:</span>
@@ -2724,41 +2738,47 @@ export function InboundForm() {
                     <h3 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
                       <span className="text-lg">📍</span> Lokasi Penyimpanan
                     </h3>
-                    <div className="text-sm">
-                      <span className="text-gray-600">Lokasi:</span>
-                      <p className="font-semibold text-gray-900 text-lg">{selectedHistoryItem.location}</p>
+                    <div className="space-y-2">
+                      {selectedHistoryItem.locations.map((loc, idx) => (
+                        <div key={idx} className="bg-white rounded-lg p-3 border border-purple-200">
+                          <div className="grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                              <span className="text-gray-600">Lokasi:</span>
+                              <p className="font-semibold text-gray-900">{loc.cluster}-L{loc.lorong}-B{loc.baris}-P{loc.level}</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Qty:</span>
+                              <p className="font-semibold text-gray-900">{loc.qtyCarton} carton{loc.isReceh ? ' (Receh)' : ''}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Waktu Input */}
+                  {/* Waktu & Metadata */}
                   <div className="bg-gradient-to-br from-gray-50 to-slate-50 rounded-xl p-4 border border-gray-200">
                     <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                      <span className="text-lg">⏰</span> Waktu Input
+                      <span className="text-lg">⏰</span> Waktu & Metadata
                     </h3>
-                    <div className="text-sm">
-                      <span className="text-gray-600">Dibuat pada:</span>
-                      <p className="font-semibold text-gray-900">
-                        {new Date(selectedHistoryItem.createdAt).toLocaleString("id-ID", {
-                          dateStyle: "full",
-                          timeStyle: "medium",
-                        })}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Status */}
-                  <div className="bg-gradient-to-br from-slate-50 to-gray-50 rounded-xl p-4 border border-slate-200">
-                    <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
-                      <span className="text-lg">✓</span> Status Transaksi
-                    </h3>
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-flex px-4 py-2 text-sm font-bold rounded-lg ${
-                        selectedHistoryItem.status === "completed"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-yellow-100 text-yellow-800"
-                      }`}>
-                        {selectedHistoryItem.status === "completed" ? "✅ Selesai" : "⚠️ Partial"}
-                      </span>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="text-gray-600">Waktu Kedatangan:</span>
+                        <p className="font-semibold text-gray-900">
+                          {new Date(selectedHistoryItem.arrivalTime).toLocaleString("id-ID", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Diterima Oleh:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.receivedBy}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-gray-600">Catatan:</span>
+                        <p className="font-semibold text-gray-900">{selectedHistoryItem.notes || '-'}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2795,7 +2815,7 @@ export function InboundForm() {
                       ⚠️ Tindakan ini akan:
                     </p>
                     <ul className="text-amber-700 text-sm mt-2 space-y-1 list-disc list-inside">
-                      <li>Membatalkan transaksi <strong>{selectedItemForAction.id}</strong></li>
+                      <li>Membatalkan transaksi <strong>{selectedItemForAction.transactionCode}</strong></li>
                       <li>Menghapus stock dari lokasi yang tercatat</li>
                       <li>Memuat data ke form untuk di-edit ulang</li>
                     </ul>
@@ -2805,15 +2825,15 @@ export function InboundForm() {
                     <div className="text-sm space-y-1">
                       <div className="flex justify-between">
                         <span className="text-gray-500">Produk:</span>
-                        <span className="font-semibold text-gray-900">{selectedItemForAction.productCode}</span>
+                        <span className="font-semibold text-gray-900">{productMasterData.find(p => p.id === selectedItemForAction.productId)?.productCode || '-'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Qty:</span>
-                        <span className="font-semibold text-gray-900">{selectedItemForAction.qtyPallet} pallet, {selectedItemForAction.qtyCarton} karton</span>
+                        <span className="font-semibold text-gray-900">{selectedItemForAction.locations.length} lokasi, {selectedItemForAction.qtyCarton} karton</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Lokasi:</span>
-                        <span className="font-semibold text-gray-900 text-xs">{selectedItemForAction.location}</span>
+                        <span className="font-semibold text-gray-900 text-xs">{selectedItemForAction.locations.map(loc => `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`).join(', ')}</span>
                       </div>
                     </div>
                   </div>
@@ -2855,7 +2875,7 @@ export function InboundForm() {
                       ⚠️ Tindakan ini akan:
                     </p>
                     <ul className="text-red-700 text-sm mt-2 space-y-1 list-disc list-inside">
-                      <li>Membatalkan transaksi <strong>{selectedItemForAction.id}</strong></li>
+                      <li>Membatalkan transaksi <strong>{selectedItemForAction.transactionCode}</strong></li>
                       <li>Menghapus stock dari lokasi yang tercatat</li>
                       <li>Menghapus record dari history</li>
                     </ul>
@@ -2865,15 +2885,15 @@ export function InboundForm() {
                     <div className="text-sm space-y-1">
                       <div className="flex justify-between">
                         <span className="text-gray-500">Produk:</span>
-                        <span className="font-semibold text-gray-900">{selectedItemForAction.productCode}</span>
+                        <span className="font-semibold text-gray-900">{productMasterData.find(p => p.id === selectedItemForAction.productId)?.productCode || '-'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Qty:</span>
-                        <span className="font-semibold text-gray-900">{selectedItemForAction.qtyPallet} pallet, {selectedItemForAction.qtyCarton} karton</span>
+                        <span className="font-semibold text-gray-900">{selectedItemForAction.locations.length} lokasi, {selectedItemForAction.qtyCarton} karton</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Lokasi:</span>
-                        <span className="font-semibold text-gray-900 text-xs">{selectedItemForAction.location}</span>
+                        <span className="font-semibold text-gray-900 text-xs">{selectedItemForAction.locations.map(loc => `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`).join(', ')}</span>
                       </div>
                     </div>
                   </div>

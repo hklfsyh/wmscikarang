@@ -27,23 +27,26 @@ export default function ProductHomeEditor({
 
   const [formData, setFormData] = useState<ProductHome>({
     id: "",
-    productCode: "",
-    productName: "",
-    homeCluster: "",
-    allowedLorongRange: [1, 10],
-    allowedBarisRange: [1, 10],
+    warehouseId: "wh-001-cikarang",
+    productId: "",
+    clusterChar: "",
+    lorongStart: 1,
+    lorongEnd: 10,
+    barisStart: 1,
+    barisEnd: 10,
     maxPalletPerLocation: 3,
+    priority: 1,
     isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   });
 
   const filteredProductHomes = productHomes.filter((ph) => {
-    if (filterCluster !== "all" && ph.homeCluster !== filterCluster) return false;
+    if (filterCluster !== "all" && ph.clusterChar !== filterCluster) return false;
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
-      return (
-        ph.productCode.toLowerCase().includes(search) ||
-        ph.productName.toLowerCase().includes(search)
-      );
+      // Search by productId for now (will need product lookup for productName)
+      return ph.productId.toLowerCase().includes(search);
     }
     return true;
   });
@@ -51,13 +54,18 @@ export default function ProductHomeEditor({
   const handleAdd = () => {
     setFormData({
       id: `ph-${Date.now()}`,
-      productCode: "",
-      productName: "",
-      homeCluster: clusters[0]?.cluster || "A",
-      allowedLorongRange: [1, 10],
-      allowedBarisRange: [1, 10],
+      warehouseId: "wh-001-cikarang",
+      productId: "",
+      clusterChar: clusters[0]?.clusterChar || "A",
+      lorongStart: 1,
+      lorongEnd: 10,
+      barisStart: 1,
+      barisEnd: 10,
       maxPalletPerLocation: 3,
+      priority: 1,
       isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
     setShowAddModal(true);
   };
@@ -82,33 +90,24 @@ export default function ProductHomeEditor({
   };
 
   const handleSubmitAdd = () => {
-    if (!formData.productCode || !formData.homeCluster) {
-      error("Product code dan home cluster harus diisi!");
+    if (!formData.productId || !formData.clusterChar) {
+      error("Product ID dan cluster harus diisi!");
       return;
     }
-    onUpdate([...productHomes, formData]);
+    const newData = { ...formData, updatedAt: new Date().toISOString() };
+    onUpdate([...productHomes, newData]);
     setShowAddModal(false);
   };
 
   const handleSubmitEdit = () => {
-    if (!formData.productCode || !formData.homeCluster) {
-      error("Product code dan home cluster harus diisi!");
+    if (!formData.productId || !formData.clusterChar) {
+      error("Product ID dan cluster harus diisi!");
       return;
     }
-    onUpdate(productHomes.map((ph) => (ph.id === selectedProductHome?.id ? formData : ph)));
+    const updatedData = { ...formData, updatedAt: new Date().toISOString() };
+    onUpdate(productHomes.map((ph) => (ph.id === selectedProductHome?.id ? updatedData : ph)));
     setShowEditModal(false);
     setSelectedProductHome(null);
-  };
-
-  const handleProductSelect = (productCode: string) => {
-    const product = products.find((p) => p.productCode === productCode);
-    if (product) {
-      setFormData({
-        ...formData,
-        productCode: product.productCode,
-        productName: product.productName,
-      });
-    }
   };
 
   return (
@@ -154,8 +153,8 @@ export default function ProductHomeEditor({
             >
               <option value="all">Semua Cluster</option>
               {clusters.map((cluster) => (
-                <option key={cluster.id} value={cluster.cluster}>
-                  Cluster {cluster.cluster}
+                <option key={cluster.id} value={cluster.clusterChar}>
+                  Cluster {cluster.clusterChar}
                 </option>
               ))}
             </select>
@@ -180,59 +179,67 @@ export default function ProductHomeEditor({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredProductHomes.map((ph) => (
-                <tr key={ph.id} className="hover:bg-blue-50 transition-colors">
-                  <td className="px-6 py-4 text-sm font-mono text-gray-700">{ph.productCode}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-800">{ph.productName}</td>
-                  <td className="px-6 py-4 text-center">
-                    <span className="inline-block px-4 py-2 bg-blue-100 text-blue-700 rounded-lg font-bold">
-                      {ph.homeCluster}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <span className="text-sm font-semibold text-gray-700">
-                      {ph.allowedLorongRange[0]} - {ph.allowedLorongRange[1]}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <span className="text-sm font-semibold text-gray-700">
-                      {ph.allowedBarisRange[0]} - {ph.allowedBarisRange[1]}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-bold">
-                      {ph.maxPalletPerLocation}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <span
-                      className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
-                        ph.isActive
-                          ? "bg-green-100 text-green-700"
-                          : "bg-gray-100 text-gray-600"
-                      }`}
-                    >
-                      {ph.isActive ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex gap-2 justify-center">
-                      <button
-                        onClick={() => handleEdit(ph)}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-all"
+              {filteredProductHomes.map((ph) => {
+                // For display, we show productId (in real app, this would JOIN with products table)
+                const productDisplay = products.find(p => `prod-${p.productCode}` === ph.productId);
+                return (
+                  <tr key={ph.id} className="hover:bg-blue-50 transition-colors">
+                    <td className="px-6 py-4 text-sm font-mono text-gray-700">
+                      {productDisplay?.productCode || ph.productId}
+                    </td>
+                    <td className="px-6 py-4 text-sm font-semibold text-gray-800">
+                      {productDisplay?.productName || "N/A"}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <span className="inline-block px-4 py-2 bg-blue-100 text-blue-700 rounded-lg font-bold">
+                        {ph.clusterChar}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <span className="text-sm font-semibold text-gray-700">
+                        {ph.lorongStart} - {ph.lorongEnd}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <span className="text-sm font-semibold text-gray-700">
+                        {ph.barisStart} - {ph.barisEnd}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-bold">
+                        {ph.maxPalletPerLocation}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <span
+                        className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
+                          ph.isActive
+                            ? "bg-green-100 text-green-700"
+                            : "bg-gray-100 text-gray-600"
+                        }`}
                       >
-                        ✏️ Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(ph)}
-                        className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 transition-all"
-                      >
-                        🗑️ Hapus
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        {ph.isActive ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex gap-2 justify-center">
+                        <button
+                          onClick={() => handleEdit(ph)}
+                          className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-all"
+                        >
+                          ✏️ Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(ph)}
+                          className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 transition-all"
+                        >
+                          🗑️ Hapus
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -283,24 +290,25 @@ export default function ProductHomeEditor({
                       Select Product *
                     </label>
                     <select
-                      value={formData.productCode}
-                      onChange={(e) => handleProductSelect(e.target.value)}
+                      value={formData.productId}
+                      onChange={(e) => {
+                        setFormData({ ...formData, productId: e.target.value });
+                      }}
                       className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
                       disabled={showEditModal}
                     >
                       <option value="">-- Pilih Produk --</option>
                       {products.map((product) => (
-                        <option key={product.productCode} value={product.productCode}>
+                        <option key={product.productCode} value={`prod-${product.productCode}`}>
                           {product.productCode} - {product.productName}
                         </option>
                       ))}
                     </select>
                   </div>
-                  {formData.productName && (
+                  {formData.productId && (
                     <div className="bg-white p-3 rounded-lg border border-blue-300">
-                      <p className="text-sm text-gray-600">Selected Product:</p>
-                      <p className="font-semibold text-gray-800">{formData.productName}</p>
-                      <p className="text-xs text-gray-500 font-mono">{formData.productCode}</p>
+                      <p className="text-sm text-gray-600">Selected Product ID:</p>
+                      <p className="font-semibold text-gray-800 font-mono text-sm">{formData.productId}</p>
                     </div>
                   )}
                 </div>
@@ -315,13 +323,13 @@ export default function ProductHomeEditor({
                       Home Cluster *
                     </label>
                     <select
-                      value={formData.homeCluster}
-                      onChange={(e) => setFormData({ ...formData, homeCluster: e.target.value })}
+                      value={formData.clusterChar}
+                      onChange={(e) => setFormData({ ...formData, clusterChar: e.target.value })}
                       className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
                     >
                       {clusters.map((cluster) => (
-                        <option key={cluster.id} value={cluster.cluster}>
-                          Cluster {cluster.cluster} - {cluster.clusterName}
+                        <option key={cluster.id} value={cluster.clusterChar}>
+                          Cluster {cluster.clusterChar} - {cluster.clusterName}
                         </option>
                       ))}
                     </select>
@@ -335,14 +343,11 @@ export default function ProductHomeEditor({
                       <input
                         type="number"
                         min="1"
-                        value={formData.allowedLorongRange[0]}
+                        value={formData.lorongStart}
                         onChange={(e) =>
                           setFormData({
                             ...formData,
-                            allowedLorongRange: [
-                              parseInt(e.target.value) || 1,
-                              formData.allowedLorongRange[1],
-                            ],
+                            lorongStart: parseInt(e.target.value) || 1,
                           })
                         }
                         className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
@@ -355,14 +360,11 @@ export default function ProductHomeEditor({
                       <input
                         type="number"
                         min="1"
-                        value={formData.allowedLorongRange[1]}
+                        value={formData.lorongEnd}
                         onChange={(e) =>
                           setFormData({
                             ...formData,
-                            allowedLorongRange: [
-                              formData.allowedLorongRange[0],
-                              parseInt(e.target.value) || 1,
-                            ],
+                            lorongEnd: parseInt(e.target.value) || 1,
                           })
                         }
                         className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
@@ -378,14 +380,11 @@ export default function ProductHomeEditor({
                       <input
                         type="number"
                         min="1"
-                        value={formData.allowedBarisRange[0]}
+                        value={formData.barisStart}
                         onChange={(e) =>
                           setFormData({
                             ...formData,
-                            allowedBarisRange: [
-                              parseInt(e.target.value) || 1,
-                              formData.allowedBarisRange[1],
-                            ],
+                            barisStart: parseInt(e.target.value) || 1,
                           })
                         }
                         className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
@@ -398,14 +397,11 @@ export default function ProductHomeEditor({
                       <input
                         type="number"
                         min="1"
-                        value={formData.allowedBarisRange[1]}
+                        value={formData.barisEnd}
                         onChange={(e) =>
                           setFormData({
                             ...formData,
-                            allowedBarisRange: [
-                              formData.allowedBarisRange[0],
-                              parseInt(e.target.value) || 1,
-                            ],
+                            barisEnd: parseInt(e.target.value) || 1,
                           })
                         }
                         className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
@@ -483,8 +479,8 @@ export default function ProductHomeEditor({
               </div>
               <h3 className="text-xl font-bold text-gray-800 mb-2">Hapus Product Home?</h3>
               <p className="text-gray-600">
-                Apakah Anda yakin ingin menghapus assignment untuk{" "}
-                <strong>{selectedProductHome.productName}</strong>?
+                Apakah Anda yakin ingin menghapus assignment untuk product{" "}
+                <strong className="font-mono">{selectedProductHome.productId}</strong>?
                 <br />
                 Produk ini akan kehilangan aturan lokasi &quot;rumah&quot;nya.
               </p>

@@ -160,9 +160,9 @@ parseBBProduk("2512210001") → {
 // Input: qtyPalletInput (pallet utuh), qtyCartonInput (karton sisa)
 // Konstanta: RECEH_THRESHOLD = 5
 
-totalCartons = (palletInput × qtyPerPalletStd) + cartonInput
-totalPallets = Math.floor(totalCartons / qtyPerPalletStd)
-remainingCartons = totalCartons % qtyPerPalletStd
+totalCartons = (palletInput × qtyCartonPerPalletStd) + cartonInput
+totalPallets = Math.floor(totalCartons / qtyCartonPerPalletStd)
+remainingCartons = totalCartons % qtyCartonPerPalletStd
 
 // SMART RECEH LOGIC:
 // Jika sisa karton ≤ 5 DAN ada pallet utuh → gabung ke pallet terakhir
@@ -213,7 +213,7 @@ totalPalletsNeeded = shouldAttachReceh ? totalPallets : (totalPallets + (isReceh
 - `stock_list` untuk cek ketersediaan
 - `product_homes` untuk rekomendasi
 - `cluster_configs` untuk pallet capacity
-- `products` untuk qtyPerPallet
+- `products` untuk qtyCartonPerPallet
 
 **Catatan Migrasi:**
 - BB Produk parsing tetap di frontend
@@ -433,7 +433,7 @@ GREEN  → diffDays >= 180
 **4 Tab:**
 
 #### Tab 1: Produk
-- CRUD product dengan field: code, name, qtyPerCarton, qtyPerPallet, defaultCluster
+- CRUD product dengan field: code, name, qtyPerCarton, qtyCartonPerPallet, defaultCluster
 - Filter by cluster, search by name/code
 
 #### Tab 2: Ekspedisi
@@ -1053,13 +1053,17 @@ filteredData.forEach((item) => {
 
 ---
 
-*Document generated: 2025-12-21*
-*Updated: 2025-12-22 (Added NPL and Permutasi feature documentation)*
-*Updated: 2025-12-22 (Added UI/UX Standards - Modal, Form Layout, Post-Submit behavior)*
-*Updated: 2025-12-22 (Renamed WMS Cikarang to WMS Lite)*
-*Updated: 2025-12-22 (Added Outbound History BB Produk per Lokasi FEFO)*
-*Updated: 2025-12-22 (Added users-mock.ts, updated ekspedisi to per-warehouse, Stock List renamed)*
+*Document generated: 2025-12-21*  
+*Updated: 2025-12-22 (Added NPL and Permutasi feature documentation)*  
+*Updated: 2025-12-22 (Added UI/UX Standards - Modal, Form Layout, Post-Submit behavior)*  
+*Updated: 2025-12-22 (Renamed WMS Cikarang to WMS Lite)*  
+*Updated: 2025-12-22 (Added Outbound History BB Produk per Lokasi FEFO)*  
+*Updated: 2025-12-22 (Added users-mock.ts, updated ekspedisi to per-warehouse, Stock List renamed)*  
+*Updated: 2025-12-26 (Field naming: qtyPerPallet → qtyCartonPerPallet)*  
 *For: WMS Lite Database Migration*
+
+**✅ Documentation Status**: UP-TO-DATE (26 Des 2025)  
+**All minor issues resolved**: Field naming ✅ | Warehouse context ✅ | DBML complete ✅
 
 ---
 

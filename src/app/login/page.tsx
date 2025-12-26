@@ -19,20 +19,71 @@ export default function LoginPage() {
 
     // Simulasi login (bypass untuk demo)
     setTimeout(() => {
-      if (username === "admin" && password === "admin123") {
-        // Admin Warehouse
-        localStorage.setItem("user", JSON.stringify({ 
-          username: "admin", 
+      // Developer
+      if (username === "dev_haikal" && password === "dev123") {
+        localStorage.setItem("user", JSON.stringify({
+          username: "dev_haikal",
+          role: "developer",
+          name: "Haikal (Developer)",
+          warehouseId: null
+        }));
+        router.push("/warehouse-management");
+      } 
+      // Admin Cabang Cikarang
+      else if (username === "admin_ckr" && password === "admin123") {
+        localStorage.setItem("user", JSON.stringify({
+          username: "admin_ckr",
+          role: "admin_cabang",
+          name: "Andi Pratama",
+          warehouseId: "wh-001-cikarang"
+        }));
+        router.push("/");
+      }
+      // Admin Warehouse Cikarang
+      else if (username === "staff_ckr1" && password === "staff123") {
+        localStorage.setItem("user", JSON.stringify({
+          username: "staff_ckr1",
           role: "admin_warehouse",
-          name: "Admin Warehouse"
+          name: "Dewi Lestari",
+          warehouseId: "wh-001-cikarang"
+        }));
+        router.push("/");
+      }
+      // Admin Cabang Bandung
+      else if (username === "admin_bdg" && password === "admin123") {
+        localStorage.setItem("user", JSON.stringify({
+          username: "admin_bdg",
+          role: "admin_cabang",
+          name: "Rizki Hakim",
+          warehouseId: "wh-002-bandung"
+        }));
+        router.push("/");
+      }
+      // Admin Warehouse Bandung
+      else if (username === "staff_bdg1" && password === "staff123") {
+        localStorage.setItem("user", JSON.stringify({
+          username: "staff_bdg1",
+          role: "admin_warehouse",
+          name: "Siti Nurhaliza",
+          warehouseId: "wh-002-bandung"
+        }));
+        router.push("/");
+      }
+      // Backward compatibility untuk login lama
+      else if (username === "admin" && password === "admin123") {
+        localStorage.setItem("user", JSON.stringify({
+          username: "admin",
+          role: "admin_warehouse",
+          name: "Admin Warehouse",
+          warehouseId: "wh-001-cikarang"
         }));
         router.push("/");
       } else if (username === "superadmin" && password === "super123") {
-        // Superadmin
-        localStorage.setItem("user", JSON.stringify({ 
-          username: "superadmin", 
-          role: "superadmin",
-          name: "Super Admin"
+        localStorage.setItem("user", JSON.stringify({
+          username: "superadmin",
+          role: "admin_cabang",
+          name: "Admin Cabang",
+          warehouseId: "wh-001-cikarang"
         }));
         router.push("/");
       } else {
@@ -40,9 +91,7 @@ export default function LoginPage() {
       }
       setLoading(false);
     }, 1000);
-  };
-
-  return (
+  };  return (
     <div className="min-h-screen bg-gradient-to-br from-blue-500 via-blue-600 to-blue-700 flex items-center justify-center p-4">
       <div className="w-full max-w-sm sm:max-w-md">
         {/* Logo/Header */}

@@ -20,8 +20,9 @@ export default function StockListPage() {
   const uniqueProducts = useMemo(() => {
     const products = new Map<string, string>();
     stockListData.forEach((item) => {
-      if (!products.has(item.productCode)) {
-        products.set(item.productCode, item.productName);
+      const product = productMasterData.find(p => p.id === item.productId);
+      if (product && !products.has(product.id)) {
+        products.set(product.id, product.productName);
       }
     });
     return Array.from(products.entries()).sort((a, b) => a[1].localeCompare(b[1]));
@@ -35,24 +36,22 @@ export default function StockListPage() {
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
       filtered = filtered.filter((item) => {
-        const bbPalletString = Array.isArray(item.bbPallet) 
-          ? item.bbPallet.join(' ').toLowerCase() 
-          : item.bbPallet.toLowerCase();
+        const product = productMasterData.find(p => p.id === item.productId);
+        const productName = product?.productName || '';
+        const productCode = product?.productCode || '';
+        const bbProdukString = item.bbProduk.toLowerCase();
+        const locationString = `${item.cluster}-L${item.lorong}-B${item.baris}-${item.level}`.toLowerCase();
         
-        const locationString = `${item.location.cluster}-${item.location.lorong}-${item.location.baris}-${item.location.level}`.toLowerCase();
-        
-        return item.productName.toLowerCase().includes(search) ||
-          item.productCode.toLowerCase().includes(search) ||
-          item.batchNumber.toLowerCase().includes(search) ||
-          item.lotNumber.toLowerCase().includes(search) ||
-          bbPalletString.includes(search) ||
+        return productName.toLowerCase().includes(search) ||
+          productCode.toLowerCase().includes(search) ||
+          bbProdukString.includes(search) ||
           locationString.includes(search);
       });
     }
 
     // Filter Cluster
     if (filterCluster !== "all") {
-      filtered = filtered.filter((item) => item.location.cluster === filterCluster);
+      filtered = filtered.filter((item) => item.cluster === filterCluster);
     }
 
     // Filter Status
@@ -62,7 +61,7 @@ export default function StockListPage() {
 
     // Filter Product
     if (filterProduct !== "all") {
-      filtered = filtered.filter((item) => item.productCode === filterProduct);
+      filtered = filtered.filter((item) => item.productId === filterProduct);
     }
 
     // Sort
@@ -73,7 +72,9 @@ export default function StockListPage() {
       } else if (sortBy === "inboundDate") {
         compareValue = new Date(a.inboundDate).getTime() - new Date(b.inboundDate).getTime();
       } else if (sortBy === "productName") {
-        compareValue = a.productName.localeCompare(b.productName);
+        const productA = productMasterData.find(p => p.id === a.productId);
+        const productB = productMasterData.find(p => p.id === b.productId);
+        compareValue = (productA?.productName || '').localeCompare(productB?.productName || '');
       }
       return sortOrder === "asc" ? compareValue : -compareValue;
     });
@@ -245,8 +246,8 @@ export default function StockListPage() {
                 className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
               >
                 <option value="all">Semua Produk</option>
-                {uniqueProducts.map(([code, name]) => (
-                  <option key={code} value={code}>{name.length > 20 ? name.substring(0, 20) + '...' : name}</option>
+                {uniqueProducts.map(([id, name]) => (
+                  <option key={id} value={id}>{name.length > 20 ? name.substring(0, 20) + '...' : name}</option>
                 ))}
               </select>
             </div>
@@ -338,16 +339,18 @@ export default function StockListPage() {
                     </td>
                   </tr>
                 ) : (
-                  currentData.map((item, index) => (
+                  currentData.map((item, index) => {
+                    const product = productMasterData.find(p => p.id === item.productId);
+                    return (
                     <tr key={item.id} className="border-b border-gray-100 hover:bg-blue-50 transition-colors">
                       <td className="px-2 py-1.5 text-[10px] sm:text-xs text-gray-600">{startIndex + index + 1}</td>
                       <td className="px-2 py-1.5">
-                        <div className="font-semibold text-gray-800 text-[10px] sm:text-xs line-clamp-1">{item.productName}</div>
-                        <div className="text-[9px] sm:text-[10px] text-blue-600 font-mono">{item.productCode}</div>
+                        <div className="font-semibold text-gray-800 text-[10px] sm:text-xs line-clamp-1">{product?.productName || 'N/A'}</div>
+                        <div className="text-[9px] sm:text-[10px] text-blue-600 font-mono">{product?.productCode || 'N/A'}</div>
                       </td>
                       <td className="px-2 py-1.5">
                         <span className="inline-block px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded text-[10px] sm:text-xs font-semibold">
-                          {item.location.cluster}-{item.location.lorong}-{item.location.baris}-{item.location.level}
+                          {item.cluster}-L{item.lorong}-B{item.baris}-{item.level}
                         </span>
                       </td>
                       <td className="px-2 py-1.5 text-center text-[10px] sm:text-xs font-bold text-gray-800">{item.qtyPallet}</td>
@@ -366,7 +369,8 @@ export default function StockListPage() {
                         </button>
                       </td>
                     </tr>
-                  ))
+                  );
+                  })
                 )}
               </tbody>
             </table>
@@ -424,7 +428,7 @@ export default function StockListPage() {
                 <div>
                   <h2 className="text-lg sm:text-xl font-bold">Detail Stock</h2>
                   <p className="text-xs sm:text-sm opacity-90 mt-1">
-                    {selectedItem.location.cluster}-{selectedItem.location.lorong}-{selectedItem.location.baris}-{selectedItem.location.level}
+                    {selectedItem.cluster}-L{selectedItem.lorong}-B{selectedItem.baris}-{selectedItem.level}
                   </p>
                 </div>
                 <button
@@ -438,34 +442,38 @@ export default function StockListPage() {
 
             {/* Modal Content */}
             <div className="p-4 sm:p-5 space-y-4">
+              {(() => {
+                const product = productMasterData.find(p => p.id === selectedItem.productId);
+                return (
+                  <>
               {/* Product Info */}
               <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
                 <p className="text-xs font-medium text-slate-500 mb-1">Produk</p>
-                <p className="font-bold text-slate-900 text-sm sm:text-base">{selectedItem.productName}</p>
-                <p className="text-xs text-blue-600 font-mono mt-1">{selectedItem.productCode}</p>
+                <p className="font-bold text-slate-900 text-sm sm:text-base">{product?.productName || 'N/A'}</p>
+                <p className="text-xs text-blue-600 font-mono mt-1">{product?.productCode || 'N/A'}</p>
               </div>
 
-              {/* BB Pallet & Location */}
+              {/* BB Produk & Location */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
-                  <p className="text-xs font-medium text-slate-500 mb-1">BB Pallet</p>
-                  <p className="font-semibold text-slate-900 text-xs sm:text-sm">
-                    {Array.isArray(selectedItem.bbPallet) ? selectedItem.bbPallet.join(", ") : selectedItem.bbPallet}
+                  <p className="text-xs font-medium text-slate-500 mb-1">BB Produk</p>
+                  <p className="font-semibold text-slate-900 text-xs sm:text-sm font-mono">
+                    {selectedItem.bbProduk}
                   </p>
-                  {selectedItem.isReceh && Array.isArray(selectedItem.bbPallet) && selectedItem.bbPallet.length > 1 && (
-                    <p className="text-[10px] text-purple-600 mt-1">🔵 Receh: {selectedItem.bbPallet.length} BB dalam 1 pallet</p>
+                  {selectedItem.isReceh && (
+                    <p className="text-[10px] text-purple-600 mt-1">🔵 Pallet Receh (Tidak Penuh)</p>
                   )}
                 </div>
                 <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
                   <p className="text-xs font-medium text-slate-500 mb-1">Lokasi</p>
                   <p className="font-semibold text-slate-900 text-sm sm:text-base">
-                    {selectedItem.location.cluster}-{selectedItem.location.lorong}-{selectedItem.location.baris}-{selectedItem.location.level}
+                    {selectedItem.cluster}-L{selectedItem.lorong}-B{selectedItem.baris}-{selectedItem.level}
                   </p>
                 </div>
               </div>
 
               {/* Quantity Info */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200 text-center">
                   <p className="text-xs font-medium text-emerald-700 mb-1">Qty Pallet</p>
                   <p className="text-xl sm:text-2xl font-bold text-emerald-600">{selectedItem.qtyPallet}</p>
@@ -473,22 +481,6 @@ export default function StockListPage() {
                 <div className="bg-blue-50 rounded-lg p-3 border border-blue-200 text-center">
                   <p className="text-xs font-medium text-blue-700 mb-1">Qty Carton</p>
                   <p className="text-xl sm:text-2xl font-bold text-blue-600">{selectedItem.qtyCarton}</p>
-                </div>
-                <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-200 text-center">
-                  <p className="text-xs font-medium text-yellow-700 mb-1">Total Pcs</p>
-                  <p className="text-xl sm:text-2xl font-bold text-yellow-600">{selectedItem.qtyPcs?.toLocaleString() || '-'}</p>
-                </div>
-              </div>
-
-              {/* Batch & Lot */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-xs font-medium text-slate-500 mb-1">Batch Number</p>
-                  <p className="font-semibold text-slate-900 text-xs sm:text-sm font-mono">{selectedItem.batchNumber}</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-xs font-medium text-slate-500 mb-1">Lot Number</p>
-                  <p className="font-semibold text-slate-900 text-xs sm:text-sm font-mono">{selectedItem.lotNumber}</p>
                 </div>
               </div>
 
@@ -520,26 +512,25 @@ export default function StockListPage() {
               </div>
 
               {/* Product Master Info */}
-              {(() => {
-                const master = getProductMaster(selectedItem.productCode);
-                if (!master) return null;
-                return (
+              {product && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                     <p className="text-xs font-medium text-blue-700 mb-2">Info Produk Master</p>
                     <div className="grid grid-cols-3 gap-2 text-xs">
-                      <div><span className="text-slate-500">Default Cluster:</span> <span className="font-semibold">{master.defaultCluster || '-'}</span></div>
-                      <div><span className="text-slate-500">Qty/Carton:</span> <span className="font-semibold">{master.qtyPerCarton} pcs</span></div>
-                      <div><span className="text-slate-500">Qty/Pallet:</span> <span className="font-semibold">{master.qtyPerPallet} carton</span></div>
+                      <div><span className="text-slate-500">Default Cluster:</span> <span className="font-semibold">{product.defaultCluster || '-'}</span></div>
+                      <div><span className="text-slate-500">Qty/Carton:</span> <span className="font-semibold">{product.qtyPerCarton} pcs</span></div>
+                      <div><span className="text-slate-500">Qty/Pallet:</span> <span className="font-semibold">{product.qtyCartonPerPallet} carton</span></div>
                     </div>
                   </div>
+                )}
+                  </>
                 );
               })()}
 
-              {/* Notes */}
-              {selectedItem.notes && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <p className="text-xs font-medium text-amber-700 mb-1">Catatan</p>
-                  <p className="text-sm text-amber-900">{selectedItem.notes}</p>
+              {/* Receh info - if parent_stock_id exists */}
+              {selectedItem.parentStockId && (
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                  <p className="text-xs font-medium text-purple-700 mb-1">Info Receh</p>
+                  <p className="text-sm text-purple-900">Pallet receh dengan parent stock ID: {selectedItem.parentStockId}</p>
                 </div>
               )}
             </div>

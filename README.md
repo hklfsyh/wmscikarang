@@ -1,36 +1,155 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WMS Cikarang - Warehouse Management System
 
-## Getting Started
+Multi-warehouse WMS system built with Next.js 15, TypeScript, and Tailwind CSS. Currently using mock data, ready for Supabase backend migration.
 
-First, run the development server:
+## 🏢 Project Overview
+
+**WMS Cikarang** adalah sistem manajemen gudang multi-warehouse untuk distributor minuman dengan fitur:
+
+- ✅ Multi-warehouse isolation (Cikarang & Bandung)
+- ✅ Role-based access control (Developer, Admin Cabang, Admin Warehouse)
+- ✅ Real-time stock tracking dengan QR code scanning
+- ✅ FEFO (First Expired First Out) untuk outbound
+- ✅ Stock opname dengan rekonsel
+- ✅ NPL (Nota Pengembalian Lapangan) & Permutasi
+- ✅ Warehouse layout visualization
+
+## 📊 Current Status
+
+- **Frontend**: ✅ 100% Complete
+- **Mock Data**: ✅ 100% Complete
+- **Backend**: 🚀 Ready for Supabase implementation
+- **Documentation**: ✅ Up-to-date (27 Des 2025)
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Node.js 18+ 
+- npm/yarn/pnpm/bun
+
+### Installation
 
 ```bash
+# Install dependencies
+npm install
+
+# Run development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) with your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Default Login Credentials
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+Developer:
+- Username: dev_haikal
+- Password: dev123
 
-## Learn More
+Admin Cabang Cikarang:
+- Username: admin_ckr
+- Password: admin123
 
-To learn more about Next.js, take a look at the following resources:
+Admin Warehouse Cikarang:
+- Username: staff_ckr1
+- Password: staff123
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 📁 Project Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+src/
+├── app/                    # Next.js App Router pages
+│   ├── login/             # Authentication
+│   ├── inbound/           # Inbound transactions
+│   ├── outbound/          # Outbound transactions (FEFO)
+│   ├── stock-list/        # Real-time stock list
+│   ├── stock-list-master/ # Master data management
+│   ├── stock-opname/      # Stock opname input
+│   ├── npl/               # Nota Pengembalian Lapangan
+│   ├── permutasi/         # Stock relocation
+│   └── admin-management/  # User management
+│
+├── components/            # React components
+│   ├── navigation.tsx     # Main navigation
+│   ├── inbound-form.tsx   # Inbound transaction form
+│   ├── outbound-form.tsx  # Outbound with FEFO logic
+│   ├── npl-form.tsx       # NPL form
+│   ├── permutasi-form.tsx # Permutasi form
+│   ├── warehouse-layout.tsx # Warehouse visualization
+│   └── qr-scanner.tsx     # QR code scanner
+│
+└── lib/
+    ├── mock/              # Mock data (production-ready structure)
+    │   ├── product-master.ts
+    │   ├── users-mock.ts
+    │   ├── stocklistmock.ts
+    │   ├── transaction-history.ts
+    │   ├── npl-history.ts
+    │   └── permutasi-history.ts
+    │
+    └── utils/             # Utility functions
+        └── warehouse-utils.ts
+```
 
-## Deploy on Vercel
+## 📚 Documentation
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **[BACKEND-READINESS-ANALYSIS.md](./BACKEND-READINESS-ANALYSIS.md)** - Backend migration guide (100% ready)
+- **[database-schema.dbml](./database-schema.dbml)** - PostgreSQL schema (16 tables)
+- **[PROJECT-LOGIC-ANALYSIS.md](./PROJECT-LOGIC-ANALYSIS.md)** - Business logic documentation
+- **[MOCK-USAGE-DOCUMENTATION.md](./MOCK-USAGE-DOCUMENTATION.md)** - Mock data usage guide
+- **[database-sample-data.md](./database-sample-data.md)** - Sample data & test cases
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🔧 Tech Stack
+
+- **Framework**: Next.js 15 (App Router)
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **State Management**: React Hooks (useState, useEffect, useMemo)
+- **Backend (Planned)**: Supabase (PostgreSQL + RLS)
+- **Authentication (Planned)**: Supabase Auth
+
+## ✅ Features
+
+### Implemented Features
+- [x] Multi-warehouse context switching
+- [x] Role-based access control
+- [x] QR code scanning for inbound/outbound
+- [x] FEFO logic for outbound
+- [x] Real-time stock tracking
+- [x] Stock opname with rekonsel
+- [x] NPL (product returns)
+- [x] Permutasi (stock relocation)
+- [x] Warehouse layout visualization
+- [x] Transaction history tracking
+- [x] Master data management (products, clusters, expeditions)
+
+### Planned Features (Post-Backend)
+- [ ] Real-time database sync (Supabase)
+- [ ] Row-level security (RLS)
+- [ ] Email notifications
+- [ ] Advanced reporting
+- [ ] Mobile app (React Native)
+
+## 🚀 Next Steps
+
+1. ✅ **Pre-requisites Complete** (All minor fixes resolved)
+2. 🚀 **Create Supabase Project** (Start here!)
+3. 🚀 **Run Phase 1: Schema Setup** (1 week)
+4. 🚀 **Implement Authentication** (Phase 2)
+5. 🚀 **Migrate Transaction Features** (Phase 3)
+
+See **[BACKEND-READINESS-ANALYSIS.md](./BACKEND-READINESS-ANALYSIS.md)** for detailed implementation plan.
+
+## 🤝 Contributing
+
+This is a private project. For questions or issues, contact the development team.
+
+## 📄 License
+
+Proprietary - All rights reserved.
+
+---
+
+*Last Updated: 26 Desember 2025*  
+*Status: ✅ Frontend Complete - Ready for Backend Implementation*
