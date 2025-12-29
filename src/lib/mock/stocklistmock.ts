@@ -43,8 +43,8 @@ export interface StockItem {
   updatedAt: string; // timestamp (ISO format)
 }
 
-// Helper function untuk generate random date berdasarkan hari ini (16 Des 2025)
-const TODAY = new Date('2025-12-16'); // Anggap hari ini 16 Desember 2025
+// Helper function untuk generate random date berdasarkan hari ini (29 Des 2025)
+const TODAY = new Date('2025-12-29'); // Anggap hari ini 29 Desember 2025
 
 function getRandomDate(startDaysFromNow: number, endDaysFromNow: number): string {
   const start = new Date(TODAY);
