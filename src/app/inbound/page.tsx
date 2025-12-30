@@ -1,40 +1,97 @@
-"use client";
+import { createClient } from "@/utils/supabase/server";
+import { redirect } from "next/navigation";
+import InboundClientDispatcher from "./InboundClientDispatcher";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { InboundForm } from "@/components/inbound-form";
-import { InboundHistoryPage } from "@/components/inbound-history";
+export default async function InboundPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
-export default function InboundPage() {
-  const router = useRouter();
-  const [userRole, setUserRole] = useState<string | null>(null);
+  if (!user) redirect("/login");
 
-  useEffect(() => {
-    const userStr = localStorage.getItem("user");
-    if (!userStr) {
-      router.push("/login");
-      return;
-    }
+  const { data: profile } = await supabase
+    .from("users")
+    .select("*, warehouses(city_name, warehouse_code)")
+    .eq("id", user.id)
+    .single();
 
-    const user = JSON.parse(userStr);
-    setUserRole(user.role);
-  }, [router]);
+  if (!profile) redirect("/login");
 
-  if (!userRole) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <div className="text-6xl mb-4">🔒</div>
-          <p className="text-xl font-semibold text-gray-700">Memeriksa akses...</p>
-        </div>
-      </div>
-    );
+  // 1. Ambil data pendukung dasar
+  const { data: expeditions } = await supabase
+    .from("expeditions")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id);
+
+  const { data: products } = await supabase
+    .from("products")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id);
+
+  const { data: currentStock } = await supabase
+    .from("stock_list")
+    .select("cluster, lorong, baris, level")
+    .eq("warehouse_id", profile.warehouse_id);
+
+  const { data: productHomes } = await supabase
+    .from("product_homes")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id);
+
+  const { data: clusterConfigs } = await supabase
+    .from("cluster_configs")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id);
+
+  // Ambil data users untuk mapping received_by
+  const { data: users } = await supabase
+    .from("users")
+    .select("id, full_name, username")
+    .eq("warehouse_id", profile.warehouse_id);
+
+  // 2. Ambil Riwayat Inbound (History)
+  let historyQuery = supabase
+    .from("inbound_history")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id)
+    .order("arrival_time", { ascending: false });
+
+  // Jika warehouse_admin, batasi hanya hari ini untuk performa
+  if (profile.role === "admin_warehouse") {
+    const today = new Date().toISOString().split('T')[0];
+    historyQuery = historyQuery.gte("arrival_time", today);
   }
 
-  // Admin Cabang sees history, Admin Warehouse sees form
-  if (userRole === "admin_cabang") {
-    return <InboundHistoryPage />;
-  }
+  const { data: historyData } = await historyQuery;
 
-  return <InboundForm />;
+  // Mapping data history agar camelCase sesuai interface UI lama Anda
+  const formattedHistory = (historyData || []).map((item: any) => ({
+    id: item.id,
+    transactionCode: item.transaction_code,
+    productId: item.product_id,
+    arrivalTime: item.arrival_time,
+    expeditionId: item.expedition_id,
+    driverName: item.driver_name,
+    vehicleNumber: item.vehicle_number,
+    dnNumber: item.dn_number,
+    bbProduk: item.bb_produk,
+    expiredDate: item.expired_date,
+    qtyCarton: item.qty_carton,
+    receivedBy: item.received_by,
+    notes: item.notes,
+    locations: item.locations // JSONB sudah otomatis jadi array of objects
+  }));
+
+  return (
+    <InboundClientDispatcher 
+      profile={profile}
+      expeditions={expeditions || []}
+      products={products || []}
+      currentStock={currentStock || []}
+      productHomes={productHomes || []}
+      warehouseId={profile.warehouse_id}
+      clusterConfigs={clusterConfigs || []}
+      historyData={formattedHistory}
+      users={users || []}
+    />
+  );
 }

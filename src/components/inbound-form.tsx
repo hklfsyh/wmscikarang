@@ -1,29 +1,104 @@
-// File: src/components/inbound-form.tsx (Langkah 14: Finalisasi Multi-Submission)
+// File: src/components/inbound-form.tsx (Refactored untuk menggunakan data dari Supabase)
 
 "use client";
 
 import { useState, useEffect, useMemo } from "react"; 
-import { 
-  productMasterData, 
-  getProductByCode,
-  getExpeditionsByWarehouse,
-  type Expedition
-} from "@/lib/mock/product-master";
-import { stockListData, StockItem } from "@/lib/mock/stocklistmock";
-import {
-  getClusterConfig,
-  getBarisCountForLorong,
-  getPalletCapacityForCell,
-  validateProductLocation,
-  getValidLocationsForProduct,
-  getInTransitRange,
-  isInTransitLocation,
-  clusterConfigs,
-} from "@/lib/mock/warehouse-config";
-import { inboundHistoryData, InboundHistory } from "@/lib/mock/transaction-history";
 import { QRScanner, QRData } from "./qr-scanner";
-import { CheckCircle, XCircle } from "lucide-react";
+import { CheckCircle, XCircle, TruckIcon } from "lucide-react";
 import { useToast, ToastContainer } from "./toast";
+import { submitInboundAction, cancelInboundAction } from "@/app/inbound/actions";
+import { useRouter } from "next/navigation";
+
+// Types dari database
+interface Expedition {
+  id: string;
+  expedition_code: string;
+  expedition_name: string;
+  warehouse_id: string;
+}
+
+interface User {
+  id: string;
+  full_name: string;
+  username: string;
+}
+
+interface Product {
+  id: string;
+  product_code: string;
+  product_name: string;
+  qty_carton_per_pallet: number;
+  qty_per_carton: number;
+  default_cluster: string;
+  warehouse_id: string;
+}
+
+interface StockItem {
+  id: string;
+  product_id: string;
+  warehouse_id: string;
+  cluster: string;
+  lorong: number;
+  baris: number;
+  level: number;
+  qty_carton: number;
+  status: string;
+}
+
+interface ProductHome {
+  id: string;
+  product_id: string;
+  cluster: string;
+  lorong_start: number;
+  lorong_end: number;
+  baris_start: number;
+  baris_end: number;
+  max_pallet_per_location: number;
+}
+
+interface ClusterConfig {
+  clusterChar: string;
+  defaultLorongCount: number;
+  isActive: boolean;
+}
+
+interface InboundHistory {
+  id: string;
+  transactionCode: string;
+  productId: string;
+  arrivalTime: string;
+  expeditionId: string;
+  driverName: string;
+  vehicleNumber: string;
+  dnNumber: string;
+  bbProduk: string;
+  expiredDate: string;
+  qtyCarton: number;
+  receivedBy: string;
+  notes: string;
+  locations: Array<{
+    cluster: string;
+    lorong: number;
+    baris: number;
+    level: number;
+    qtyCarton: number;
+    isReceh: boolean;
+  }>;
+}
+
+// Props interface
+// Bagian 1: Update interface props
+interface InboundFormProps {
+  userProfile?: any;
+  expeditions: Expedition[];
+  products: Product[];
+  currentStock: StockItem[];
+  productHomes: ProductHome[];
+  warehouseId: string;
+  clusterConfigs: ClusterConfig[];
+  todayInboundHistory: InboundHistory[]; // Tambahkan baris ini
+  users: User[];
+}
 
 interface RecommendedLocation {
   clusterChar: string;
@@ -141,12 +216,86 @@ const parseBBProduk = (bb: string): { expiredDate: string, kdPlant: string, isVa
   };
 };
 
-export function InboundForm() {
-  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
-  const [warehouseExpeditions, setWarehouseExpeditions] = useState<Expedition[]>([]);
+export function InboundForm({ 
+  userProfile,
+  expeditions, 
+  products, 
+  currentStock, 
+  productHomes,
+  warehouseId,
+  clusterConfigs,
+  todayInboundHistory,
+  users
+}: InboundFormProps) {
   const { toasts, removeToast } = useToast();
+  const router = useRouter();
   
-  // Modal notification helpers (pengganti toast)
+  // Helper functions untuk bekerja dengan database data
+  const getProductByCode = (code: string): Product | undefined => {
+    return products.find(p => p.product_code === code);
+  }
+  
+  const getClusterConfig = (clusterChar: string) => {
+    return clusterConfigs.find(c => c.clusterChar === clusterChar);
+  };
+  
+  const getBarisCountForLorong = (clusterChar: string, lorongNum: number): number => {
+    // Default 9 baris per lorong (bisa disesuaikan dengan config dari database jika ada)
+    return 9;
+  };
+  
+  const getPalletCapacityForCell = (clusterChar: string, lorongNum: number, barisNum: number): number => {
+    // Default 3 pallet per cell (bisa disesuaikan dengan config dari database jika ada)
+    return 3;
+  };
+  
+  const getValidLocationsForProduct = (productCode: string) => {
+    const product = getProductByCode(productCode);
+    if (!product) return null;
+    
+    const home = productHomes.find(h => h.product_id === product.id);
+    if (!home) return null;
+    
+    return {
+      clusterChar: home.cluster,
+      lorongRange: [home.lorong_start, home.lorong_end] as [number, number],
+      barisRange: [home.baris_start, home.baris_end] as [number, number],
+      maxPalletPerLocation: home.max_pallet_per_location
+    };
+  };
+  
+  const validateProductLocation = (productCode: string, clusterChar: string, lorongNum: number, barisNum: number) => {
+    const validLocs = getValidLocationsForProduct(productCode);
+    if (!validLocs) return { isValid: true }; // Jika tidak ada home, boleh di mana saja
+    
+    if (validLocs.clusterChar !== clusterChar) {
+      return { isValid: false, message: "Cluster tidak sesuai dengan product home" };
+    }
+    
+    if (lorongNum < validLocs.lorongRange[0] || lorongNum > validLocs.lorongRange[1]) {
+      return { isValid: false, message: "Lorong tidak sesuai dengan product home" };
+    }
+    
+    if (barisNum < validLocs.barisRange[0] || barisNum > validLocs.barisRange[1]) {
+      return { isValid: false, message: "Baris tidak sesuai dengan product home" };
+    }
+    
+    return { isValid: true };
+  };
+  
+  const getInTransitRange = (clusterChar: string): [number, number] | null => {
+    // In Transit area biasanya di lorong terakhir (bisa disesuaikan)
+    // Contoh: Cluster C lorong 8-11 adalah In Transit
+    if (clusterChar === "C") return [8, 11];
+    return null;
+  };
+  
+  const isInTransitLocation = (clusterChar: string, lorongNum: number): boolean => {
+    const range = getInTransitRange(clusterChar);
+    if (!range) return false;
+    return lorongNum >= range[0] && lorongNum <= range[1];
+  };
+  
   const showNotification = (title: string, message: string, type: 'success' | 'error' | 'warning') => {
     setNotificationTitle(title);
     setNotificationMessage(message);
@@ -165,6 +314,56 @@ export function InboundForm() {
   const warning = (message: string) => {
     showNotification('⚠️ Peringatan', message, 'warning');
   };
+
+  // --- SUBMIT LOGIC ---
+  const confirmSubmit = async () => {
+    if (!finalSubmissionData || !selectedProduct) return;
+
+    setIsSubmitting(true);
+    const dataForServer = {
+      warehouse_id: warehouseId,
+      product_id: selectedProduct.id,
+      bb_produk: form.bbProduk,
+      total_qty_carton: totalCartons,
+      expired_date: form.expiredDate,
+      ekspedisi: form.ekspedisi,
+      namaPengemudi: form.namaPengemudi,
+      nomorPolisi: form.nomorPolisi,
+      noDN: form.noDN
+    };
+
+    try {
+      const result = await submitInboundAction(dataForServer, finalSubmissionData);
+      if (result.success) {
+        setShowConfirmModal(false);
+        setShowSuccess(true);
+        // Save input history to localStorage
+        saveToHistory('wms_driver_history', form.namaPengemudi, driverHistory, setDriverHistory);
+        saveToHistory('wms_dn_history', form.noDN, dnHistory, setDnHistory);
+        saveToHistory('wms_police_no_history', form.nomorPolisi, policeNoHistory, setPoliceNoHistory);
+
+        // Refresh data dari server untuk update stock dan history
+        router.refresh();
+
+        setTimeout(() => {
+          setShowSuccess(false);
+          setForm(initialState);
+          setMultiLocationRec(null);
+          setRecommendedLocation(null);
+          setFinalSubmissionData(null);
+          setManualLocations([]);
+          setIsSubmitting(false);
+        }, 2000);
+      } else {
+        error(result.message || "Terjadi kesalahan database.");
+        setIsSubmitting(false);
+      }
+    } catch (err: any) {
+      error(err.message || "System error occurred.");
+      setIsSubmitting(false);
+    }
+  };
+  // --- END SUBMIT LOGIC ---
   const [form, setForm] = useState<InboundFormState>(initialState);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [recommendedLocation, setRecommendedLocation] = useState<RecommendedLocation | null>(null);
@@ -175,6 +374,7 @@ export function InboundForm() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
   const [autoRecommend, setAutoRecommend] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- INPUT HISTORY/AUTOCOMPLETE STATE ---
   const [driverHistory, setDriverHistory] = useState<string[]>([]);
@@ -214,15 +414,9 @@ export function InboundForm() {
   const [notificationMessage, setNotificationMessage] = useState('');
   const [notificationType, setNotificationType] = useState<'success' | 'error' | 'warning'>('success');
 
-  // Load warehouse context and history from localStorage on mount
+  // Load input history from localStorage on mount (tetap pakai localStorage untuk autocomplete)
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const userStr = localStorage.getItem('user');
-      if (userStr) {
-        const user = JSON.parse(userStr);
-        setCurrentWarehouseId(user.warehouseId || null);
-      }
-      
       const savedDrivers = localStorage.getItem('wms_driver_history');
       const savedDNs = localStorage.getItem('wms_dn_history');
       const savedPoliceNos = localStorage.getItem('wms_police_no_history');
@@ -233,19 +427,8 @@ export function InboundForm() {
     }
   }, []);
 
-  // Load expeditions based on current warehouse
-  useEffect(() => {
-    if (currentWarehouseId) {
-      const warehouseExpeditions = getExpeditionsByWarehouse(currentWarehouseId);
-      setWarehouseExpeditions(warehouseExpeditions);
-    }
-  }, [currentWarehouseId]);
-
-  // Filter products by warehouse
-  const filteredProducts = useMemo(() => {
-    if (!currentWarehouseId) return productMasterData;
-    return productMasterData.filter(p => p.warehouseId === currentWarehouseId);
-  }, [currentWarehouseId]);
+  // Products sudah di-filter di server component, langsung pakai dari props
+  const filteredProducts = products;
 
   // Save to history helper
   const saveToHistory = (key: string, value: string, currentHistory: string[], setHistory: (val: string[]) => void) => {
@@ -262,7 +445,7 @@ export function InboundForm() {
 
   // --- LOGIKA QTY DINAMIS (CALCULATED VALUES) ---
   const selectedProduct = form.productCode ? getProductByCode(form.productCode) : null;
-  const qtyPerPalletStd = selectedProduct?.qtyCartonPerPallet || 0; 
+  const qtyPerPalletStd = selectedProduct?.qty_carton_per_pallet || 0; 
   
   const { totalPallets, remainingCartons, totalCartons, shouldAttachReceh } = useMemo(() => {
     const palletInput = Number(form.qtyPalletInput) || 0;
@@ -320,15 +503,16 @@ export function InboundForm() {
   // --- AKHIR LOGIKA QTY DINAMIS ---
 
   // --- DYNAMIC OPTIONS & LOCATION RECOMMENDATION (USING CLUSTER CONFIG & PRODUCT HOME) ---
-  const _autoCluster = selectedProduct?.defaultCluster || ""; 
+  const _autoCluster = selectedProduct?.default_cluster || ""; 
   
   // Get valid locations for current product
   const productValidLocations = form.productCode ? getValidLocationsForProduct(form.productCode) : null;
   
-  // Cluster options - ambil dari clusterConfigs yang aktif
+  // Cluster options - ambil dari clusterConfigs yang aktif (dari props)
   const clusterOptions = useMemo(() => {
+    if (!clusterConfigs || clusterConfigs.length === 0) return [];
     return clusterConfigs.filter(c => c.isActive).map(c => c.clusterChar);
-  }, []);
+  }, [clusterConfigs]);
   
   // Generate dynamic lorong options
   const lorongOptions = useMemo(() => {
@@ -397,8 +581,7 @@ export function InboundForm() {
 
   const findMultipleRecommendedLocations = (
     clusterChar: string,
-    palletsNeeded: number,
-    warehouseId: string | null
+    palletsNeeded: number
   ): MultiLocationRecommendation => {
     const locations: RecommendedLocation[] = [];
     let remainingPallets = palletsNeeded;
@@ -454,14 +637,14 @@ export function InboundForm() {
             if (!validation.isValid) continue;
           }
           
-          // Check if location is empty (filter by current warehouse)
-          const locationExists = stockListData.some(
+          // Check if location is empty (menggunakan currentStock dari props)
+          const locationExists = currentStock.some(
             (item: StockItem) =>
-              item.warehouseId === warehouseId && // Filter by current warehouse
+              item.warehouse_id === warehouseId &&
               item.cluster === clusterChar &&
-              item.lorong === parseInt(lorong.replace('L', '')) &&
-              item.baris === parseInt(baris.replace('B', '')) &&
-              item.level === parseInt(level.replace('P', ''))
+              item.lorong === lorongNum &&
+              item.baris === barisNum &&
+              item.level === palletNum
           );
           
           if (!locationExists) {
@@ -511,13 +694,13 @@ export function InboundForm() {
               const level = `P${palletNum}`;
               
               // Check if location is empty
-              const locationExists = stockListData.some(
+              const locationExists = currentStock.some(
                 (item: StockItem) =>
-                  item.warehouseId === warehouseId && // Filter by current warehouse
+                  item.warehouse_id === warehouseId &&
                   item.cluster === clusterChar &&
-                  item.lorong === parseInt(lorong.replace('L', '')) &&
-                  item.baris === parseInt(baris.replace('B', '')) &&
-                  item.level === parseInt(level.replace('P', ''))
+                  item.lorong === lorongNum &&
+                  item.baris === barisNum &&
+                  item.level === palletNum
               );
               
               if (!locationExists) {
@@ -560,13 +743,13 @@ export function InboundForm() {
                 const level = `P${palletNum}`;
                 
                 // Check if location is empty in Cluster C In Transit
-                const locationExists = stockListData.some(
+                const locationExists = currentStock.some(
                   (item: StockItem) =>
-                    item.warehouseId === warehouseId && // Filter by current warehouse
+                    item.warehouse_id === warehouseId &&
                     item.cluster === "C" &&
-                    item.lorong === parseInt(lorong.replace('L', '')) &&
-                    item.baris === parseInt(baris.replace('B', '')) &&
-                    item.level === parseInt(level.replace('P', ''))
+                    item.lorong === lorongNum &&
+                    item.baris === barisNum &&
+                    item.level === palletNum
                 );
                 
                 if (!locationExists) {
@@ -596,7 +779,7 @@ export function InboundForm() {
   // Helper function for finding single location (kept for potential future use)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _findRecommendedLocation = (clusterChar: string): RecommendedLocation | null => {
-    const multiRec = findMultipleRecommendedLocations(clusterChar, 1, currentWarehouseId);
+    const multiRec = findMultipleRecommendedLocations(clusterChar, 1);
     if (multiRec.locations.length > 0) {
       return multiRec.locations[0];
     }
@@ -636,13 +819,13 @@ export function InboundForm() {
       return; 
     }
 
-    const cluster = selectedProduct?.defaultCluster || "";
+    const cluster = selectedProduct?.default_cluster || "";
     if (!cluster) { 
       error("Produk ini tidak memiliki Cluster Default."); 
       return; 
     }
     
-    const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded, currentWarehouseId);
+    const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded);
     
     if (multiRec.locations.length < totalPalletsNeeded) {
         error(`Gudang penuh! Hanya ditemukan ${multiRec.locations.length} dari ${totalPalletsNeeded} lokasi yang dibutuhkan.`);
@@ -701,7 +884,7 @@ export function InboundForm() {
 
     if (field === "productCode" && value) {
       const selectedProd = getProductByCode(value);
-      const cluster = selectedProd?.defaultCluster || ""; 
+      const cluster = selectedProd?.default_cluster || ""; 
       setForm(prev => ({ ...prev, cluster }));
     }
   };
@@ -746,8 +929,8 @@ export function InboundForm() {
 
     // SMART FILTER: Filter hanya lokasi yang KOSONG
     const availableLocations = allLocations.filter(loc => {
-      const existingStock = stockListData.find(
-        s => s.warehouseId === currentWarehouseId &&
+      const existingStock = currentStock.find(
+        s => s.warehouse_id === warehouseId &&
              s.cluster === loc.clusterChar && 
              s.lorong === parseInt(loc.lorong.replace('L', '')) && 
              s.baris === parseInt(loc.baris.replace('B', '')) && 
@@ -849,7 +1032,7 @@ export function InboundForm() {
         qtyPalletInput: data.qtyPallet, 
         qtyCartonInput: data.qtyCarton, 
         bbReceh: [], 
-        clusterChar: selectedProd.defaultCluster || "", 
+        clusterChar: selectedProd.default_cluster || "", 
         lorong: "", 
         baris: "", 
         pallet: "",
@@ -861,45 +1044,14 @@ export function InboundForm() {
     setErrors({});
     
     // Show success notification
-    success(`QR Scan Berhasil!\n\nData telah diisi:\n- Ekspedisi: ${data.ekspedisi}\n- Produk: ${selectedProd.productName}\n- Qty: ${data.qtyPallet} Pallet + ${data.qtyCarton} Karton\n- BB: ${data.bbProduk}`);
+    success(`QR Scan Berhasil!\n\nData telah diisi:\n- Ekspedisi: ${data.ekspedisi}\n- Produk: ${selectedProd.product_name}\n- Qty: ${data.qtyPallet} Pallet + ${data.qtyCarton} Karton\n- BB: ${data.bbProduk}`);
   };
 
-  // Confirm submit after validation
-  const confirmSubmit = () => {
-    // Save input history to localStorage
-    saveToHistory('wms_driver_history', form.namaPengemudi, driverHistory, setDriverHistory);
-    saveToHistory('wms_dn_history', form.noDN, dnHistory, setDnHistory);
-    saveToHistory('wms_police_no_history', form.nomorPolisi, policeNoHistory, setPoliceNoHistory);
 
-    // Close confirmation modal
-    setShowConfirmModal(false);
-    
-    // Show success modal
-    setShowSuccess(true);
-    
-    // Reset only location-related fields, keep ALL input data for next submission
-    setTimeout(() => {
-      setShowSuccess(false);
-      // Keep: ekspedisi, tanggal, namaPengemudi, noDN, nomorPolisi, productCode, bbProduk, qty
-      // Reset: location only (cluster, lorong, baris, pallet) and recommendations
-      setForm(prev => ({
-        ...prev,
-        clusterChar: prev.productCode ? getProductByCode(prev.productCode)?.defaultCluster || "" : "",
-        lorong: "",
-        baris: "",
-        pallet: "",
-      }));
-      setMultiLocationRec(null);
-      setRecommendedLocation(null);
-      setFinalSubmissionData(null);
-    }, 2000);
-  };
 
   // --- FILTER TRANSAKSI HARI INI ---
-  const todayTransactions = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    return inboundHistoryData.filter(item => item.arrivalTime.startsWith(todayStr));
-  }, []);
+  // TODO: History data akan diambil dari server component dan di-pass sebagai props
+  const todayTransactions = todayInboundHistory;
 
   // --- HANDLE EDIT TRANSAKSI ---
   const handleEditClick = (item: InboundHistory) => {
@@ -909,63 +1061,12 @@ export function InboundForm() {
 
   const confirmEdit = () => {
     if (!selectedItemForAction) return;
-
-    // 1. Access locations array directly (new structure)
-    const locations = selectedItemForAction.locations;
-
-    // 2. Hapus stock dari lokasi-lokasi tersebut (simulasi pembatalan inbound)
-    locations.forEach(loc => {
-      const stockIndex = stockListData.findIndex(
-        s => s.cluster === loc.cluster &&
-             s.lorong === loc.lorong &&
-             s.baris === loc.baris &&
-             s.level === loc.level &&
-             s.productId === selectedItemForAction.productId
-      );
-      if (stockIndex !== -1) {
-        stockListData.splice(stockIndex, 1);
-      }
-    });
-
-    // 3. Hapus dari history
-    const historyIndex = inboundHistoryData.findIndex(h => h.id === selectedItemForAction.id);
-    if (historyIndex !== -1) {
-      inboundHistoryData.splice(historyIndex, 1);
-    }
-
-    // 4. Load data ke form untuk di-edit
-    const selectedProd = productMasterData.find(p => p.id === selectedItemForAction.productId);
-    const qtyPerPallet = selectedProd?.qtyCartonPerPallet || 1;
-    const totalCarton = selectedItemForAction.qtyCarton;
-    const fullPallets = Math.floor(totalCarton / qtyPerPallet);
-    const remainingCartons = totalCarton % qtyPerPallet;
-
-    setForm({
-      ekspedisi: selectedItemForAction.expeditionId || '',
-      tanggal: selectedItemForAction.arrivalTime.slice(0, 10),
-      namaPengemudi: selectedItemForAction.driverName,
-      noDN: selectedItemForAction.dnNumber,
-      nomorPolisi: selectedItemForAction.vehicleNumber,
-      productCode: selectedProd?.productCode || '',
-      bbProduk: selectedItemForAction.bbProduk,
-      kdPlant: selectedItemForAction.bbProduk.substring(6, 10),
-      expiredDate: selectedItemForAction.expiredDate,
-      qtyPalletInput: String(fullPallets),
-      qtyCartonInput: String(remainingCartons),
-      bbReceh: [],
-      clusterChar: locations[0]?.cluster || "",
-      lorong: `L${locations[0]?.lorong || ''}`,
-      baris: `B${locations[0]?.baris || ''}`,
-      pallet: `P${locations[0]?.level || ''}`,
-    });
-
-    // 5. Reset state
+    
+    // Edit: Load data ke form untuk di-edit
+    warning("Fitur Edit akan membuka form dengan data transaksi ini");
+    // TODO: Implementasi load data ke form state
     setShowEditConfirmModal(false);
     setSelectedItemForAction(null);
-    setMultiLocationRec(null);
-    setRecommendedLocation(null);
-
-    success(`Data transaksi ${selectedItemForAction.transactionCode} telah dimuat ke form. Silakan edit dan submit ulang.`);
   };
 
   // --- HANDLE BATAL TRANSAKSI ---
@@ -974,37 +1075,25 @@ export function InboundForm() {
     setShowBatalConfirmModal(true);
   };
 
-  const confirmBatal = () => {
+  const confirmBatal = async () => {
     if (!selectedItemForAction) return;
 
-    // 1. Access locations array directly (new structure)
-    const locations = selectedItemForAction.locations;
-
-    // 2. Hapus stock dari lokasi-lokasi tersebut
-    locations.forEach(loc => {
-      const stockIndex = stockListData.findIndex(
-        s => s.cluster === loc.cluster &&
-             s.lorong === loc.lorong &&
-             s.baris === loc.baris &&
-             s.level === loc.level &&
-             s.productId === selectedItemForAction.productId
-      );
-      if (stockIndex !== -1) {
-        stockListData.splice(stockIndex, 1);
+    try {
+      const result = await cancelInboundAction(selectedItemForAction.id);
+      
+      if (result.success) {
+        success(result.message || "Transaksi berhasil dibatalkan");
+        // Refresh page untuk update data
+        router.refresh();
+      } else {
+        error(result.message || "Gagal membatalkan transaksi");
       }
-    });
-
-    // 3. Hapus dari history
-    const historyIndex = inboundHistoryData.findIndex(h => h.id === selectedItemForAction.id);
-    if (historyIndex !== -1) {
-      inboundHistoryData.splice(historyIndex, 1);
+    } catch (err: any) {
+      error(err?.message || "Terjadi kesalahan saat membatalkan transaksi");
     }
 
-    // 4. Reset state
     setShowBatalConfirmModal(false);
     setSelectedItemForAction(null);
-
-    success(`Transaksi ${selectedItemForAction.transactionCode} telah dibatalkan. Stock telah dikembalikan.`);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1045,15 +1134,15 @@ export function InboundForm() {
             // Validasi ketersediaan lokasi yang direkomendasikan
             const occupiedRecommendedLocs: string[] = [];
             multiLocationRec.locations.forEach(loc => {
-              const existingStock = stockListData.find(
+              const existingStock = currentStock.find(
                 s => s.cluster === loc.clusterChar && 
                      s.lorong === parseInt(loc.lorong.replace('L', '')) && 
                      s.baris === parseInt(loc.baris.replace('B', '')) && 
                      s.level === parseInt(loc.level.replace('P', ''))
               );
               if (existingStock) {
-                const product = productMasterData.find(p => p.id === existingStock.productId);
-                occupiedRecommendedLocs.push(`${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.level} (${product?.productName || 'Unknown'})`);
+                const product = products.find(p => p.id === existingStock.product_id);
+                occupiedRecommendedLocs.push(`${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.level} (${product?.product_name || 'Unknown'})`);
               }
             });
             
@@ -1089,9 +1178,9 @@ export function InboundForm() {
             }
             
             // Check apakah lokasi sudah terisi di stockList
-            const locationIsOccupied = stockListData.some(
+            const locationIsOccupied = currentStock.some(
               (item) =>
-                item.warehouseId === currentWarehouseId && // Filter by current warehouse
+                item.warehouse_id === warehouseId &&
                 item.cluster === loc.clusterChar &&
                 item.lorong === parseInt(loc.lorong.replace('L', '')) &&
                 item.baris === parseInt(loc.baris.replace('B', '')) &&
@@ -1129,9 +1218,9 @@ export function InboundForm() {
              newErrors.lorong = "Lokasi (Lorong, Baris, Pallet) harus diisi.";
              errorList.push(newErrors.lorong);
         } else {
-            const locationIsOccupied = stockListData.some(
+            const locationIsOccupied = currentStock.some(
               (item) =>
-                item.warehouseId === currentWarehouseId && // Filter by current warehouse
+                item.warehouse_id === warehouseId &&
                 item.cluster === currentLoc.clusterChar &&
                 item.lorong === parseInt(currentLoc.lorong.replace('L', '')) &&
                 item.baris === parseInt(currentLoc.baris.replace('B', '')) &&
@@ -1202,20 +1291,18 @@ export function InboundForm() {
 
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-100 p-4 md:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4 md:p-8">
       <ToastContainer toasts={toasts} onRemove={removeToast} />
       
       <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8">
+        <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
           {/* Header with QR Scanner Button */}
           <div className="mb-6 flex items-center justify-between">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
                 📦 Form Inbound Produk
               </h1>
-              <p className="text-sm text-gray-600">
-                Lengkapi data inbound untuk pencatatan masuk barang
-              </p>
+              <p className="text-sm text-gray-600">Gudang {warehouseId ? 'Cikarang' : '...'}</p>
             </div>
             <div>
               <QRScanner 
@@ -1234,15 +1321,15 @@ export function InboundForm() {
               onClick={() => setShowErrorModal(false)}
             >
               <div 
-                className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[80vh] overflow-y-auto"
+                className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-xl max-h-[80vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="bg-linear-to-r from-red-500 to-pink-600 p-6">
+                <div className="bg-gradient-to-r from-red-500 to-pink-600 p-5">
                   <div className="flex flex-col items-center text-center">
-                    <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
-                      <XCircle className="h-10 w-10 text-white" />
+                    <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/20">
+                      <XCircle className="h-8 w-8 text-white" />
                     </div>
-                    <h3 className="text-2xl font-bold text-white mb-1">
+                    <h3 className="text-xl font-bold text-white mb-1">
                       Validasi Gagal
                     </h3>
                     <p className="text-red-100 text-sm">
@@ -1250,18 +1337,18 @@ export function InboundForm() {
                     </p>
                   </div>
                 </div>
-                <div className="p-6">
+                <div className="p-5">
                   <ul className="space-y-2 mb-4">
                     {errorMessages.map((msg, idx) => (
-                      <li key={idx} className="flex items-start gap-2 text-sm text-red-700">
-                        <span className="text-red-500 font-bold">•</span>
+                      <li key={idx} className="flex items-start gap-2 text-sm text-gray-700">
+                        <span className="text-red-500">•</span>
                         <span>{msg}</span>
                       </li>
                     ))}
                   </ul>
                   <button
                     onClick={() => setShowErrorModal(false)}
-                    className="w-full bg-linear-to-r from-red-500 to-pink-600 text-white py-3 rounded-xl font-semibold hover:from-red-600 hover:to-pink-700 transition-all shadow-lg"
+                    className="w-full bg-gradient-to-r from-red-500 to-pink-600 text-white py-3 rounded-lg font-semibold hover:from-red-600 hover:to-pink-700 transition-all"
                   >
                     Tutup
                   </button>
@@ -1277,22 +1364,22 @@ export function InboundForm() {
               onClick={() => setShowConfirmModal(false)}
             >
               <div 
-                className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+                className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="p-6">
-                  <h2 className="text-2xl font-bold text-gray-800 mb-4">
+                <div className="p-5">
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">
                     Konfirmasi Penerimaan Barang
                   </h2>
                   
-                  <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mb-6">
-                    <p className="text-amber-800 font-medium">
+                  <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-3 mb-5">
+                    <p className="text-amber-800 font-medium text-sm">
                       ⚠️ Pastikan data berikut sudah benar sebelum menyimpan ke sistem:
                     </p>
                   </div>
 
-                  <div className="space-y-4 mb-6">
-                    <div className="bg-gray-50 rounded-xl p-4">
+                  <div className="space-y-4 mb-5">
+                    <div className="bg-gray-50 rounded-lg p-4">
                       <h3 className="font-semibold text-gray-800 mb-3">Informasi Pengiriman:</h3>
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
@@ -1314,12 +1401,12 @@ export function InboundForm() {
                       </div>
                     </div>
 
-                    <div className="bg-blue-50 rounded-xl p-4">
+                    <div className="bg-blue-50 rounded-lg p-4">
                       <h3 className="font-semibold text-gray-800 mb-3">Detail Barang & Lokasi:</h3>
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-gray-600">Produk:</span>
-                          <span className="font-semibold text-gray-800">{selectedProduct?.productName}</span>
+                          <span className="font-semibold text-gray-800">{selectedProduct?.product_name}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-600">BB Produk:</span>
@@ -1350,14 +1437,14 @@ export function InboundForm() {
                     <button
                       onClick={() => setShowConfirmModal(false)}
                       type="button"
-                      className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                      className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors"
                     >
                       Batal
                     </button>
                     <button
                       onClick={confirmSubmit}
                       type="button"
-                      className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors shadow-lg"
+                      className="flex-1 bg-green-500 text-white py-3 rounded-lg font-semibold hover:bg-green-600 transition-colors"
                     >
                       ✓ Konfirmasi & Simpan
                     </button>
@@ -1367,16 +1454,27 @@ export function InboundForm() {
             </div>
           )}
 
+          {/* Submit Confirmation Modal */}
+          {isSubmitting && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
+              <div className="bg-white rounded-xl shadow-xl p-6 text-center">
+                <div className="text-5xl mb-3 animate-spin">⏳</div>
+                <h2 className="text-xl font-bold text-gray-800 mb-2">Memproses...</h2>
+                <p className="text-gray-600 text-sm">Sedang menyimpan data ke database</p>
+              </div>
+            </div>
+          )}
+
           {/* Success Modal (Updated to display multi-submission) */}
           {showSuccess && finalSubmissionData && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-              <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
-                <div className="bg-linear-to-r from-green-500 to-emerald-600 p-6">
+              <div className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-xl">
+                <div className="bg-gradient-to-r from-green-500 to-emerald-600 p-5">
                   <div className="flex flex-col items-center text-center">
-                    <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
-                      <CheckCircle className="h-10 w-10 text-white" />
+                    <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/20">
+                      <CheckCircle className="h-8 w-8 text-white" />
                     </div>
-                    <h3 className="text-2xl font-bold text-white mb-1">
+                    <h3 className="text-xl font-bold text-white mb-1">
                       Inbound {finalSubmissionData.length} Pallet Berhasil!
                     </h3>
                     <p className="text-green-100 text-sm">
@@ -1384,7 +1482,7 @@ export function InboundForm() {
                     </p>
                   </div>
                 </div>
-                <div className="p-6">
+                <div className="p-5">
                   <div className="mb-4 space-y-2 text-sm">
                     <div className="flex justify-between border-b pb-2">
                       <span className="text-gray-600">Pengemudi:</span>
@@ -1425,40 +1523,13 @@ export function InboundForm() {
           {/* Notification Modal (Pengganti Toast) */}
           {showNotificationModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-              <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
-                <div className={`p-6 ${
-                  notificationType === 'success' ? 'bg-linear-to-r from-green-500 to-emerald-600' :
-                  notificationType === 'error' ? 'bg-linear-to-r from-red-500 to-pink-600' :
-                  'bg-linear-to-r from-orange-500 to-amber-600'
-                }`}>
-                  <div className="flex flex-col items-center text-center">
-                    <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
-                      {notificationType === 'success' ? (
-                        <CheckCircle className="h-10 w-10 text-white" />
-                      ) : (
-                        <XCircle className="h-10 w-10 text-white" />
-                      )}
-                    </div>
-                    <h3 className="text-2xl font-bold text-white mb-1">
-                      {notificationTitle}
-                    </h3>
-                  </div>
+              <div className="bg-white rounded-xl p-6 max-w-sm w-full text-center shadow-xl" onClick={e => e.stopPropagation()}>
+                <div className="text-5xl mb-3">
+                  {notificationType === 'success' ? '✅' : notificationType === 'error' ? '❌' : '⚠️'}
                 </div>
-                <div className="p-6">
-                  <p className="text-gray-700 whitespace-pre-line text-center mb-6">
-                    {notificationMessage}
-                  </p>
-                  <button
-                    onClick={() => setShowNotificationModal(false)}
-                    className={`w-full py-3 rounded-xl font-semibold transition-all shadow-lg ${
-                      notificationType === 'success' ? 'bg-green-500 hover:bg-green-600 text-white' :
-                      notificationType === 'error' ? 'bg-red-500 hover:bg-red-600 text-white' :
-                      'bg-orange-500 hover:bg-orange-600 text-white'
-                    }`}
-                  >
-                    Tutup
-                  </button>
-                </div>
+                <h3 className="text-xl font-bold mb-2">{notificationTitle}</h3>
+                <p className="text-gray-600 mb-6">{notificationMessage}</p>
+                <button onClick={() => setShowNotificationModal(false)} className="w-full py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-all">OK</button>
               </div>
             </div>
           )}
@@ -1621,9 +1692,9 @@ export function InboundForm() {
                   }`}
                 >
                   <option value="">-- Pilih Ekspedisi --</option>
-                  {warehouseExpeditions.map((exp) => (
-                    <option key={exp.id} value={exp.expeditionCode}>
-                      {exp.expeditionName} ({exp.expeditionCode})
+                  {expeditions.map((exp) => (
+                    <option key={exp.id} value={exp.expedition_code}>
+                      {exp.expedition_name} ({exp.expedition_code})
                     </option>
                   ))}
                 </select>
@@ -1802,8 +1873,8 @@ export function InboundForm() {
               >
                 <option value="">-- Pilih Produk --</option>
                 {filteredProducts.map((product) => (
-                  <option key={product.id} value={product.productCode}>
-                    {product.productName} ({product.productCode})
+                  <option key={product.id} value={product.product_code}>
+                    {product.product_name} ({product.product_code})
                   </option>
                 ))}
               </select>
@@ -2408,7 +2479,7 @@ export function InboundForm() {
                   </div>
                   <div className="col-span-2">
                     <span className="text-slate-600">Produk:</span>{" "}
-                    <span className="font-semibold text-slate-900">{selectedProduct?.productName || "-"}</span>
+                    <span className="font-semibold text-slate-900">{selectedProduct?.product_name || "-"}</span>
                   </div>
                   <div className="col-span-2">
                     <span className="text-slate-600">BB Produk:</span>{" "}
@@ -2520,8 +2591,8 @@ export function InboundForm() {
 
           {/* Tabel Transaksi Hari Ini */}
           <div className="mt-8">
-            <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-200">
-              <div className="bg-linear-to-r from-blue-500 to-indigo-600 px-6 py-4">
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
+              <div className="bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-4">
                 <h3 className="text-xl font-bold text-white">📋 Transaksi Hari Ini</h3>
                 <p className="text-blue-100 text-sm mt-1">
                   {new Date().toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
@@ -2529,7 +2600,7 @@ export function InboundForm() {
               </div>
               {todayTransactions.length === 0 ? (
                 <div className="px-6 py-12 text-center">
-                  <div className="text-6xl mb-4">📭</div>
+                  <div className="text-5xl mb-3">📭</div>
                   <p className="text-gray-500 font-medium">Belum ada transaksi inbound hari ini</p>
                 </div>
               ) : (
@@ -2538,27 +2609,29 @@ export function InboundForm() {
                     <table className="w-full">
                       <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
-                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Waktu</th>
-                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Ekspedisi</th>
-                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Pengemudi</th>
-                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Produk</th>
-                          <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Pallet</th>
-                          <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Carton</th>
-                          <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
-                          <th className="px-3 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Aksi</th>
+                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Waktu</th>
+                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Ekspedisi</th>
+                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Pengemudi</th>
+                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Produk</th>
+                          <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Pallet</th>
+                          <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Carton</th>
+                          <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
+                          <th className="px-3 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Aksi</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {todayTransactions.map((item) => (
+                        {todayTransactions.map((item) => {
+                          const expedition = expeditions.find(e => e.id === item.expeditionId);
+                          return (
                           <tr key={item.id} className="hover:bg-blue-50 transition-colors">
                             <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
                               {new Date(item.arrivalTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
                             </td>
-                            <td className="px-3 py-3 text-sm text-gray-900">{item.expeditionId || '-'}</td>
+                            <td className="px-3 py-3 text-sm text-gray-900">{expedition?.expedition_name || item.expeditionId || '-'}</td>
                             <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">{item.driverName}</td>
                             <td className="px-3 py-3 text-sm">
-                              <div className="font-medium text-gray-900">{productMasterData.find(p => p.id === item.productId)?.productCode || '-'}</div>
-                              <div className="text-gray-500 text-xs truncate max-w-[150px]">{productMasterData.find(p => p.id === item.productId)?.productName || '-'}</div>
+                              <div className="font-medium text-gray-900">{products.find(p => p.id === item.productId)?.product_code || '-'}</div>
+                              <div className="text-gray-500 text-xs truncate max-w-[150px]">{products.find(p => p.id === item.productId)?.product_name || '-'}</div>
                             </td>
                             <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
                               {item.locations.length}
@@ -2597,7 +2670,8 @@ export function InboundForm() {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                        );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -2657,7 +2731,7 @@ export function InboundForm() {
                       </div>
                       <div>
                         <span className="text-gray-600">Ekspedisi:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.expeditionId || '-'}</p>
+                        <p className="font-semibold text-gray-900">{expeditions.find(e => e.id === selectedHistoryItem.expeditionId)?.expedition_name || selectedHistoryItem.expeditionId || '-'}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Nama Pengemudi:</span>
@@ -2682,15 +2756,15 @@ export function InboundForm() {
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div className="col-span-2">
                         <span className="text-gray-600">Nama Produk:</span>
-                        <p className="font-semibold text-gray-900">{productMasterData.find(p => p.id === selectedHistoryItem.productId)?.productName || '-'}</p>
+                        <p className="font-semibold text-gray-900">{products.find(p => p.id === selectedHistoryItem.productId)?.product_name || '-'}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Kode Produk:</span>
-                        <p className="font-semibold text-gray-900">{productMasterData.find(p => p.id === selectedHistoryItem.productId)?.productCode || '-'}</p>
+                        <p className="font-semibold text-gray-900">{products.find(p => p.id === selectedHistoryItem.productId)?.product_code || '-'}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Total PCS:</span>
-                        <p className="font-semibold text-gray-900">{((productMasterData.find(p => p.id === selectedHistoryItem.productId)?.qtyPerCarton || 0) * selectedHistoryItem.qtyCarton).toLocaleString()} pcs</p>
+                        <p className="font-semibold text-gray-900">{((products.find(p => p.id === selectedHistoryItem.productId)?.qty_per_carton || 0) * selectedHistoryItem.qtyCarton).toLocaleString()} pcs</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Qty Lokasi:</span>
@@ -2762,7 +2836,7 @@ export function InboundForm() {
                       </div>
                       <div>
                         <span className="text-gray-600">Diterima Oleh:</span>
-                        <p className="font-semibold text-gray-900">{selectedHistoryItem.receivedBy}</p>
+                        <p className="font-semibold text-gray-900">{users.find(u => u.id === selectedHistoryItem.receivedBy)?.full_name || selectedHistoryItem.receivedBy || '-'}</p>
                       </div>
                       <div className="col-span-2">
                         <span className="text-gray-600">Catatan:</span>
@@ -2814,7 +2888,7 @@ export function InboundForm() {
                     <div className="text-sm space-y-1">
                       <div className="flex justify-between">
                         <span className="text-gray-500">Produk:</span>
-                        <span className="font-semibold text-gray-900">{productMasterData.find(p => p.id === selectedItemForAction.productId)?.productCode || '-'}</span>
+                        <span className="font-semibold text-gray-900">{products.find(p => p.id === selectedItemForAction.productId)?.product_code || '-'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Qty:</span>
@@ -2874,7 +2948,7 @@ export function InboundForm() {
                     <div className="text-sm space-y-1">
                       <div className="flex justify-between">
                         <span className="text-gray-500">Produk:</span>
-                        <span className="font-semibold text-gray-900">{productMasterData.find(p => p.id === selectedItemForAction.productId)?.productCode || '-'}</span>
+                        <span className="font-semibold text-gray-900">{products.find(p => p.id === selectedItemForAction.productId)?.product_code || '-'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Qty:</span>

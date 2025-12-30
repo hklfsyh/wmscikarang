@@ -1,70 +1,17 @@
 "use client";
 
+// Inbound History Component for Superadmin
 import { useState, useMemo } from "react";
-import { Search, Calendar, TruckIcon, FileDown, ArrowLeft } from "lucide-react";
+import { inboundHistoryData, InboundHistory } from "@/lib/mock/transaction-history";
+import { productMasterData } from "@/lib/mock/product-master";
+import { Search, Calendar, TruckIcon, FileDown } from "lucide-react";
 import * as XLSX from 'xlsx';
-import { Navigation } from "@/components/navigation";
-
-// --- INTERFACES ---
-interface Product {
-  id: string;
-  product_code: string;
-  product_name: string;
-  qty_per_carton: number;
-}
-
-interface Expedition {
-  id: string;
-  expedition_code: string;
-  expedition_name: string;
-  warehouse_id: string;
-}
-
-interface User {
-  id: string;
-  full_name: string;
-  username: string;
-}
-
-interface InboundHistory {
-  id: string;
-  transactionCode: string;
-  productId: string;
-  arrivalTime: string;
-  expeditionId: string;
-  driverName: string;
-  vehicleNumber: string;
-  dnNumber: string;
-  bbProduk: string;
-  expiredDate: string;
-  qtyCarton: number;
-  receivedBy: string;
-  notes: string;
-  locations: Array<{
-    cluster: string;
-    lorong: number;
-    baris: number;
-    level: number;
-    qtyCarton: number;
-    isReceh: boolean;
-  }>;
-}
 
 interface InboundHistoryPageProps {
-  userProfile?: any;
-  historyData: InboundHistory[];
-  products: Product[];
-  expeditions: Expedition[];
-  users: User[];
+  userProfile?: any; // Profile user (opsional)
 }
 
-export function InboundHistoryPage({ 
-  userProfile, 
-  historyData = [], 
-  products = [],
-  expeditions = [],
-  users = []
-}: InboundHistoryPageProps) {
+export function InboundHistoryPage({ userProfile }: InboundHistoryPageProps = {}) {
   const [searchQuery, setSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -72,22 +19,23 @@ export function InboundHistoryPage({
   const [selectedItem, setSelectedItem] = useState<InboundHistory | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
-  // --- LOGIKA FILTER (MENGGUNAKAN DATA DARI PROPS) ---
+  // Filter data
   const filteredData = useMemo(() => {
-    return historyData.filter((item) => {
-      const product = products.find(p => p.id === item.productId);
+    return inboundHistoryData.filter((item) => {
+      // Search filter
       const searchLower = searchQuery.toLowerCase();
-      
+      const product = productMasterData.find(p => p.id === item.productId);
       const matchesSearch =
         searchQuery === "" ||
         item.transactionCode.toLowerCase().includes(searchLower) ||
-        (product?.product_name.toLowerCase().includes(searchLower) || false) ||
-        (product?.product_code.toLowerCase().includes(searchLower) || false) ||
+        (product?.productName.toLowerCase().includes(searchLower) || false) ||
+        (product?.productCode.toLowerCase().includes(searchLower) || false) ||
         item.driverName.toLowerCase().includes(searchLower) ||
         item.vehicleNumber.toLowerCase().includes(searchLower) ||
         item.dnNumber.toLowerCase().includes(searchLower) ||
         (item.expeditionId?.toLowerCase().includes(searchLower) || false);
 
+      // Date filter
       const itemDate = new Date(item.arrivalTime);
       const matchesStartDate = !startDate || itemDate >= new Date(startDate);
       const matchesEndDate = !endDate || itemDate <= new Date(endDate);
@@ -97,9 +45,9 @@ export function InboundHistoryPage({
 
       return matchesSearch && matchesStartDate && matchesEndDate && matchesStatus;
     });
-  }, [searchQuery, startDate, endDate, selectedStatus, historyData, products]);
+  }, [searchQuery, startDate, endDate, selectedStatus]);
 
-  // --- FORMAT HELPERS ---
+  // Format date for display
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleDateString("id-ID", {
@@ -109,6 +57,7 @@ export function InboundHistoryPage({
     });
   };
 
+  // Format datetime for display
   const formatDateTime = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleString("id-ID", {
@@ -120,6 +69,7 @@ export function InboundHistoryPage({
     });
   };
 
+  // Reset filters
   const handleReset = () => {
     setSearchQuery("");
     setStartDate("");
@@ -127,58 +77,85 @@ export function InboundHistoryPage({
     setSelectedStatus("all");
   };
 
+  // Open detail modal
   const handleViewDetail = (item: InboundHistory) => {
     setSelectedItem(item);
     setShowDetailModal(true);
   };
 
+  // Close detail modal
   const handleCloseDetail = () => {
     setShowDetailModal(false);
     setSelectedItem(null);
   };
 
-  // --- EXPORT TO EXCEL ---
+  // Export to Excel
   const exportToExcel = () => {
+    // Prepare data for export
     const exportData = filteredData.map((item, index) => {
-      const product = products.find(p => p.id === item.productId);
-      const expedition = expeditions.find(e => e.id === item.expeditionId);
-      const user = users.find(u => u.id === item.receivedBy);
-      const totalPcs = (product?.qty_per_carton || 0) * item.qtyCarton;
+      const product = productMasterData.find(p => p.id === item.productId);
+      const totalPcs = (product?.qtyPerCarton || 0) * item.qtyCarton;
       return {
         'No': index + 1,
         'Kode Transaksi': item.transactionCode,
         'Tanggal': formatDate(item.arrivalTime),
-        'Ekspedisi': expedition?.expedition_name || item.expeditionId || '-',
+        'Ekspedisi': item.expeditionId || '-',
         'Pengemudi': item.driverName,
         'No. Polisi': item.vehicleNumber,
         'No. DN': item.dnNumber,
-        'Kode Produk': product?.product_code || '-',
-        'Nama Produk': product?.product_name || '-',
+        'Kode Produk': product?.productCode || '-',
+        'Nama Produk': product?.productName || '-',
         'Qty Lokasi': item.locations.length,
         'Qty Carton': item.qtyCarton,
         'Total Pcs': totalPcs,
         'BB Produk': item.bbProduk,
         'Expired Date': formatDate(item.expiredDate),
         'Lokasi': item.locations.map(loc => `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`).join(', '),
-        'Diterima Oleh': user?.full_name || item.receivedBy || '-',
+        'Diterima Oleh': item.receivedBy,
         'Waktu Kedatangan': formatDateTime(item.arrivalTime),
       };
     });
 
+    // Create worksheet
     const ws = XLSX.utils.json_to_sheet(exportData);
+    
+    // Set column widths
+    const colWidths = [
+      { wch: 5 },  // No
+      { wch: 15 }, // ID Transaksi
+      { wch: 12 }, // Tanggal
+      { wch: 10 }, // Ekspedisi
+      { wch: 20 }, // Pengemudi
+      { wch: 12 }, // No. Polisi
+      { wch: 15 }, // No. DN
+      { wch: 12 }, // Kode Produk
+      { wch: 40 }, // Nama Produk
+      { wch: 10 }, // Qty Pallet
+      { wch: 10 }, // Qty Carton
+      { wch: 10 }, // Total Pcs
+      { wch: 15 }, // BB Produk
+      { wch: 12 }, // Expired Date
+      { wch: 30 }, // Lokasi
+      { wch: 10 }, // Status
+      { wch: 18 }, // Waktu Input
+    ];
+    ws['!cols'] = colWidths;
+
+    // Create workbook
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Riwayat Inbound');
 
+    // Generate filename with current date
     const date = new Date();
-    const filename = `Riwayat_Inbound_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}.xlsx`;
+    const filename = `Riwayat_Inbound_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}.xlsx`;
+
+    // Save file
     XLSX.writeFile(wb, filename);
   };
 
   return (
     <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-100">
-      <Navigation userProfile={userProfile} />
-      <div className="lg:pl-10 p-4 md:p-6 space-y-3 sm:space-y-4">
-        
+      <div className="w-full max-w-full space-y-3 sm:space-y-4">
         {/* Header */}
         <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -206,6 +183,7 @@ export function InboundHistoryPage({
         {/* Filters */}
         <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-3">
+            {/* Search */}
             <div className="col-span-2">
               <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
                 <Search className="w-3 h-3 inline mr-1" />
@@ -219,6 +197,8 @@ export function InboundHistoryPage({
                 className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors"
               />
             </div>
+
+            {/* Start Date */}
             <div>
               <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
                 <Calendar className="w-3 h-3 inline mr-1" />
@@ -231,6 +211,8 @@ export function InboundHistoryPage({
                 className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors"
               />
             </div>
+
+            {/* End Date */}
             <div>
               <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
                 <Calendar className="w-3 h-3 inline mr-1" />
@@ -245,12 +227,15 @@ export function InboundHistoryPage({
             </div>
           </div>
 
+          {/* Status Filter & Reset */}
           <div className="flex flex-wrap items-center gap-1 sm:gap-2">
             <span className="text-[10px] sm:text-xs font-semibold text-gray-700">Status:</span>
             <button
               onClick={() => setSelectedStatus("all")}
               className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs rounded-lg font-semibold transition-all ${
-                selectedStatus === "all" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                selectedStatus === "all"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
               }`}
             >
               Semua
@@ -258,7 +243,9 @@ export function InboundHistoryPage({
             <button
               onClick={() => setSelectedStatus("completed")}
               className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs rounded-lg font-semibold transition-all ${
-                selectedStatus === "completed" ? "bg-green-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                selectedStatus === "completed"
+                  ? "bg-green-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
               }`}
             >
               Selesai
@@ -266,7 +253,9 @@ export function InboundHistoryPage({
             <button
               onClick={() => setSelectedStatus("partial")}
               className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs rounded-lg font-semibold transition-all ${
-                selectedStatus === "partial" ? "bg-yellow-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                selectedStatus === "partial"
+                  ? "bg-yellow-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
               }`}
             >
               Partial
@@ -280,9 +269,10 @@ export function InboundHistoryPage({
             </button>
           </div>
 
+          {/* Summary */}
           <div className="mt-2 pt-2 border-t border-gray-200">
             <p className="text-[10px] sm:text-xs text-gray-600">
-              {filteredData.length} transaksi ditemukan
+              {filteredData.length} dari {inboundHistoryData.length} transaksi
             </p>
           </div>
         </div>
@@ -313,8 +303,7 @@ export function InboundHistoryPage({
                   </tr>
                 ) : (
                   filteredData.map((item) => {
-                    const product = products.find(p => p.id === item.productId);
-                    const expedition = expeditions.find(e => e.id === item.expeditionId);
+                    const product = productMasterData.find(p => p.id === item.productId);
                     return (
                       <tr key={item.id} className="hover:bg-blue-50 transition-colors">
                         <td className="px-2 py-1.5 text-[10px] sm:text-xs text-gray-700 whitespace-nowrap">
@@ -322,7 +311,7 @@ export function InboundHistoryPage({
                         </td>
                         <td className="px-2 py-1.5">
                           <span className="inline-block px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-[10px] sm:text-xs font-bold">
-                            {expedition?.expedition_name || item.expeditionId || '-'}
+                            {item.expeditionId || '-'}
                           </span>
                         </td>
                         <td className="px-2 py-1.5 text-[10px] sm:text-xs font-semibold text-gray-800 whitespace-nowrap max-w-[100px] truncate">
@@ -330,9 +319,9 @@ export function InboundHistoryPage({
                         </td>
                         <td className="px-2 py-1.5">
                           <div className="text-[10px] sm:text-xs max-w-[150px]">
-                            <div className="font-mono text-blue-600">{product?.product_code || '-'}</div>
-                            <div className="font-semibold text-gray-800 truncate">
-                              {product?.product_name || '-'}
+                            <div className="font-mono text-blue-600">{product?.productCode || '-'}</div>
+                            <div className="font-semibold text-gray-800 truncate" title={product?.productName || '-'}>
+                              {product?.productName || '-'}
                             </div>
                           </div>
                         </td>
@@ -380,74 +369,155 @@ export function InboundHistoryPage({
                   <div>
                     <h2 className="text-2xl font-bold">Detail Transaksi Inbound</h2>
                     <p className="text-sm opacity-90 mt-1">
-                      {formatDate(selectedItem.arrivalTime)} - {expeditions.find(e => e.id === selectedItem.expeditionId)?.expedition_name || selectedItem.expeditionId || '-'}
+                      {formatDate(selectedItem.arrivalTime)} - {selectedItem.expeditionId || '-'}
                     </p>
                   </div>
                   <button
                     onClick={handleCloseDetail}
                     className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
                   >
-                    ✕
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
                   </button>
                 </div>
               </div>
 
               {/* Modal Body */}
               <div className="p-6 space-y-6">
+                {/* Informasi Pengiriman */}
                 <div>
                   <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
-                    <span className="text-2xl">🚚</span> Informasi Pengiriman
+                    <span className="text-2xl">🚚</span>
+                    Informasi Pengiriman
                   </h3>
-                  <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl text-sm">
-                    <div><p className="text-xs text-gray-600">Kode Transaksi</p><p className="font-mono font-semibold">{selectedItem.transactionCode}</p></div>
-                    <div><p className="text-xs text-gray-600">Tanggal</p><p className="font-semibold">{formatDate(selectedItem.arrivalTime)}</p></div>
-                    <div><p className="text-xs text-gray-600">Ekspedisi</p><p className="font-semibold">{expeditions.find(e => e.id === selectedItem.expeditionId)?.expedition_name || selectedItem.expeditionId || '-'}</p></div>
-                    <div><p className="text-xs text-gray-600">Pengemudi</p><p className="font-semibold">{selectedItem.driverName}</p></div>
-                    <div><p className="text-xs text-gray-600">No. Polisi</p><p className="font-mono font-semibold">{selectedItem.vehicleNumber}</p></div>
-                    <div><p className="text-xs text-gray-600">No. DN</p><p className="font-mono font-semibold">{selectedItem.dnNumber}</p></div>
+                  <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl">
+                    <div>
+                      <p className="text-xs text-gray-600">Kode Transaksi</p>
+                      <p className="font-mono font-semibold text-gray-800">{selectedItem.transactionCode}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Tanggal</p>
+                      <p className="font-semibold text-gray-800">{formatDate(selectedItem.arrivalTime)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Ekspedisi</p>
+                      <p className="font-semibold text-gray-800">{selectedItem.expeditionId || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Pengemudi</p>
+                      <p className="font-semibold text-gray-800">{selectedItem.driverName}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">No. Polisi</p>
+                      <p className="font-mono font-semibold text-gray-800">{selectedItem.vehicleNumber}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">No. DN</p>
+                      <p className="font-mono font-semibold text-gray-800">{selectedItem.dnNumber}</p>
+                    </div>
                   </div>
                 </div>
 
+                {/* Informasi Produk */}
                 <div>
                   <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
-                    <span className="text-2xl">📦</span> Informasi Produk
+                    <span className="text-2xl">📦</span>
+                    Informasi Produk
                   </h3>
                   <div className="bg-blue-50 p-4 rounded-xl space-y-3">
                     <div>
                       <p className="text-xs text-gray-600">Kode Produk</p>
-                      <p className="font-mono font-bold text-blue-600 text-lg">{products.find(p => p.id === selectedItem.productId)?.product_code || '-'}</p>
+                      <p className="font-mono font-bold text-blue-600 text-lg">{productMasterData.find(p => p.id === selectedItem.productId)?.productCode || '-'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600">Nama Produk</p>
-                      <p className="font-semibold">{products.find(p => p.id === selectedItem.productId)?.product_name || '-'}</p>
+                      <p className="font-semibold text-gray-800">{productMasterData.find(p => p.id === selectedItem.productId)?.productName || '-'}</p>
                     </div>
                     <div className="grid grid-cols-3 gap-4 pt-3 border-t border-blue-200">
-                      <div className="text-center"><p className="text-xs text-gray-600">Qty Lokasi</p><p className="text-2xl font-bold text-green-600">{selectedItem.locations.length}</p></div>
-                      <div className="text-center"><p className="text-xs text-gray-600">Qty Carton</p><p className="text-2xl font-bold text-blue-600">{selectedItem.qtyCarton}</p></div>
-                      <div className="text-center"><p className="text-xs text-gray-600">Total Pcs</p><p className="text-2xl font-bold text-purple-600">{((products.find(p => p.id === selectedItem.productId)?.qty_per_carton || 0) * selectedItem.qtyCarton).toLocaleString()}</p></div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-600 mb-1">Qty Lokasi</p>
+                        <p className="text-2xl font-bold text-green-600">{selectedItem.locations.length}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-600 mb-1">Qty Carton</p>
+                        <p className="text-2xl font-bold text-blue-600">{selectedItem.qtyCarton}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-600 mb-1">Total Pcs</p>
+                        <p className="text-2xl font-bold text-purple-600">{((productMasterData.find(p => p.id === selectedItem.productId)?.qtyPerCarton || 0) * selectedItem.qtyCarton).toLocaleString()}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
 
+                {/* Informasi Batch & Expired */}
                 <div>
                   <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
-                    <span className="text-2xl">📍</span> Lokasi Penyimpanan
+                    <span className="text-2xl">📋</span>
+                    Informasi Batch & Expired
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl">
+                    <div>
+                      <p className="text-xs text-gray-600">BB Produk</p>
+                      <p className="font-mono font-bold text-gray-800 text-lg">{selectedItem.bbProduk}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Expired Date</p>
+                      <p className="font-semibold text-red-600 text-lg">{formatDate(selectedItem.expiredDate)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Lokasi Penyimpanan */}
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                    <span className="text-2xl">📍</span>
+                    Lokasi Penyimpanan
                   </h3>
                   <div className="space-y-2">
                     {selectedItem.locations.map((loc, idx) => (
-                      <div key={idx} className="bg-green-50 p-3 rounded-xl border border-green-200 text-sm">
+                      <div key={idx} className="bg-green-50 p-3 rounded-xl border border-green-200">
                         <div className="grid grid-cols-2 gap-2">
-                          <div><p className="text-xs text-gray-600">Lokasi</p><p className="font-mono font-semibold text-green-700">{loc.cluster}-L{loc.lorong}-B{loc.baris}-P{loc.level}</p></div>
-                          <div><p className="text-xs text-gray-600">Qty</p><p className="font-semibold">{loc.qtyCarton} ctn{loc.isReceh ? ' (Receh)' : ''}</p></div>
+                          <div>
+                            <p className="text-xs text-gray-600">Lokasi</p>
+                            <p className="font-mono font-semibold text-green-700">{loc.cluster}-L{loc.lorong}-B{loc.baris}-P{loc.level}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-600">Qty</p>
+                            <p className="font-semibold text-gray-800">{loc.qtyCarton} carton{loc.isReceh ? ' (Receh)' : ''}</p>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
+
+                {/* Waktu & Metadata */}
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                    <span className="text-2xl">⏰</span>
+                    Waktu & Metadata
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl">
+                    <div>
+                      <p className="text-xs text-gray-600">Waktu Kedatangan</p>
+                      <p className="font-semibold text-gray-800">{formatDateTime(selectedItem.arrivalTime)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Diterima Oleh</p>
+                      <p className="font-semibold text-gray-800">{selectedItem.receivedBy}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-xs text-gray-600">Catatan</p>
+                      <p className="font-semibold text-gray-800">{selectedItem.notes || '-'}</p>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Modal Footer */}
-              <div className="bg-gray-50 p-4 sticky bottom-0 border-t">
+              <div className="bg-gray-50 p-4 sticky bottom-0">
                 <button
                   onClick={handleCloseDetail}
                   className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"

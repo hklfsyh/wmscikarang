@@ -4,8 +4,9 @@ import { useState } from "react";
 import { Navigation } from "@/components/navigation";
 import { type Warehouse } from "@/lib/mock/product-master";
 import { ConfirmationModal } from "@/components/confirmation-modal";
-import { createClient } from "@/utils/supabase/client"; // Gunakan client-side client
+import { createClient } from "@/utils/supabase/client";
 import { useRouter } from "next/navigation";
+import { createWarehouse, updateWarehouse, deleteWarehouse, toggleWarehouseStatus } from "./actions";
 
 interface UserProfile {
   username: string;
@@ -22,10 +23,12 @@ export default function WarehouseManagementClient({
 }) {
   const supabase = createClient();
   const router = useRouter();
-  const [warehouses, setWarehouses] = useState<Warehouse[]>(initialWarehouses);
+  const [warehouses] = useState<Warehouse[]>(initialWarehouses);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false); // Tambahkan ini
   const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
+  const [deletingWarehouse, setDeletingWarehouse] = useState<Warehouse | null>(null); // Tambahkan ini
   const [loading, setLoading] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -43,6 +46,11 @@ export default function WarehouseManagementClient({
     onConfirm: () => {},
   });
 
+  const resetForm = () => {
+    setFormData({ warehouseCode: "", cityName: "", address: "", phone: "" });
+    setEditingWarehouse(null);
+  };
+
   const handleAddWarehouse = async () => {
     if (!formData.warehouseCode || !formData.cityName || !formData.address) {
       setConfirmationModal({
@@ -54,30 +62,21 @@ export default function WarehouseManagementClient({
     }
 
     setLoading(true);
-    const { error } = await supabase
-      .from("warehouses")
-      .insert([{
-        warehouse_code: formData.warehouseCode,
-        city_name: formData.cityName,
-        address: formData.address,
-        phone: formData.phone,
-        is_active: true
-      }]);
+    const result = await createWarehouse(formData);
 
-    if (error) {
+    if (result.error) {
       setConfirmationModal({
         isOpen: true, type: "error", title: "Gagal",
-        message: "Error database: " + error.message,
+        message: result.error,
         onConfirm: () => {},
       });
     } else {
-      setFormData({ warehouseCode: "", cityName: "", address: "", phone: "" });
       setShowAddModal(false);
-      router.refresh(); // Ambil data terbaru dari server
+      resetForm();
       setConfirmationModal({
         isOpen: true, type: "success", title: "Berhasil",
-        message: "Gudang baru berhasil ditambahkan ke database!",
-        onConfirm: () => window.location.reload(),
+        message: "Gudang baru berhasil ditambahkan!",
+        onConfirm: () => router.refresh(),
       });
     }
     setLoading(false);
@@ -87,30 +86,21 @@ export default function WarehouseManagementClient({
     if (!editingWarehouse) return;
     setLoading(true);
 
-    const { error } = await supabase
-      .from("warehouses")
-      .update({
-        warehouse_code: formData.warehouseCode,
-        city_name: formData.cityName,
-        address: formData.address,
-        phone: formData.phone,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", editingWarehouse.id);
+    const result = await updateWarehouse(editingWarehouse.id, formData);
 
-    if (error) {
+    if (result.error) {
       setConfirmationModal({
         isOpen: true, type: "error", title: "Gagal",
-        message: "Update gagal: " + error.message,
+        message: result.error,
         onConfirm: () => {},
       });
     } else {
       setShowEditModal(false);
-      router.refresh();
+      resetForm();
       setConfirmationModal({
         isOpen: true, type: "success", title: "Berhasil",
         message: "Data gudang berhasil diperbarui!",
-        onConfirm: () => window.location.reload(),
+        onConfirm: () => router.refresh(),
       });
     }
     setLoading(false);
@@ -122,8 +112,31 @@ export default function WarehouseManagementClient({
       .update({ is_active: !warehouse.isActive })
       .eq("id", warehouse.id);
 
-    if (!error) router.refresh();
-    window.location.reload();
+    if (!error) window.location.reload();
+  };
+
+  const handleDeleteWarehouse = async () => {
+    if (!deletingWarehouse) return;
+    setLoading(true);
+
+    const result = await deleteWarehouse(deletingWarehouse.id);
+
+    if (result.error) {
+      setConfirmationModal({
+        isOpen: true, type: "error", title: "Gagal",
+        message: result.error,
+        onConfirm: () => {},
+      });
+    } else {
+      setShowDeleteModal(false);
+      setDeletingWarehouse(null);
+      setConfirmationModal({
+        isOpen: true, type: "success", title: "Terhapus",
+        message: "Gudang berhasil dihapus!",
+        onConfirm: () => router.refresh(),
+      });
+    }
+    setLoading(false);
   };
 
   const openEditModal = (warehouse: Warehouse) => {
@@ -132,9 +145,14 @@ export default function WarehouseManagementClient({
       warehouseCode: warehouse.warehouseCode,
       cityName: warehouse.cityName,
       address: warehouse.address,
-      phone: warehouse.phone,
+      phone: warehouse.phone || "",
     });
     setShowEditModal(true);
+  };
+
+  const openDeleteModal = (warehouse: Warehouse) => {
+    setDeletingWarehouse(warehouse);
+    setShowDeleteModal(true);
   };
 
   return (
@@ -142,73 +160,63 @@ export default function WarehouseManagementClient({
       <Navigation userProfile={userProfile} />
 
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 lg:pl-4">
-        <div className="w-full max-w-full space-y-3 sm:space-y-4">
-          <div className="bg-white rounded-2xl shadow-xl p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center">
-                  <span className="text-xl sm:text-2xl">🏢</span>
-                </div>
-                <div>
-                  <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-800">Management Warehouse</h1>
-                  <p className="text-xs sm:text-sm text-gray-600">Kelola master data gudang</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="w-full sm:w-auto px-4 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-xl font-semibold shadow-lg"
-              >
-                + Tambah Gudang
-              </button>
+        <div className="w-full max-w-full space-y-3 sm:space-y-4 p-4">
+          {/* Header */}
+          <div className="bg-white rounded-2xl shadow-xl p-6 flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">Management Warehouse</h1>
+              <p className="text-sm text-gray-600">Kelola master data gudang</p>
             </div>
+            <button
+              onClick={() => { resetForm(); setShowAddModal(true); }}
+              className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-semibold shadow-lg"
+            >
+              + Tambah Gudang
+            </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:gap-4">
-            <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 lg:p-6 text-center sm:text-left">
-              <p className="text-xs sm:text-sm text-gray-600 uppercase">Total Gudang</p>
-              <p className="text-lg sm:text-2xl font-bold text-gray-800">{warehouses.length}</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 lg:p-6 text-center sm:text-left">
-              <p className="text-xs sm:text-sm text-gray-600 uppercase">Aktif</p>
-              <p className="text-lg sm:text-2xl font-bold text-green-600">{warehouses.filter(wh => wh.isActive).length}</p>
-            </div>
-          </div>
-
+          {/* Table */}
           <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white">
+                <thead className="bg-indigo-600 text-white text-sm">
                   <tr>
-                    <th className="px-4 py-3 text-left text-sm font-bold uppercase">Kode</th>
-                    <th className="px-4 py-3 text-left text-sm font-bold uppercase">Kota</th>
-                    <th className="px-4 py-3 text-left text-sm font-bold uppercase hidden md:table-cell">Alamat</th>
-                    <th className="px-4 py-3 text-left text-sm font-bold uppercase">Telepon</th>
-                    <th className="px-4 py-3 text-center text-sm font-bold uppercase">Status</th>
-                    <th className="px-4 py-3 text-center text-sm font-bold uppercase">Aksi</th>
+                    <th className="px-4 py-3 text-left font-bold uppercase tracking-wider">Kode</th>
+                    <th className="px-4 py-3 text-left font-bold uppercase tracking-wider">Kota</th>
+                    <th className="px-4 py-3 text-left font-bold uppercase tracking-wider hidden md:table-cell">Alamat</th>
+                    <th className="px-4 py-3 text-center font-bold uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-center font-bold uppercase tracking-wider">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {warehouses.map((warehouse) => (
-                    <tr key={warehouse.id} className="hover:bg-blue-50 transition-colors">
-                      <td className="px-4 py-3 text-sm font-mono font-bold text-gray-800">{warehouse.warehouseCode}</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-800">{warehouse.cityName}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 hidden md:table-cell">{warehouse.address}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{warehouse.phone || "-"}</td>
+                  {warehouses.map((wh) => (
+                    <tr key={wh.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 text-sm font-mono font-bold text-indigo-600">{wh.warehouseCode}</td>
+                      <td className="px-4 py-3 text-sm font-semibold">{wh.cityName}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 hidden md:table-cell">{wh.address}</td>
                       <td className="px-4 py-3 text-center">
                         <button
-                          onClick={() => handleToggleStatus(warehouse)}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold ${warehouse.isActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
+                          onClick={() => handleToggleStatus(wh)}
+                          className={`px-2 py-1 rounded-lg text-xs font-bold ${wh.isActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
                         >
-                          {warehouse.isActive ? "✓ Aktif" : "✗ Nonaktif"}
+                          {wh.isActive ? "✓ Aktif" : "✗ Nonaktif"}
                         </button>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => openEditModal(warehouse)}
-                          className="px-4 py-2 bg-blue-500 text-white rounded-lg text-xs font-bold hover:bg-blue-600"
-                        >
-                          Edit
-                        </button>
+                        <div className="flex justify-center gap-2">
+                          <button
+                            onClick={() => openEditModal(wh)}
+                            className="px-2 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => openDeleteModal(wh)}
+                            className="px-2 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold"
+                          >
+                            Hapus
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -218,27 +226,40 @@ export default function WarehouseManagementClient({
           </div>
         </div>
 
-        {/* Modal Logic (Tetap Sesuai Kebutuhan) */}
+        {/* MODAL SECTION - WITH CLICK OUTSIDE TO CLOSE */}
         {(showAddModal || showEditModal) && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden">
-              <div className={`p-6 text-white bg-gradient-to-r ${showEditModal ? 'from-blue-500 to-indigo-600' : 'from-purple-500 to-indigo-600'}`}>
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold">{showEditModal ? "Edit Data Gudang" : "Tambah Gudang Baru"}</h2>
-                  <button disabled={loading} onClick={() => { setShowAddModal(false); setShowEditModal(false); }} className="text-white hover:bg-white/20 rounded-lg p-2">✕</button>
-                </div>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => { setShowAddModal(false); setShowEditModal(false); resetForm(); }}>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-indigo-600 p-6 text-white flex justify-between items-center">
+                <h2 className="text-xl font-bold">{showEditModal ? "Edit" : "Tambah"} Gudang</h2>
+                <button onClick={() => { setShowAddModal(false); setShowEditModal(false); resetForm(); }}>✕</button>
               </div>
-              <div className="p-6 space-y-4 overflow-y-auto">
-                <input disabled={loading} type="text" value={formData.warehouseCode} onChange={(e) => setFormData({ ...formData, warehouseCode: e.target.value })} placeholder="Kode Gudang" className="w-full px-4 py-3 border-2 rounded-xl outline-none" />
-                <input disabled={loading} type="text" value={formData.cityName} onChange={(e) => setFormData({ ...formData, cityName: e.target.value })} placeholder="Kota" className="w-full px-4 py-3 border-2 rounded-xl outline-none" />
-                <textarea disabled={loading} value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} placeholder="Alamat" rows={3} className="w-full px-4 py-3 border-2 rounded-xl outline-none" />
-                <input disabled={loading} type="text" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="Telepon" className="w-full px-4 py-3 border-2 rounded-xl outline-none" />
+              <div className="p-6 space-y-4">
+                <input disabled={loading} type="text" value={formData.warehouseCode} onChange={(e) => setFormData({...formData, warehouseCode: e.target.value})} placeholder="Kode Gudang (WH-CKR)" className="w-full px-4 py-2 border rounded-xl" />
+                <input disabled={loading} type="text" value={formData.cityName} onChange={(e) => setFormData({...formData, cityName: e.target.value})} placeholder="Nama Kota" className="w-full px-4 py-2 border rounded-xl" />
+                <textarea disabled={loading} value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})} placeholder="Alamat Lengkap" rows={3} className="w-full px-4 py-2 border rounded-xl" />
+                <input disabled={loading} type="text" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} placeholder="Nomor Telepon" className="w-full px-4 py-2 border rounded-xl" />
               </div>
-              <div className="bg-gray-50 p-4 flex gap-3">
-                <button disabled={loading} onClick={() => { setShowAddModal(false); setShowEditModal(false); }} className="flex-1 py-3 bg-gray-200 rounded-xl">Batal</button>
-                <button disabled={loading} onClick={showEditModal ? handleEditWarehouse : handleAddWarehouse} className={`flex-1 py-3 text-white rounded-xl bg-gradient-to-r ${showEditModal ? 'from-blue-500 to-indigo-600' : 'from-purple-500 to-indigo-600'}`}>
-                  {loading ? "Memproses..." : "Simpan"}
+              <div className="p-4 bg-gray-50 flex gap-3">
+                <button onClick={() => { setShowAddModal(false); setShowEditModal(false); }} className="flex-1 py-2 bg-gray-200 rounded-xl">Batal</button>
+                <button disabled={loading} onClick={showEditModal ? handleEditWarehouse : handleAddWarehouse} className="flex-1 py-2 bg-indigo-600 text-white rounded-xl shadow-lg">
+                  {loading ? "Proses..." : "Simpan"}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DELETE MODAL */}
+        {showDeleteModal && deletingWarehouse && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowDeleteModal(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center" onClick={(e) => e.stopPropagation()}>
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">⚠️</div>
+              <h3 className="text-xl font-bold mb-2">Hapus Gudang?</h3>
+              <p className="text-sm text-gray-500 mb-6">Menghapus <b>{deletingWarehouse.warehouseCode}</b> akan berdampak pada data stok di dalamnya.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-2 bg-gray-100 rounded-xl">Batal</button>
+                <button onClick={handleDeleteWarehouse} className="flex-1 py-2 bg-red-600 text-white rounded-xl shadow-lg">Ya, Hapus</button>
               </div>
             </div>
           </div>
