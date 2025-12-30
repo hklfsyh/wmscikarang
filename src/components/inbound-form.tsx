@@ -397,13 +397,14 @@ export function InboundForm() {
 
   const findMultipleRecommendedLocations = (
     clusterChar: string,
-    palletsNeeded: number
+    palletsNeeded: number,
+    warehouseId: string | null
   ): MultiLocationRecommendation => {
     const locations: RecommendedLocation[] = [];
     let remainingPallets = palletsNeeded;
 
     // Get cluster config untuk dynamic lorong/baris count
-    const clusterConfig = getClusterConfig(form.clusterChar);
+    const clusterConfig = getClusterConfig(clusterChar);
     if (!clusterConfig) {
       return { locations: [], totalPalletsPlaced: 0, needsMultipleLocations: false };
     }
@@ -412,8 +413,8 @@ export function InboundForm() {
     const validLocs = form.productCode ? getValidLocationsForProduct(form.productCode) : null;
     
     // PHASE 1: Try to fill primary product home locations
-    const lorongStart = validLocs && validLocs.clusterChar === form.clusterChar ? validLocs.lorongRange[0] : 1;
-    const lorongEnd = validLocs && validLocs.clusterChar === form.clusterChar 
+    const lorongStart = validLocs && validLocs.clusterChar === clusterChar ? validLocs.lorongRange[0] : 1;
+    const lorongEnd = validLocs && validLocs.clusterChar === clusterChar 
       ? validLocs.lorongRange[1] 
       : clusterConfig.defaultLorongCount;
     
@@ -421,14 +422,14 @@ export function InboundForm() {
       if (remainingPallets === 0) break;
       
       // Skip In Transit area in primary phase
-      if (isInTransitLocation(form.clusterChar, lorongNum)) continue;
+      if (isInTransitLocation(clusterChar, lorongNum)) continue;
       
       // Get baris count for this lorong (dynamic)
-      const maxBaris = getBarisCountForLorong(form.clusterChar, lorongNum);
+      const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
       
       // Determine baris range
-      const barisStart = validLocs && validLocs.clusterChar === form.clusterChar ? validLocs.barisRange[0] : 1;
-      const barisEnd = validLocs && validLocs.clusterChar === form.clusterChar 
+      const barisStart = validLocs && validLocs.clusterChar === clusterChar ? validLocs.barisRange[0] : 1;
+      const barisEnd = validLocs && validLocs.clusterChar === clusterChar 
         ? Math.min(validLocs.barisRange[1], maxBaris)
         : maxBaris;
       
@@ -436,7 +437,7 @@ export function InboundForm() {
         if (remainingPallets === 0) break;
         
         // Get pallet capacity for this cell (dynamic)
-        const maxPallet = getPalletCapacityForCell(form.clusterChar, lorongNum, barisNum);
+        const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
         const productMaxPallet = validLocs ? validLocs.maxPalletPerLocation : 999;
         const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
         
@@ -449,14 +450,15 @@ export function InboundForm() {
           
           // Validate product can be placed here
           if (form.productCode) {
-            const validation = validateProductLocation(form.productCode, form.clusterChar, lorongNum, barisNum);
+            const validation = validateProductLocation(form.productCode, clusterChar, lorongNum, barisNum);
             if (!validation.isValid) continue;
           }
           
-          // Check if location is empty
+          // Check if location is empty (filter by current warehouse)
           const locationExists = stockListData.some(
             (item: StockItem) =>
-              item.cluster === form.clusterChar &&
+              item.warehouseId === warehouseId && // Filter by current warehouse
+              item.cluster === clusterChar &&
               item.lorong === parseInt(lorong.replace('L', '')) &&
               item.baris === parseInt(baris.replace('B', '')) &&
               item.level === parseInt(level.replace('P', ''))
@@ -486,7 +488,7 @@ export function InboundForm() {
     // CROSS-CLUSTER IN TRANSIT: Search Cluster C In Transit for ALL products (global overflow buffer)
     if (remainingPallets > 0) {
       // First, try In Transit in the same cluster (if exists)
-      const inTransitRange = getInTransitRange(form.clusterChar);
+      const inTransitRange = getInTransitRange(clusterChar);
       
       if (inTransitRange) {
         const [transitStart, transitEnd] = inTransitRange;
@@ -494,12 +496,12 @@ export function InboundForm() {
         for (let lorongNum = transitStart; lorongNum <= transitEnd; lorongNum++) {
           if (remainingPallets === 0) break;
           
-          const maxBaris = getBarisCountForLorong(form.clusterChar, lorongNum);
+          const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
           
           for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
             if (remainingPallets === 0) break;
             
-            const maxPallet = getPalletCapacityForCell(form.clusterChar, lorongNum, barisNum);
+            const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
             
             for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
               if (remainingPallets === 0) break;
@@ -511,7 +513,8 @@ export function InboundForm() {
               // Check if location is empty
               const locationExists = stockListData.some(
                 (item: StockItem) =>
-                  item.cluster === form.clusterChar &&
+                  item.warehouseId === warehouseId && // Filter by current warehouse
+                  item.cluster === clusterChar &&
                   item.lorong === parseInt(lorong.replace('L', '')) &&
                   item.baris === parseInt(baris.replace('B', '')) &&
                   item.level === parseInt(level.replace('P', ''))
@@ -519,7 +522,7 @@ export function InboundForm() {
               
               if (!locationExists) {
                 locations.push({
-                  clusterChar: form.clusterChar,
+                  clusterChar: clusterChar,
                   lorong,
                   baris,
                   level,
@@ -533,7 +536,7 @@ export function InboundForm() {
       }
       
       // PHASE 2B: If still have remaining pallets AND home cluster is NOT C, search Cluster C In Transit (cross-cluster overflow)
-      if (remainingPallets > 0 && form.clusterChar !== "C") {
+      if (remainingPallets > 0 && clusterChar !== "C") {
         const clusterCInTransitRange = getInTransitRange("C");
         
         if (clusterCInTransitRange) {
@@ -559,6 +562,7 @@ export function InboundForm() {
                 // Check if location is empty in Cluster C In Transit
                 const locationExists = stockListData.some(
                   (item: StockItem) =>
+                    item.warehouseId === warehouseId && // Filter by current warehouse
                     item.cluster === "C" &&
                     item.lorong === parseInt(lorong.replace('L', '')) &&
                     item.baris === parseInt(baris.replace('B', '')) &&
@@ -592,7 +596,7 @@ export function InboundForm() {
   // Helper function for finding single location (kept for potential future use)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _findRecommendedLocation = (clusterChar: string): RecommendedLocation | null => {
-    const multiRec = findMultipleRecommendedLocations(clusterChar, 1);
+    const multiRec = findMultipleRecommendedLocations(clusterChar, 1, currentWarehouseId);
     if (multiRec.locations.length > 0) {
       return multiRec.locations[0];
     }
@@ -638,7 +642,7 @@ export function InboundForm() {
       return; 
     }
     
-    const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded);
+    const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded, currentWarehouseId);
     
     if (multiRec.locations.length < totalPalletsNeeded) {
         error(`Gudang penuh! Hanya ditemukan ${multiRec.locations.length} dari ${totalPalletsNeeded} lokasi yang dibutuhkan.`);
@@ -728,10 +732,10 @@ export function InboundForm() {
     }
 
     // Generate all locations from range
-    const locations: ManualLocationInput[] = [];
+    const allLocations: ManualLocationInput[] = [];
     for (let b = barisStartNum; b <= barisEndNum; b++) {
       for (let p = palletStartNum; p <= palletEndNum; p++) {
-        locations.push({
+        allLocations.push({
           clusterChar,
           lorong,
           baris: `B${b}`,
@@ -740,66 +744,49 @@ export function InboundForm() {
       }
     }
 
-    if (locations.length < totalPalletsNeeded) {
-      error(`Range hanya menghasilkan ${locations.length} lokasi, tetapi butuh ${totalPalletsNeeded} lokasi!`);
-      return;
-    }
-
-    // SMART SELECTION: Jika range > kebutuhan, ambil sebagian saja (sesuai kebutuhan)
-    const locationsToUse = locations.length > totalPalletsNeeded 
-      ? locations.slice(0, totalPalletsNeeded)
-      : locations;
-    
-    if (locations.length > totalPalletsNeeded) {
-      warning(`Range menghasilkan ${locations.length} lokasi. Sistem akan menggunakan ${totalPalletsNeeded} lokasi pertama (${locationsToUse[0].clusterChar}-${locationsToUse[0].lorong}-${locationsToUse[0].baris}-${locationsToUse[0].pallet} s/d ${locationsToUse[locationsToUse.length-1].clusterChar}-${locationsToUse[locationsToUse.length-1].lorong}-${locationsToUse[locationsToUse.length-1].baris}-${locationsToUse[locationsToUse.length-1].pallet}).`);
-    }
-
-    // Check availability for selected locations
-    checkLocationsAvailability(locationsToUse);
-  };
-
-  // Check if locations are available
-  const checkLocationsAvailability = (locations: ManualLocationInput[]) => {
-    const availability: LocationAvailability[] = [];
-    const occupied: LocationAvailability[] = [];
-
-    locations.forEach(loc => {
-      const locationKey = `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
-      // FIXED: Gunakan struktur data yang sama seperti di handleSubmit
+    // SMART FILTER: Filter hanya lokasi yang KOSONG
+    const availableLocations = allLocations.filter(loc => {
       const existingStock = stockListData.find(
-        s => s.cluster === loc.clusterChar && 
+        s => s.warehouseId === currentWarehouseId &&
+             s.cluster === loc.clusterChar && 
              s.lorong === parseInt(loc.lorong.replace('L', '')) && 
              s.baris === parseInt(loc.baris.replace('B', '')) && 
              s.level === parseInt(loc.pallet.replace('P', ''))
       );
-
-      const isOccupied = !!existingStock;
-      const availabilityInfo: LocationAvailability = {
-        location: locationKey,
-        isOccupied,
-        occupiedBy: existingStock 
-          ? `${productMasterData.find(p => p.id === existingStock.productId)?.productName || 'Unknown'} (${existingStock.qtyCarton} karton)` 
-          : undefined
-      };
-
-      availability.push(availabilityInfo);
-      if (isOccupied) {
-        occupied.push(availabilityInfo);
-      }
+      return !existingStock; // Hanya ambil yang kosong
     });
 
-    setLocationAvailability(availability);
-    setOccupiedLocations(occupied);
-    setExpandedLocations(locations);
+    // Count occupied locations for info
+    const occupiedCount = allLocations.length - availableLocations.length;
 
-    if (occupied.length > 0) {
-      // Show confirmation modal with detailed grouping
-      setShowAvailabilityModal(true);
-    } else {
-      // All locations available, proceed
-      setManualLocations(locations);
-      success(`${locations.length} lokasi tersedia dan siap digunakan!`);
+    if (availableLocations.length < totalPalletsNeeded) {
+      error(`Range menghasilkan ${allLocations.length} lokasi (${occupiedCount} terisi, ${availableLocations.length} kosong).\nButuh ${totalPalletsNeeded} lokasi kosong, hanya tersedia ${availableLocations.length}!`);
+      return;
     }
+
+    // SMART SELECTION: Ambil lokasi kosong sesuai kebutuhan
+    const locationsToUse = availableLocations.slice(0, totalPalletsNeeded);
+    
+    if (occupiedCount > 0) {
+      success(`✅ Range diproses!\n\nTotal: ${allLocations.length} lokasi\n- Terisi: ${occupiedCount} lokasi (di-skip)\n- Kosong: ${availableLocations.length} lokasi\n- Digunakan: ${locationsToUse.length} lokasi\n\nLokasi: ${locationsToUse[0].clusterChar}-${locationsToUse[0].lorong}-${locationsToUse[0].baris}-${locationsToUse[0].pallet} s/d ${locationsToUse[locationsToUse.length-1].clusterChar}-${locationsToUse[locationsToUse.length-1].lorong}-${locationsToUse[locationsToUse.length-1].baris}-${locationsToUse[locationsToUse.length-1].pallet}`);
+    } else {
+      success(`✅ ${locationsToUse.length} lokasi kosong siap digunakan!\n\nLokasi: ${locationsToUse[0].clusterChar}-${locationsToUse[0].lorong}-${locationsToUse[0].baris}-${locationsToUse[0].pallet} s/d ${locationsToUse[locationsToUse.length-1].clusterChar}-${locationsToUse[locationsToUse.length-1].lorong}-${locationsToUse[locationsToUse.length-1].baris}-${locationsToUse[locationsToUse.length-1].pallet}`);
+    }
+
+    // Set manual locations directly (no need for availability modal)
+    setManualLocations(locationsToUse);
+    setExpandedLocations(locationsToUse);
+    setLocationAvailability([]);
+    setOccupiedLocations([]);
+  };
+
+  // Check if locations are available (legacy function, now simplified)
+  const checkLocationsAvailability = (locations: ManualLocationInput[]) => {
+    // This function is now mainly for backward compatibility
+    // The filtering is done in expandRangeToLocations
+    setManualLocations(locations);
+    setExpandedLocations(locations);
+    success(`${locations.length} lokasi kosong siap digunakan!`);
   };
 
   // Confirm override occupied locations
@@ -1104,6 +1091,7 @@ export function InboundForm() {
             // Check apakah lokasi sudah terisi di stockList
             const locationIsOccupied = stockListData.some(
               (item) =>
+                item.warehouseId === currentWarehouseId && // Filter by current warehouse
                 item.cluster === loc.clusterChar &&
                 item.lorong === parseInt(loc.lorong.replace('L', '')) &&
                 item.baris === parseInt(loc.baris.replace('B', '')) &&
@@ -1143,6 +1131,7 @@ export function InboundForm() {
         } else {
             const locationIsOccupied = stockListData.some(
               (item) =>
+                item.warehouseId === currentWarehouseId && // Filter by current warehouse
                 item.cluster === currentLoc.clusterChar &&
                 item.lorong === parseInt(currentLoc.lorong.replace('L', '')) &&
                 item.baris === parseInt(currentLoc.baris.replace('B', '')) &&

@@ -2,499 +2,162 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { logout } from "@/app/login/actions";
 
-type UserRole = "admin_warehouse" | "admin_cabang" | "developer";
-
-interface User {
+interface UserProfile {
   username: string;
-  role: UserRole;
-  name: string;
-  warehouseId?: string | null;
+  role: string;
+  full_name: string;
+  warehouse_id?: string | null;
 }
 
-export function Navigation() {
+export function Navigation({ userProfile }: { userProfile: UserProfile }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [mounted, setMounted] = useState(false);
 
+  // Menghindari Hydration Mismatch: Jam hanya muncul setelah komponen nempel di browser
   useEffect(() => {
-    const userStr = localStorage.getItem("user");
-    if (userStr) {
-      setUser(JSON.parse(userStr));
-    } else if (pathname !== "/login") {
-      router.push("/login");
-    }
-  }, [pathname, router]);
-
-  // Update jam digital setiap detik
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000); // Update setiap detik
-
+    setMounted(true);
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Auto-refresh setiap 15 menit
-  useEffect(() => {
-    const refreshTimer = setTimeout(() => {
-      window.location.reload();
-    }, 15 * 60 * 1000); // 15 menit dalam milliseconds
-
-    return () => clearTimeout(refreshTimer);
-  }, []);
-
-  // Format jam digital (HH:MM:SS)
-  const formatTime = (date: Date) => {
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const seconds = date.getSeconds().toString().padStart(2, '0');
-    return `${hours}:${minutes}:${seconds}`;
-  };
-
-  // Format tanggal (DD/MM/YYYY)
-  const formatDate = (date: Date) => {
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    router.push("/login");
-  };
-
-  if (!user || pathname === "/login") return null;
+  const formatTime = (date: Date) => date.toLocaleTimeString('en-GB', { hour12: false });
+  const formatDate = (date: Date) => date.toLocaleDateString('en-GB');
 
   const menuItems = [
-    // Developer Only
-    {
-      label: "Management Warehouse",
-      path: "/warehouse-management",
-      icon: "🏢",
-      roles: ["developer"],
-    },
-    {
-      label: "Management User",
-      path: "/admin-management",
-      icon: "👥",
-      roles: ["developer", "admin_cabang"],
-    },
-    // Admin Cabang Only
-    {
-      label: "Warehouse Layout",
-      path: "/warehouse-layout",
-      icon: "🏢",
-      roles: ["admin_cabang"],
-    },
-    {
-      label: "Stock List",
-      path: "/stock-list",
-      icon: "📋",
-      roles: ["admin_cabang"],
-    },
-    {
-      label: "Inbound History",
-      path: "/inbound",
-      icon: "📥",
-      roles: ["admin_cabang"],
-    },
-    {
-      label: "Outbound History",
-      path: "/outbound",
-      icon: "📤",
-      roles: ["admin_cabang"],
-    },
-    {
-      label: "Pre-Stock Opname History",
-      path: "/prestock-opname-history",
-      icon: "📊",
-      roles: ["admin_cabang"],
-    },
-    {
-      label: "Master Data Stock",
-      path: "/stock-list-master",
-      icon: "🗄️",
-      roles: ["admin_cabang"],
-    },
-    // Admin Warehouse Only
-    {
-      label: "Warehouse Layout",
-      path: "/warehouse-layout",
-      icon: "🏢",
-      roles: ["admin_warehouse"],
-    },
-    {
-      label: "Stock List",
-      path: "/stock-list",
-      icon: "📋",
-      roles: ["admin_warehouse"],
-    },
-    {
-      label: "Inbound",
-      path: "/inbound",
-      icon: "📥",
-      roles: ["admin_warehouse"],
-    },
-    {
-      label: "Outbound",
-      path: "/outbound",
-      icon: "📤",
-      roles: ["admin_warehouse"],
-    },
-    {
-      label: "NPL (Return)",
-      path: "/npl",
-      icon: "🔄",
-      roles: ["admin_warehouse"],
-    },
-    {
-      label: "Permutasi",
-      path: "/permutasi",
-      icon: "🔀",
-      roles: ["admin_warehouse"],
-    },
-    {
-      label: "Pre-Stock Opname",
-      path: "/stock-opname",
-      icon: "📊",
-      roles: ["admin_warehouse"],
-    },
+    { label: "Management Warehouse", path: "/warehouse-management", roles: ["developer"] },
+    { label: "Management User", path: "/admin-management", roles: ["developer", "admin_cabang"] },
+    { label: "Warehouse Layout", path: "/warehouse-layout", roles: ["admin_cabang", "admin_warehouse"] },
+    { label: "Stock List", path: "/stock-list", roles: ["admin_cabang", "admin_warehouse"] },
+    { label: "Inbound", path: "/inbound", roles: ["admin_cabang", "admin_warehouse"] },
+    { label: "Outbound", path: "/outbound", roles: ["admin_cabang", "admin_warehouse"] },
+    { label: "NPL (Return)", path: "/npl", roles: ["admin_warehouse"] },
+    { label: "Permutasi", path: "/permutasi", roles: ["admin_warehouse"] },
+    { label: "Pre-Stock Opname", path: "/stock-opname", roles: ["admin_warehouse"] },
+    { label: "Pre-Stock Opname History", path: "/prestock-opname-history", roles: ["admin_cabang"] },
+    { label: "Master Data Stock", path: "/stock-list-master", roles: ["admin_cabang"] },
   ];
 
   const filteredMenuItems = menuItems.filter((item) =>
-    item.roles.includes(user.role)
+    item.roles.includes(userProfile.role)
+  );
+
+  const getIcon = (path: string) => {
+    switch (path) {
+      case '/warehouse-layout':
+      case '/warehouse-management':
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>;
+      case '/stock-list':
+      case '/prestock-opname-history':
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>;
+      case '/inbound':
+      case '/outbound':
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>;
+      case '/npl':
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>;
+      case '/permutasi':
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>;
+      case '/stock-opname':
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>;
+      case '/stock-list-master':
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" /></svg>;
+      case '/admin-management':
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>;
+      default:
+        return null;
+    }
+  };
+
+  const NavContent = () => (
+    <div className="flex flex-col h-full">
+      {/* Logo & Jam */}
+      <div className="p-4 border-b border-slate-700">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-white text-xl">📦</div>
+          <div>
+            <h1 className="text-lg font-bold text-white">WMS Lite</h1>
+            <p className="text-xs text-slate-400 capitalize">{userProfile.role.replace('_', ' ')}</p>
+          </div>
+        </div>
+        <div className="px-3 py-3 bg-slate-800/50 rounded-xl">
+          <div className="flex items-center gap-2 mb-1">
+            <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <div className="text-xs text-blue-400 font-medium">{mounted ? formatDate(currentTime) : '--/--/----'}</div>
+          </div>
+          <div className="text-2xl font-bold text-white text-center tracking-wider font-mono">
+            {mounted ? formatTime(currentTime) : '--:--:--'}
+          </div>
+        </div>
+      </div>
+
+      {/* Menu */}
+      <div className="flex-1 overflow-y-auto py-4">
+        {filteredMenuItems.map((item) => (
+          <Link
+            key={item.path}
+            href={item.path}
+            onClick={() => setMobileMenuOpen(false)}
+            className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg text-sm font-semibold transition-all mb-1 ${
+              pathname === item.path ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            {getIcon(item.path)}
+            {item.label}
+          </Link>
+        ))}
+      </div>
+
+      {/* Profile & Logout */}
+      <div className="p-4 border-t border-slate-700 bg-slate-900/50">
+        <div className="mb-4 px-2">
+          <p className="text-sm font-bold text-white truncate">{userProfile.full_name}</p>
+          <p className="text-xs text-slate-400">@{userProfile.username}</p>
+        </div>
+        <button
+          onClick={async () => {
+            await logout(); // Memanggil server action
+          }}
+          className="w-full px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
+        >
+          <span>🚪</span> Logout
+        </button>
+      </div>
+    </div>
   );
 
   return (
     <>
-      {/* Sidebar Navigation - Hidden on mobile */}
+      {/* Desktop Sidebar */}
       <nav className="hidden lg:fixed lg:left-0 lg:top-0 lg:h-screen lg:w-64 lg:flex lg:flex-col bg-slate-900 text-white z-50">
-        {/* Logo & Jam Digital */}
-        <div className="p-4 border-b border-slate-700">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-white text-xl">
-              📦
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-white">WMS Lite</h1>
-              <p className="text-xs text-slate-400">
-                {user.role === "developer" ? "Developer" : user.role === "admin_cabang" ? "Admin Cabang" : "Admin Warehouse"}
-              </p>
-            </div>
-          </div>
-          
-          {/* Jam Digital - Visible di Sidebar */}
-          <div className="px-3 py-3">
-            <div className="flex items-center gap-2 mb-2">
-              <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <div className="text-xs text-blue-400 font-medium">{formatDate(currentTime)}</div>
-            </div>
-            <div className="text-2xl font-bold text-white text-center tracking-wider">
-              {formatTime(currentTime)}
-            </div>
-          </div>
-        </div>
-
-        {/* Menu Items */}
-        <div className="flex-1 overflow-y-auto py-2">
-          {filteredMenuItems.map((item) => {
-            const getIcon = (path: string) => {
-              switch (path) {
-                case '/warehouse-layout':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                    </svg>
-                  );
-                case '/stock-list':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                    </svg>
-                  );
-                case '/inbound':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                    </svg>
-                  );
-                case '/outbound':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                    </svg>
-                  );
-                case '/npl':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  );
-                case '/permutasi':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                    </svg>
-                  );
-                case '/stock-opname':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                  );
-                case '/prestock-opname-history':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                    </svg>
-                  );
-                case '/stock-list-master':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                    </svg>
-                  );
-                case '/admin-management':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                    </svg>
-                  );
-                case '/warehouse-management':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                    </svg>
-                  );
-                case '/cluster-config':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                  );
-                default:
-                  return null;
-              }
-            };
-
-            return (
-              <Link
-                key={item.path}
-                href={item.path}
-                className={`flex items-center gap-3 px-4 py-2.5 mx-2 rounded-lg text-sm font-semibold transition-all ${
-                  pathname === item.path
-                    ? "bg-blue-600 text-white"
-                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                }`}
-              >
-                {getIcon(item.path)}
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* User Info & Logout */}
-        <div className="p-4 border-t border-slate-700">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-sm font-semibold text-white">{user.name}</p>
-              <p className="text-xs text-slate-400">
-                {user.role === "developer" ? "Developer" : user.role === "admin_cabang" ? "Admin Cabang" : "Admin Warehouse"}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="w-full px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition-all flex items-center justify-center gap-2"
-          >
-            <span>🚪</span>
-            Logout
-          </button>
-        </div>
+        <NavContent />
       </nav>
 
-      {/* Mobile Menu Overlay - Transparent Click Area */}
-      {mobileMenuOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
-      )}
-
-      {/* Mobile Sidebar */}
-      <nav className={`fixed left-0 top-0 h-screen w-64 bg-slate-900 text-white flex flex-col z-50 lg:hidden transition-transform duration-300 ${
-        mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-      }`}>
-        {/* Logo & Jam Digital */}
-        <div className="p-4 border-b border-slate-700">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-white text-xl">
-                📦
-              </div>
-              <div>
-                <h1 className="text-lg font-bold text-white">WMS Lite</h1>
-                <p className="text-xs text-slate-400">
-                  {user.role === "developer" ? "Developer" : user.role === "admin_cabang" ? "Admin Cabang" : "Admin Warehouse"}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setMobileMenuOpen(false)}
-              className="text-white text-2xl p-1 hover:bg-slate-800 rounded"
-            >
-              ✕
-            </button>
-          </div>
-          
-          {/* Jam Digital Mobile */}
-          <div className="px-3 py-3 border-b border-slate-700">
-            <div className="flex items-center gap-2 mb-2">
-              <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <div className="text-xs text-blue-400 font-medium">{formatDate(currentTime)}</div>
-            </div>
-            <div className="text-2xl font-bold text-white text-center tracking-wider">
-              {formatTime(currentTime)}
-            </div>
-          </div>
-        </div>
-
-        {/* Menu Items */}
-        <div className="flex-1 overflow-y-auto py-2">
-          {filteredMenuItems.map((item) => {
-            const getIcon = (path: string) => {
-              switch (path) {
-                case '/warehouse-layout':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                    </svg>
-                  );
-                case '/stock-list':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                    </svg>
-                  );
-                case '/inbound':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                    </svg>
-                  );
-                case '/outbound':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                    </svg>
-                  );
-                case '/npl':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  );
-                case '/permutasi':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                    </svg>
-                  );
-                case '/stock-opname':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                  );
-                case '/prestock-opname-history':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                    </svg>
-                  );
-                case '/stock-list-master':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                    </svg>
-                  );
-                case '/admin-management':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                    </svg>
-                  );
-                case '/warehouse-management':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                    </svg>
-                  );
-                case '/cluster-config':
-                  return (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                  );
-                default:
-                  return null;
-              }
-            };
-
-            return (
-              <Link
-                key={item.path}
-                href={item.path}
-                onClick={() => setMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-4 py-2.5 mx-2 rounded-lg text-sm font-semibold transition-all ${
-                  pathname === item.path
-                    ? "bg-blue-600 text-white"
-                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                }`}
-              >
-                {getIcon(item.path)}
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* User Info & Logout */}
-        <div className="p-4 border-t border-slate-700">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-sm font-semibold text-white">{user.name}</p>
-              <p className="text-xs text-slate-400">
-                {user.role === "developer" ? "Developer" : user.role === "admin_cabang" ? "Admin Cabang" : "Admin Warehouse"}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="w-full px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition-all flex items-center justify-center gap-2"
-          >
-            <span>🚪</span>
-            Logout
-          </button>
-        </div>
-      </nav>
-
-      {/* Mobile Menu Toggle Button */}
+      {/* Mobile Toggle Button */}
       <button
         onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-        className="fixed top-4 left-4 z-40 lg:hidden p-2 bg-blue-600 text-white rounded-lg shadow-lg hover:bg-blue-700 transition-colors"
+        className="fixed top-4 left-4 z-[60] lg:hidden p-2.5 bg-blue-600 text-white rounded-xl shadow-lg hover:bg-blue-700 transition-all active:scale-90"
       >
-        {mobileMenuOpen ? "✕" : "☰"}
+        {mobileMenuOpen ? <span className="text-xl">✕</span> : <span className="text-xl">☰</span>}
       </button>
+
+      {/* Mobile Sidebar Overlay */}
+      {mobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-40 lg:hidden transition-opacity"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Mobile Sidebar Content */}
+      <nav className={`fixed left-0 top-0 h-screen w-72 bg-slate-900 text-white flex flex-col z-50 lg:hidden transition-transform duration-300 ease-in-out ${
+        mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+      }`}>
+        <NavContent />
+      </nav>
     </>
   );
 }
