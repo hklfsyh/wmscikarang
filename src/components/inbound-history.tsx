@@ -76,8 +76,10 @@ export function InboundHistoryPage({
   const filteredData = useMemo(() => {
     return historyData.filter((item) => {
       const product = products.find(p => p.id === item.productId);
+      const expedition = expeditions.find(e => e.id === item.expeditionId);
+      const user = users.find(u => u.id === item.receivedBy);
       const searchLower = searchQuery.toLowerCase();
-      
+
       const matchesSearch =
         searchQuery === "" ||
         item.transactionCode.toLowerCase().includes(searchLower) ||
@@ -86,7 +88,8 @@ export function InboundHistoryPage({
         item.driverName.toLowerCase().includes(searchLower) ||
         item.vehicleNumber.toLowerCase().includes(searchLower) ||
         item.dnNumber.toLowerCase().includes(searchLower) ||
-        (item.expeditionId?.toLowerCase().includes(searchLower) || false);
+        (expedition?.expedition_name.toLowerCase().includes(searchLower) || false) ||
+        (user?.full_name.toLowerCase().includes(searchLower) || false);
 
       const itemDate = new Date(item.arrivalTime);
       const matchesStartDate = !startDate || itemDate >= new Date(startDate);
@@ -97,7 +100,7 @@ export function InboundHistoryPage({
 
       return matchesSearch && matchesStartDate && matchesEndDate && matchesStatus;
     });
-  }, [searchQuery, startDate, endDate, selectedStatus, historyData, products]);
+  }, [searchQuery, startDate, endDate, selectedStatus, historyData, products, expeditions, users]);
 
   // --- FORMAT HELPERS ---
   const formatDate = (dateStr: string) => {
