@@ -3,22 +3,25 @@
 
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { stockListData, StockItem } from "@/lib/mock/stocklistmock";
-import { getProductByCode, productMasterData } from "@/lib/mock/product-master";
-import {
-  getClusterConfig,
-  getBarisCountForLorong,
-  getPalletCapacityForCell,
-  validateProductLocation,
-  getValidLocationsForProduct,
-  isInTransitLocation,
-  clusterConfigs,
-} from "@/lib/mock/warehouse-config";
-import { permutasiHistoryData, PermutasiHistory } from "@/lib/mock/permutasi-history";
+import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { moveStockAction } from "@/app/permutasi/actions";
 import { CheckCircle, XCircle, ArrowRightLeft, MapPin } from "lucide-react";
 
-interface WrongLocationStock extends StockItem {
+interface WrongLocationStock {
+  id: string;
+  cluster: string;
+  lorong: number;
+  baris: number;
+  level: number;
+  qty_carton: number;
+  bb_produk: string;
+  products: {
+    id: string;
+    product_code: string;
+    product_name: string;
+    default_cluster: string;
+  };
   homeCluster: string;
   reason: "salah-cluster" | "in-transit";
 }
@@ -30,8 +33,23 @@ interface RecommendedLocation {
   level: string;
 }
 
-export function PermutasiForm() {
-  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
+interface PermutasiFormProps {
+  warehouseId: string;
+  initialStocks: any[];
+  clusterConfigs: any[];
+  productHomes: any[];
+  initialHistory: any[];
+}
+
+export function PermutasiForm({ 
+  warehouseId, 
+  initialStocks, 
+  clusterConfigs, 
+  productHomes, 
+  initialHistory 
+}: PermutasiFormProps) {
+  const router = useRouter();
+  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(warehouseId);
   const [activeTab, setActiveTab] = useState<"salah-cluster" | "in-transit" | "history">("salah-cluster");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [showMoveModal, setShowMoveModal] = useState(false);
@@ -48,6 +66,21 @@ export function PermutasiForm() {
   const [notificationType, setNotificationType] = useState<"success" | "error" | "warning">("success");
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showBatchConfirmModal, setShowBatchConfirmModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Fungsi validasi lokasi tujuan berdasarkan product_homes
+  const isTargetLocationValid = (productId: string, cluster: string, lorong: number, baris: number) => {
+    const rule = productHomes.find((h: any) => h.product_id === productId);
+    if (!rule) return true; // Bebas jika tidak ada aturan khusus
+
+    return (
+      rule.cluster_char === cluster &&
+      lorong >= rule.lorong_start &&
+      lorong <= rule.lorong_end &&
+      baris >= rule.baris_start &&
+      baris <= rule.baris_end
+    );
+  };
 
   const showNotification = (title: string, message: string, type: "success" | "error" | "warning") => {
     setNotificationTitle(title);
@@ -59,43 +92,46 @@ export function PermutasiForm() {
   const success = (message: string) => showNotification("✅ Berhasil", message, "success");
   const error = (message: string) => showNotification("❌ Error", message, "error");
 
-  // Load warehouse context
-  useEffect(() => {
-    const userStr = localStorage.getItem("user");
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      setCurrentWarehouseId(user.warehouseId || null);
-    }
-  }, []);
-
-  // Get wrong location stocks
+  // Get wrong location stocks from database
   const wrongLocationStocks = useMemo((): WrongLocationStock[] => {
     const result: WrongLocationStock[] = [];
 
-    stockListData.forEach((stock) => {
+    initialStocks.forEach((stock) => {
       const lorongNum = stock.lorong;
-      const barisNum = stock.baris;
+      const cluster = stock.cluster;
 
-      // Check if In Transit
-      const inTransit = isInTransitLocation(stock.cluster, lorongNum);
+      // Check if In Transit (Cluster C, Lorong 8-11)
+      const inTransit = cluster === "C" && lorongNum >= 8 && lorongNum <= 11;
 
       // Get product info
-      const product = productMasterData.find(p => p.id === stock.productId);
-      const productCode = product?.productCode || "UNKNOWN";
-      const homeCluster = product?.defaultCluster || "?";
+      const homeCluster = stock.products?.default_cluster || "?";
 
       if (inTransit) {
         result.push({
-          ...stock,
+          id: stock.id,
+          cluster: stock.cluster,
+          lorong: stock.lorong,
+          baris: stock.baris,
+          level: stock.level,
+          qty_carton: stock.qty_carton,
+          bb_produk: stock.bb_produk,
+          products: stock.products,
           homeCluster,
           reason: "in-transit",
         });
       } else {
         // Check if wrong cluster
-        const validation = validateProductLocation(productCode, stock.cluster, lorongNum, barisNum);
-        if (!validation.isValid) {
+        const isWrongCluster = stock.cluster !== stock.products?.default_cluster;
+        if (isWrongCluster) {
           result.push({
-            ...stock,
+            id: stock.id,
+            cluster: stock.cluster,
+            lorong: stock.lorong,
+            baris: stock.baris,
+            level: stock.level,
+            qty_carton: stock.qty_carton,
+            bb_produk: stock.bb_produk,
+            products: stock.products,
             homeCluster,
             reason: "salah-cluster",
           });
@@ -104,7 +140,7 @@ export function PermutasiForm() {
     });
 
     return result;
-  }, []);
+  }, [initialStocks]);
 
   // Filter by tab
   const filteredStocks = useMemo(() => {
@@ -117,67 +153,65 @@ export function PermutasiForm() {
   }, [wrongLocationStocks, activeTab]);
 
   // Cluster & Location Options
-  const clusterOptions = useMemo(() => clusterConfigs.filter((c) => c.isActive).map((c) => c.clusterChar), []);
+  const clusterOptions = useMemo(() => clusterConfigs.filter((c: any) => c.is_active).map((c: any) => c.cluster_char), [clusterConfigs]);
 
   const lorongOptions = useMemo(() => {
     if (!manualLocation.clusterChar) return [];
-    const config = getClusterConfig(manualLocation.clusterChar);
+    const config = clusterConfigs.find((c: any) => c.cluster_char === manualLocation.clusterChar);
     if (!config) return [];
-    return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
-  }, [manualLocation.clusterChar]);
+    return Array.from({ length: config.default_lorong_count }, (_, i) => `L${i + 1}`);
+  }, [manualLocation.clusterChar, clusterConfigs]);
 
   const barisOptions = useMemo(() => {
     if (!manualLocation.clusterChar || !manualLocation.lorong) return [];
-    const lorongNum = parseInt(manualLocation.lorong.replace("L", ""));
-    const barisCount = getBarisCountForLorong(manualLocation.clusterChar, lorongNum);
-    return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+    // Default baris count adalah 9
+    return Array.from({ length: 9 }, (_, i) => `B${i + 1}`);
   }, [manualLocation.clusterChar, manualLocation.lorong]);
 
   const palletOptions = useMemo(() => {
     if (!manualLocation.clusterChar || !manualLocation.lorong || !manualLocation.baris) return [];
-    const lorongNum = parseInt(manualLocation.lorong.replace("L", ""));
-    const barisNum = parseInt(manualLocation.baris.replace("B", ""));
-    const palletCapacity = getPalletCapacityForCell(manualLocation.clusterChar, lorongNum, barisNum);
-    return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+    // Default pallet capacity adalah 3
+    return Array.from({ length: 3 }, (_, i) => `P${i + 1}`);
   }, [manualLocation.clusterChar, manualLocation.lorong, manualLocation.baris]);
 
-  // Find recommended location for a product
-  const findRecommendedLocation = (productCode: string): RecommendedLocation | null => {
-    const productHome = getValidLocationsForProduct(productCode);
-    const product = getProductByCode(productCode);
-    const cluster = productHome?.clusterChar || product?.defaultCluster || "";
+  // Find recommended location for a product using database
+  const findRecommendedLocation = (productId: string, productCode: string): RecommendedLocation | null => {
+    // Cari aturan product home
+    const productHome = productHomes.find((h: any) => h.product_id === productId);
+    
+    // Cari produk untuk mendapatkan default cluster
+    const product = initialStocks.find((s: any) => s.product_id === productId)?.products;
+    const cluster = productHome?.cluster_char || product?.default_cluster || "";
 
     if (!cluster) return null;
 
-    const clusterConfig = getClusterConfig(cluster);
+    const clusterConfig = clusterConfigs.find((c: any) => c.cluster_char === cluster);
     if (!clusterConfig) return null;
 
-    const lorongStart = productHome ? productHome.lorongRange[0] : 1;
-    const lorongEnd = productHome ? productHome.lorongRange[1] : clusterConfig.defaultLorongCount;
+    const lorongStart = productHome ? productHome.lorong_start : 1;
+    const lorongEnd = productHome ? productHome.lorong_end : clusterConfig.default_lorong_count;
 
     for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
-      if (isInTransitLocation(cluster, lorongNum)) continue;
+      // Skip In Transit area (Cluster C, Lorong 8-11)
+      if (cluster === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
 
-      const maxBaris = getBarisCountForLorong(cluster, lorongNum);
-      const barisStart = productHome ? productHome.barisRange[0] : 1;
-      const barisEnd = productHome ? Math.min(productHome.barisRange[1], maxBaris) : maxBaris;
+      const barisStart = productHome ? productHome.baris_start : 1;
+      const barisEnd = productHome ? productHome.baris_end : 9;
 
       for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
-        const maxPallet = getPalletCapacityForCell(cluster, lorongNum, barisNum);
-        const productMaxPallet = productHome ? productHome.maxPalletPerLocation : 999;
-        const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
+        const maxPallet = productHome?.max_pallet_per_location || 3;
 
-        for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
+        for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
           const lorong = `L${lorongNum}`;
           const baris = `B${barisNum}`;
           const level = `P${palletNum}`;
 
-          const locationExists = stockListData.some(
-            (item) =>
+          const locationExists = initialStocks.some(
+            (item: any) =>
               item.cluster === cluster &&
-              item.lorong === parseInt(lorong.replace('L', '')) &&
-              item.baris === parseInt(baris.replace('B', '')) &&
-              item.level === parseInt(level.replace('P', ''))
+              item.lorong === lorongNum &&
+              item.baris === barisNum &&
+              item.level === palletNum
           );
 
           if (!locationExists) {
@@ -223,13 +257,13 @@ export function PermutasiForm() {
   // Handle recommend button
   const handleRecommend = () => {
     if (!itemToMove) return;
-    const product = productMasterData.find(p => p.id === itemToMove.productId);
-    const productCode = product?.productCode || "UNKNOWN";
-    const recommended = findRecommendedLocation(productCode);
+    const productId = itemToMove.products.id;
+    const productCode = itemToMove.products.product_code;
+    const recommended = findRecommendedLocation(productId, productCode);
     if (recommended) {
       // Verify it's not occupied
-      const isOccupied = stockListData.some(
-        (s) =>
+      const isOccupied = initialStocks.some(
+        (s: any) =>
           s.cluster === recommended.clusterChar &&
           s.lorong === parseInt(recommended.lorong.replace('L', '')) &&
           s.baris === parseInt(recommended.baris.replace('B', '')) &&
@@ -268,8 +302,8 @@ export function PermutasiForm() {
         return;
       }
       // Check if manual location is occupied
-      const isOccupied = stockListData.some(
-        (s) =>
+      const isOccupied = initialStocks.some(
+        (s: any) =>
           s.cluster === manualLocation.clusterChar &&
           s.lorong === parseInt(manualLocation.lorong.replace('L', '')) &&
           s.baris === parseInt(manualLocation.baris.replace('B', '')) &&
@@ -284,68 +318,58 @@ export function PermutasiForm() {
     setShowConfirmModal(true);
   };
 
-  // Confirm move
-  const confirmMove = () => {
+  // Confirm move dengan server action
+  const confirmMove = async () => {
     if (!itemToMove) return;
 
-    let targetLocation: { clusterChar: string; lorong: string; baris: string; level: string };
+    const target = autoRecommend ? recommendedLocation! : {
+      clusterChar: manualLocation.clusterChar,
+      lorong: manualLocation.lorong,
+      baris: manualLocation.baris,
+      level: manualLocation.pallet,
+    };
 
-    if (autoRecommend) {
-      targetLocation = recommendedLocation!;
-    } else {
-      targetLocation = {
-        clusterChar: manualLocation.clusterChar,
-        lorong: manualLocation.lorong,
-        baris: manualLocation.baris,
-        level: manualLocation.pallet,
-      };
+    const lorongNum = parseInt(target.lorong.replace('L', ''));
+    const barisNum = parseInt(target.baris.replace('B', ''));
+    const levelNum = parseInt(target.level.replace('P', ''));
+
+    // Validasi Tambahan sebelum kirim ke Server
+    if (!isTargetLocationValid(itemToMove.products.id, target.clusterChar, lorongNum, barisNum)) {
+      error(`Lokasi tujuan tidak sesuai dengan aturan Cluster produk ini!`);
+      return;
     }
 
-    // Find and update stock
-    const stockIndex = stockListData.findIndex((s) => s.id === itemToMove.id);
-    if (stockIndex !== -1) {
-      const stock = stockListData[stockIndex];
-      const oldLocation = `${stock.cluster}-L${stock.lorong}-B${stock.baris}-P${stock.level}`;
-      const newLocation = `${targetLocation.clusterChar}-${targetLocation.lorong}-${targetLocation.baris}-${targetLocation.level}`;
+    setIsSubmitting(true);
+    try {
+      const res = await moveStockAction(
+        warehouseId,
+        itemToMove.id,
+        { 
+          cluster: target.clusterChar, 
+          lorong: lorongNum, 
+          baris: barisNum, 
+          level: levelNum
+        },
+        moveReason
+      );
 
-      // Update stock location
-      stockListData[stockIndex].cluster = targetLocation.clusterChar;
-      stockListData[stockIndex].lorong = parseInt(targetLocation.lorong.replace('L', ''));
-      stockListData[stockIndex].baris = parseInt(targetLocation.baris.replace('B', ''));
-      stockListData[stockIndex].level = parseInt(targetLocation.level.replace('P', ''));
-
-      // Add to permutasi history
-      const newPermutasi: PermutasiHistory = {
-        id: `pmt-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + 1).padStart(3, "0")}`,
-        warehouse_id: "wh-001-cikarang",
-        transaction_code: `PMT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + 1).padStart(4, "0")}`,
-        stock_id: `stk-${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`,
-        product_id: itemToMove.productId,
-        qty_carton: itemToMove.qtyCarton,
-        from_cluster: itemToMove.cluster,
-        from_lorong: itemToMove.lorong,
-        from_baris: itemToMove.baris,
-        from_level: itemToMove.level,
-        to_cluster: targetLocation.clusterChar,
-        to_lorong: parseInt(targetLocation.lorong.replace('L', '')),
-        to_baris: parseInt(targetLocation.baris.replace('B', '')),
-        to_level: parseInt(targetLocation.level.replace('P', '')),
-        reason: moveReason,
-        moved_by: "usr-003", // Dewi Lestari (admin_warehouse)
-        moved_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-      };
-      permutasiHistoryData.unshift(newPermutasi);
-
-      success(`Stock berhasil dipindahkan dari ${oldLocation} ke ${newLocation}`);
+      if (res.success) {
+        success("Stock berhasil direlokasi.");
+        router.refresh(); // Sinkronisasi Data
+        setShowConfirmModal(false);
+        setShowMoveModal(false);
+        setItemToMove(null);
+        setRecommendedLocation(null);
+        setMoveReason("");
+        setSelectedItems(new Set());
+      } else {
+        error(res.message || "Gagal memindahkan stok.");
+      }
+    } catch (err) {
+      error("Kesalahan sistem.");
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setShowConfirmModal(false);
-    setShowMoveModal(false);
-    setItemToMove(null);
-    setRecommendedLocation(null);
-    setMoveReason("");
-    setSelectedItems(new Set());
   };
 
   // Open batch confirm modal
@@ -357,84 +381,74 @@ export function PermutasiForm() {
     setShowBatchConfirmModal(true);
   };
 
-  // Move selected items (batch)
-  const confirmBatchMove = () => {
-    let movedCount = 0;
+  // Move selected items (batch) dengan server action
+  const confirmBatchMove = async () => {
+    setIsSubmitting(true);
+    let successCount = 0;
     let failedCount = 0;
+    const failedItems: string[] = [];
 
-    selectedItems.forEach((id) => {
+    for (const id of Array.from(selectedItems)) {
       const stock = filteredStocks.find((s) => s.id === id);
-      if (!stock) return;
+      if (!stock) continue;
 
-      const product = productMasterData.find(p => p.id === stock.productId);
-      const productCode = product?.productCode || "UNKNOWN";
-      const recommended = findRecommendedLocation(productCode);
-      if (recommended) {
-        // Verify not occupied
-        const isOccupied = stockListData.some(
-          (s) =>
-            s.cluster === recommended.clusterChar &&
-            s.lorong === parseInt(recommended.lorong.replace('L', '')) &&
-            s.baris === parseInt(recommended.baris.replace('B', '')) &&
-            s.level === parseInt(recommended.level.replace('P', ''))
+      const productId = stock.products.id;
+      const productCode = stock.products.product_code;
+      const rec = findRecommendedLocation(productId, productCode);
+      
+      if (rec) {
+        const lorongNum = parseInt(rec.lorong.replace('L', ''));
+        const barisNum = parseInt(rec.baris.replace('B', ''));
+        const levelNum = parseInt(rec.level.replace('P', ''));
+
+        // Validasi lokasi tujuan
+        if (!isTargetLocationValid(productId, rec.clusterChar, lorongNum, barisNum)) {
+          failedItems.push(stock.products.product_name);
+          failedCount++;
+          continue;
+        }
+
+        const res = await moveStockAction(
+          warehouseId,
+          id,
+          { 
+            cluster: rec.clusterChar, 
+            lorong: lorongNum, 
+            baris: barisNum, 
+            level: levelNum
+          },
+          "Relokasi Masal (Batch Move)"
         );
-
-        if (!isOccupied) {
-          const stockIndex = stockListData.findIndex((s) => s.id === id);
-          if (stockIndex !== -1) {
-            stockListData[stockIndex].cluster = recommended.clusterChar;
-            stockListData[stockIndex].lorong = parseInt(recommended.lorong.replace('L', ''));
-            stockListData[stockIndex].baris = parseInt(recommended.baris.replace('B', ''));
-            stockListData[stockIndex].level = parseInt(recommended.level.replace('P', ''));
-
-            const newPermutasi: PermutasiHistory = {
-              id: `pmt-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + movedCount + 1).padStart(3, "0")}`,
-              warehouse_id: "wh-001-cikarang",
-              transaction_code: `PMT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + movedCount + 1).padStart(4, "0")}`,
-              stock_id: `stk-${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`,
-              product_id: stock.productId,
-              qty_carton: stock.qtyCarton,
-              from_cluster: stock.cluster,
-              from_lorong: stock.lorong,
-              from_baris: stock.baris,
-              from_level: stock.level,
-              to_cluster: recommended.clusterChar,
-              to_lorong: parseInt(recommended.lorong.replace('L', '')),
-              to_baris: parseInt(recommended.baris.replace('B', '')),
-              to_level: parseInt(recommended.level.replace('P', '')),
-              reason: stock.reason === "in-transit" ? "Relokasi dari In Transit (batch)" : "Koreksi cluster (batch)",
-              moved_by: "usr-003",
-              moved_at: new Date().toISOString(),
-              created_at: new Date().toISOString(),
-            };
-            permutasiHistoryData.unshift(newPermutasi);
-
-            movedCount++;
-          }
+        
+        if (res.success) {
+          successCount++;
         } else {
+          failedItems.push(stock.products.product_name);
           failedCount++;
         }
       } else {
+        failedItems.push(stock.products.product_name);
         failedCount++;
       }
-    });
-
-    setShowBatchConfirmModal(false);
-
-    if (movedCount > 0) {
-      success(`${movedCount} item berhasil dipindahkan.${failedCount > 0 ? ` ${failedCount} item gagal (lokasi tidak tersedia).` : ""}`);
-    } else {
-      error("Tidak ada item yang berhasil dipindahkan. Tidak ada lokasi kosong yang sesuai.");
     }
 
+    if (successCount > 0) {
+      success(`${successCount} item berhasil dipindahkan.${failedCount > 0 ? ` ${failedCount} item gagal.` : ""}`);
+    } else {
+      error(`Tidak ada item yang berhasil dipindahkan. ${failedItems.length > 0 ? `Gagal: ${failedItems.join(", ")}` : ""}`);
+    }
+
+    router.refresh();
     setSelectedItems(new Set());
+    setShowBatchConfirmModal(false);
+    setIsSubmitting(false);
   };
 
-  // Today's history
+  // Today's history from database
   const todayHistory = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return permutasiHistoryData.filter((h) => h.moved_at.startsWith(todayStr));
-  }, []);
+    return initialHistory.filter((h: any) => h.moved_at.startsWith(todayStr));
+  }, [initialHistory]);
 
   // Modal backdrop click handler
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>, closeModal: () => void) => {
@@ -575,14 +589,14 @@ export function PermutasiForm() {
                             />
                           </td>
                           <td className="px-3 py-3">
-                            <div className="font-medium text-gray-900 text-sm">{productMasterData.find(p => p.id === stock.productId)?.productCode || 'UNKNOWN'}</div>
-                            <div className="text-gray-500 text-xs truncate max-w-[150px] md:max-w-[200px]">{productMasterData.find(p => p.id === stock.productId)?.productName || 'Unknown Product'}</div>
+                            <div className="font-medium text-gray-900 text-sm">{stock.products.product_code}</div>
+                            <div className="text-gray-500 text-xs truncate max-w-[150px] md:max-w-[200px]">{stock.products.product_name}</div>
                           </td>
                           <td className="px-3 py-3 text-xs font-mono text-gray-600 hidden md:table-cell">
-                            {stock.bbProduk}
+                            {stock.bb_produk}
                           </td>
                           <td className="px-3 py-3 text-center">
-                            <span className="font-bold text-gray-900">{stock.qtyCarton}</span>
+                            <span className="font-bold text-gray-900">{stock.qty_carton}</span>
                             <span className="text-gray-500 text-xs ml-1">ctn</span>
                           </td>
                           <td className="px-3 py-3 text-center">
@@ -637,8 +651,8 @@ export function PermutasiForm() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {todayHistory.map((h) => {
-                        const product = productMasterData.find(p => p.id === h.product_id);
+                      {todayHistory.map((h: any) => {
+                        const product = h.products;
                         const fromLocation = `${h.from_cluster}-L${h.from_lorong}-B${h.from_baris}-P${h.from_level}`;
                         const toLocation = `${h.to_cluster}-L${h.to_lorong}-B${h.to_baris}-P${h.to_level}`;
                         return (
@@ -647,8 +661,8 @@ export function PermutasiForm() {
                             {new Date(h.moved_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
                           </td>
                           <td className="px-3 py-3">
-                            <div className="font-medium text-gray-900 text-sm">{product?.productCode || "UNKNOWN"}</div>
-                            <div className="text-gray-500 text-xs truncate max-w-[150px]">{product?.productName || "Unknown Product"}</div>
+                            <div className="font-medium text-gray-900 text-sm">{product?.product_code || "UNKNOWN"}</div>
+                            <div className="text-gray-500 text-xs truncate max-w-[150px]">{product?.product_name || "Unknown Product"}</div>
                           </td>
                           <td className="px-3 py-3 text-center font-bold text-gray-900">{h.qty_carton} ctn</td>
                           <td className="px-3 py-3 text-center">
@@ -736,15 +750,15 @@ export function PermutasiForm() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Produk:</span>
-                    <span className="font-semibold text-gray-900">{productMasterData.find(p => p.id === itemToMove.productId)?.productCode || 'UNKNOWN'}</span>
+                    <span className="font-semibold text-gray-900">{itemToMove.products.product_code}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Nama:</span>
-                    <span className="font-semibold text-gray-900 text-right max-w-[200px] truncate">{productMasterData.find(p => p.id === itemToMove.productId)?.productName || 'Unknown Product'}</span>
+                    <span className="font-semibold text-gray-900 text-right max-w-[200px] truncate">{itemToMove.products.product_name}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Qty:</span>
-                    <span className="font-semibold text-gray-900">{itemToMove.qtyCarton} karton</span>
+                    <span className="font-semibold text-gray-900">{itemToMove.qty_carton} karton</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Lokasi Saat Ini:</span>
@@ -920,7 +934,7 @@ export function PermutasiForm() {
               <p className="text-gray-700 text-center mb-4">Yakin ingin memindahkan stock ini?</p>
               <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm space-y-1">
                 <p>
-                  <strong>Produk:</strong> {productMasterData.find(p => p.id === itemToMove.productId)?.productCode || 'UNKNOWN'}
+                  <strong>Produk:</strong> {itemToMove.products.product_code}
                 </p>
                 <p>
                   <strong>Dari:</strong>{" "}

@@ -158,6 +158,7 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
       throw new Error("Gagal mencatat riwayat: " + errHistory.message);
 
     // 5. INSERT KE STOCK_LIST & STOCK_MOVEMENTS
+    // Logika baru: Cek level pallet di lokasi yang sama sebelum berpindah ke baris berikutnya
     for (const sub of submissions) {
       const locParts = sub.location.split("-");
 
@@ -168,48 +169,78 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
         );
       }
 
-      const { data: newStock, error: errStock } = await supabase
-        .from("stock_list")
-        .insert({
-          warehouse_id: formData.warehouse_id,
-          product_id: formData.product_id,
-          bb_produk: formData.bb_produk,
-          cluster: locParts[0], // Sekarang ini pasti berisi 'A', 'B', dll
-          lorong: parseInt(locParts[1].replace("L", "")),
-          baris: parseInt(locParts[2].replace("B", "")),
-          level: parseInt(locParts[3].replace("P", "")),
-          qty_pallet: 1,
-          qty_carton: sub.qtyCarton,
-          expired_date: formData.expired_date,
-          inbound_date: new Date().toISOString().slice(0, 10),
-          created_by: user.id,
-          status: sub.isReceh ? "receh" : "release", // Status dinamis
-        })
-        .select()
-        .single();
+      // Periksa level pallet di lokasi yang sama (pallet 1 → pallet 2 → pallet 3)
+      let stockPlaced = false;
+      for (let level = 1; level <= 3 && !stockPlaced; level++) {
+        const locationKey = `${locParts[0]}-L${locParts[1]}-B${locParts[2]}-P${level}`;
+        
+        // Cek apakah level pallet ini sudah terisi
+        const { data: existingStock } = await supabase
+          .from("stock_list")
+          .select("id")
+          .eq("warehouse_id", formData.warehouse_id)
+          .eq("cluster", locParts[0])
+          .eq("lorong", parseInt(locParts[1].replace("L", "")))
+          .eq("baris", parseInt(locParts[2].replace("B", "")))
+          .eq("level", level)
+          .maybeSingle();
 
-      if (errStock) {
-        console.error("Gagal insert stock_list:", errStock);
-        throw new Error(
-          `Gagal mengisi stok di lokasi ${sub.location}: ${errStock.message}`
-        );
+        if (!existingStock) {
+          // Jika level pallet kosong, masukkan stok di sini
+          const { data: newStock, error: errStock } = await supabase
+            .from("stock_list")
+            .insert({
+              warehouse_id: formData.warehouse_id,
+              product_id: formData.product_id,
+              bb_produk: formData.bb_produk,
+              cluster: locParts[0],
+              lorong: parseInt(locParts[1].replace("L", "")),
+              baris: parseInt(locParts[2].replace("B", "")),
+              level: level,
+              qty_pallet: 1,
+              qty_carton: sub.qtyCarton,
+              expired_date: formData.expired_date,
+              inbound_date: new Date().toISOString().slice(0, 10),
+              created_by: user.id,
+              status: sub.isReceh ? "receh" : "release",
+            })
+            .select()
+            .single();
+
+          if (errStock) {
+            console.error("Gagal insert stock_list:", errStock);
+            throw new Error(
+              `Gagal mengisi stok di lokasi ${locationKey}: ${errStock.message}`
+            );
+          }
+
+          // Insert ke stock_movements
+          await supabase.from("stock_movements").insert({
+            warehouse_id: formData.warehouse_id,
+            stock_id: newStock.id,
+            product_id: formData.product_id,
+            bb_produk: formData.bb_produk,
+            movement_type: "inbound",
+            reference_type: "inbound_history",
+            reference_id: inboundEntry.id,
+            qty_before: 0,
+            qty_change: sub.qtyCarton,
+            qty_after: sub.qtyCarton,
+            to_location: locationKey,
+            performed_by: user.id,
+            notes: "Inbound via Form Real-DB",
+          });
+
+          stockPlaced = true; // Tandai bahwa stok sudah ditempatkan
+        }
       }
 
-      await supabase.from("stock_movements").insert({
-        warehouse_id: formData.warehouse_id,
-        stock_id: newStock.id,
-        product_id: formData.product_id,
-        bb_produk: formData.bb_produk,
-        movement_type: "inbound",
-        reference_type: "inbound_history",
-        reference_id: inboundEntry.id,
-        qty_before: 0,
-        qty_change: sub.qtyCarton,
-        qty_after: sub.qtyCarton,
-        to_location: sub.location,
-        performed_by: user.id,
-        notes: "Inbound via Form Real-DB",
-      });
+      // Jika tidak ada level pallet yang kosong di lokasi ini, lempar error
+      if (!stockPlaced) {
+        throw new Error(
+          `Tidak ada level pallet yang tersedia di lokasi ${sub.location}. Semua level sudah terisi.`
+        );
+      }
     }
 
     revalidatePath("/stock-list");
@@ -459,6 +490,7 @@ export async function getSmartRecommendationAction(
 
       for (let l = home.lorong_start; l <= home.lorong_end; l++) {
         for (let b = home.baris_start; b <= home.baris_end; b++) {
+          // PERBAIKAN: Cek level pallet secara berurutan (1 → 2 → 3) di lokasi yang sama
           for (let p = 1; p <= maxLevel; p++) {
             if (remaining === 0) break;
             const currentCluster = home.cluster_char;
