@@ -53,13 +53,17 @@ export default function WarehouseLayoutClient({
   userProfile,
   initialStocks,
   clusterConfigs,
+  clusterCellOverrides,
   productHomes,
 }: {
   userProfile: any;
   initialStocks: any[];
   clusterConfigs: any[];
+  clusterCellOverrides: any[];
   productHomes: any[];
 }) {
+  console.log("User Profile:", userProfile);
+
   const [selectedCell, setSelectedCell] = useState<WarehouseCell | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "release" | "hold" | "receh" | "wrong_cluster">("ALL");
@@ -82,43 +86,91 @@ export default function WarehouseLayoutClient({
     const cells: WarehouseCell[] = [];
     const locationMap = new Map<string, StockItem>();
 
+    // Simpan data dengan level asli dari database
     initialStocks.forEach((stock: StockItem) => {
-      // Tukar level 1 dan level 3
-      const adjustedLevel = stock.level === 1 ? 3 : stock.level === 3 ? 1 : stock.level;
-      const key = `${stock.cluster}-${stock.lorong}-${stock.baris}-${adjustedLevel}`;
-      locationMap.set(key, { ...stock, level: adjustedLevel });
+      const key = `${stock.cluster}-${stock.lorong}-${stock.baris}-${stock.level}`;
+      locationMap.set(key, stock);
     });
 
-    clusterConfigs.forEach((config) => {
+    // Loop through all cluster configs (sort by cluster_char for alphabetical order)
+    const sortedConfigs = [...clusterConfigs].sort((a, b) => 
+      a.cluster_char.localeCompare(b.cluster_char)
+    );
+
+    sortedConfigs.forEach((config) => {
       const cluster = config.cluster_char;
-      for (let l = 1; l <= config.default_lorong_count; l++) {
-        for (let b = 1; b <= 9; b++) {
-          for (let p = 1; p <= 3; p++) {
-            const key = `${cluster}-${l}-${b}-${p}`;
+      
+      // Calculate max lorong including overrides that extend beyond default
+      const overridesForCluster = clusterCellOverrides.filter((o: any) => o.cluster_config_id === config.id);
+      const maxLorongFromOverrides = overridesForCluster.length > 0
+        ? Math.max(...overridesForCluster.map((o: any) => o.lorong_end || 0))
+        : 0;
+      const maxLorong = Math.max(config.default_lorong_count, maxLorongFromOverrides);
+
+      for (let lorong = 1; lorong <= maxLorong; lorong++) {
+        // Find all overrides that apply to this lorong
+        const applicableOverrides = clusterCellOverrides.filter((o: any) => 
+          o.cluster_config_id === config.id &&
+          o.lorong_start <= lorong &&
+          o.lorong_end >= lorong
+        );
+
+        // Check if this lorong is in transit area (check any override)
+        const isTransitLorong = applicableOverrides.some((o: any) => o.is_transit_area === true);
+
+        // Determine max baris for this lorong
+        // Find override with custom_baris_count (if any)
+        const barisCountOverride = applicableOverrides.find((o: any) => 
+          o.custom_baris_count !== null && o.custom_baris_count !== undefined
+        );
+        const maxBaris = barisCountOverride?.custom_baris_count ?? config.default_baris_count;
+
+        for (let baris = 1; baris <= maxBaris; baris++) {
+          // Find the most specific override for this baris
+          // Priority: override with baris range that includes this baris
+          const specificOverride = applicableOverrides.find((o: any) => 
+            o.baris_start !== null && o.baris_start !== undefined &&
+            o.baris_end !== null && o.baris_end !== undefined &&
+            baris >= o.baris_start && baris <= o.baris_end &&
+            o.custom_pallet_level !== null && o.custom_pallet_level !== undefined
+          );
+
+          // If no specific override, check for general override (no baris range)
+          const generalOverride = applicableOverrides.find((o: any) =>
+            (o.baris_start === null || o.baris_start === undefined) &&
+            (o.baris_end === null || o.baris_end === undefined) &&
+            o.custom_pallet_level !== null && o.custom_pallet_level !== undefined
+          );
+
+          // Determine max pallet for this location
+          const maxPallet = specificOverride?.custom_pallet_level 
+            ?? generalOverride?.custom_pallet_level 
+            ?? config.default_pallet_level;
+
+          // Render pallets from P3 to P1 (reverse order for display)
+          for (let pallet = maxPallet; pallet >= 1; pallet--) {
+            const key = `${cluster}-${lorong}-${baris}-${pallet}`;
             const stock = locationMap.get(key);
-            
-            // DINAMIS: Cek apakah lokasi ini adalah area In Transit untuk Cluster ini
-            const inTransit = cluster === "C" && l >= 8 && l <= 11;
 
             if (stock) {
               let color: "green" | "yellow" | "blue" | "red" = "green";
               
-              // 1. Ambil aturan "Home" untuk produk ini dari database
+              // Get product home rule
               const homeRule = productHomes.find((h: any) => h.product_id === stock.products?.id);
               
-              // 2. Cek apakah cluster saat ini sesuai dengan cluster yang seharusnya
+              // Check if product is in wrong cluster
               const isWrongCluster = stock.cluster !== stock.products?.default_cluster;
 
-              if (inTransit) {
-                color = "red"; // In Transit selalu merah karena lokasi sementara
+              if (isTransitLorong) {
+                color = "red"; // In Transit always red
               } else if (isWrongCluster) {
-                color = "red"; // Salah naruh cluster
+                color = "red"; // Wrong cluster
               } else if (stock.status === "receh" || stock.is_receh) {
                 color = "blue";
               } else if (stock.status === "hold") {
                 color = "yellow";
               } else {
-                // Hitung Expired untuk warna Hijau (Release)
+                // Calculate expiry for green (Release)
                 const daysToExpiry = Math.ceil(
                   (new Date(stock.expired_date).getTime() - Date.now()) / (1000 * 3600 * 24)
                 );
@@ -128,9 +180,9 @@ export default function WarehouseLayoutClient({
               cells.push({
                 id: key,
                 clusterChar: cluster,
-                lorong: l,
-                baris: b,
-                pallet: p,
+                lorong,
+                baris,
+                pallet,
                 productCode: stock.products?.product_code,
                 product: stock.products?.product_name,
                 bbPallet: stock.bb_produk,
@@ -138,17 +190,18 @@ export default function WarehouseLayoutClient({
                 qtyCarton: stock.qty_carton,
                 status: isWrongCluster ? "wrong_cluster" : stock.status,
                 colorCode: color,
-                isInTransit: inTransit,
+                isInTransit: isTransitLorong,
               });
             } else {
+              // Empty cell
               cells.push({
                 id: key,
                 clusterChar: cluster,
-                lorong: l,
-                baris: b,
-                pallet: p,
+                lorong,
+                baris,
+                pallet,
                 colorCode: "empty",
-                isInTransit: inTransit,
+                isInTransit: isTransitLorong,
               });
             }
           }
@@ -156,7 +209,7 @@ export default function WarehouseLayoutClient({
       }
     });
     return cells;
-  }, [initialStocks, clusterConfigs, productHomes]);
+  }, [initialStocks, clusterConfigs, clusterCellOverrides, productHomes]);
 
   const filteredCells = useMemo(() => {
     return warehouseCells.filter((cell) => {
@@ -266,10 +319,10 @@ export default function WarehouseLayoutClient({
       group.pallets.push(cell);
     });
     
-    // Sort pallets within each group
+    // Sort pallets within each group - DESCENDING (P3 -> P2 -> P1)
     Object.keys(grouped).forEach((cluster) => {
       grouped[cluster].forEach((group) => {
-        group.pallets.sort((a, b) => a.pallet - b.pallet);
+        group.pallets.sort((a, b) => b.pallet - a.pallet); // Ubah ke descending
       });
       // Sort groups by lorong and baris
       grouped[cluster].sort((a, b) => {
@@ -479,7 +532,9 @@ export default function WarehouseLayoutClient({
 
           {/* Warehouse View */}
           <div className="space-y-3">
-            {clusterConfigs.map((clusterConfig: any) => {
+            {[...clusterConfigs]
+              .sort((a, b) => a.cluster_char.localeCompare(b.cluster_char))
+              .map((clusterConfig: any) => {
               const cluster = clusterConfig.cluster_char;
               const clusterCells = groupedCells[cluster] || [];
               
@@ -564,7 +619,14 @@ export default function WarehouseLayoutClient({
                                   
                                   {/* Lorong Rows */}
                                   {sortedLorongs.map((lorongNum) => {
-                                    const isInTransitLorong = cluster === "C" && lorongNum >= 8 && lorongNum <= 11;
+                                    // Check if this lorong is in transit based on cluster_cell_overrides
+                                    const override = clusterCellOverrides.find((o: any) => 
+                                      o.cluster_config_id === clusterConfig.id &&
+                                      o.lorong_start <= lorongNum &&
+                                      o.lorong_end >= lorongNum &&
+                                      o.is_transit_area === true
+                                    );
+                                    const isInTransitLorong = !!override;
                                     
                                     return (
                                       <div key={lorongNum} className="flex mb-2">
@@ -636,7 +698,10 @@ export default function WarehouseLayoutClient({
                               <div className="w-2.5 h-2.5 rounded bg-red-500" />
                               <span>Salah Cluster</span>
                             </div>
-                            {cluster === "C" && (
+                            {/* Check if this cluster has any in-transit overrides */}
+                            {clusterCellOverrides.some((o: any) => 
+                              o.cluster_config_id === clusterConfig.id && o.is_transit_area === true
+                            ) && (
                               <div className="flex items-center gap-1">
                                 <div className="w-2.5 h-2.5 rounded bg-red-100 border border-red-400" />
                                 <span className="font-semibold text-red-700">In Transit</span>

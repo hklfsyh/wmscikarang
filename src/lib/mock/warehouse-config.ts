@@ -49,7 +49,9 @@ export interface ClusterConfig {
 export interface ProductHome {
   id: string;
   warehouseId: string;
-  productId: string; // UUID reference to products.id
+  productId: string; // UUID reference to products.id or product_code
+  productCode?: string; // Added for display
+  productName?: string; // Added for display
   clusterChar: string; // char(1)
   lorongStart: number;
   lorongEnd: number;

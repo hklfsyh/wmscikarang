@@ -2,6 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
+import { getIndonesianDateString, getIndonesianDate } from "@/lib/utils/datetime";
 
 /**
  * Logika Pencarian Stok Berdasarkan FEFO (Server-Side)
@@ -101,11 +102,11 @@ export async function submitOutboundAction(formData: any, allocation: any[]) {
     );
 
     // 1. Generate Transaction Code
-    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const todayStr = getIndonesianDateString();
     const { count } = await supabase
       .from("outbound_history")
       .select("*", { count: "exact", head: true })
-      .gte("created_at", new Date().toISOString().slice(0, 10));
+      .gte("created_at", getIndonesianDate());
 
     const transactionCode = `OUT-${todayStr}-${String(
       (count || 0) + 1

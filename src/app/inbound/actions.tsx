@@ -2,6 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
+import { getIndonesianDateTime, getIndonesianDateString, getIndonesianDate } from "@/lib/utils/datetime";
 
 /**
  * Cek ketersediaan lokasi secara real-time di database.
@@ -114,11 +115,11 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
     }
 
     // 3. Generate Transaction Code (Contoh: INB-20251230-0001)
-    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const todayStr = getIndonesianDateString();
     const { count } = await supabase
       .from("inbound_history")
       .select("*", { count: "exact", head: true })
-      .gte("created_at", new Date().toISOString().slice(0, 10));
+      .gte("created_at", getIndonesianDate());
 
     const sequence = String((count || 0) + 1).padStart(4, "0");
     const transactionCode = `INB-${todayStr}-${sequence}`;
@@ -149,7 +150,7 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
         vehicle_number: formData.nomorPolisi,
         dn_number: formData.noDN,
         received_by: user.id,
-        arrival_time: new Date().toISOString(),
+        arrival_time: getIndonesianDateTime(),
       })
       .select()
       .single();
@@ -200,7 +201,7 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
               qty_pallet: 1,
               qty_carton: sub.qtyCarton,
               expired_date: formData.expired_date,
-              inbound_date: new Date().toISOString().slice(0, 10),
+              inbound_date: getIndonesianDate(),
               created_by: user.id,
               status: sub.isReceh ? "receh" : "release",
             })
@@ -321,7 +322,7 @@ export async function cancelInboundAction(inboundHistoryId: string) {
         .from("stock_list")
         .update({
           qty_carton: stockItem.qty_carton - qtyCarton,
-          updated_at: new Date().toISOString(),
+          updated_at: getIndonesianDateTime(),
         })
         .eq("id", stockItem.id);
     }
@@ -542,7 +543,7 @@ export async function getSmartRecommendationAction(
       totalFound: recommendations.length,
       remainingPallets: remaining,
       isFull: remaining > 0,
-      timestamp: new Date().toISOString(),
+      timestamp: getIndonesianDateTime(),
     };
   } catch (err: any) {
     return { success: false, error: err.message };

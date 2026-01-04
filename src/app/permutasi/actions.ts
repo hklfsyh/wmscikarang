@@ -2,6 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
+import { getIndonesianDateTime, getIndonesianDateString } from "@/lib/utils/datetime";
 
 export async function moveStockAction(
   warehouseId: string,
@@ -27,7 +28,7 @@ export async function moveStockAction(
     if (errFetch || !oldStock) throw new Error("Data stok tidak ditemukan.");
 
     // 2. Generate Transaction Code Permutasi
-    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const todayStr = getIndonesianDateString();
     const transactionCode = `PMT-${todayStr}-${Math.random()
       .toString(36)
       .substr(2, 4)
@@ -41,7 +42,7 @@ export async function moveStockAction(
         lorong: targetLoc.lorong,
         baris: targetLoc.baris,
         level: targetLoc.level,
-        updated_at: new Date().toISOString(),
+        updated_at: getIndonesianDateTime(),
       })
       .eq("id", stockId);
 
@@ -64,7 +65,7 @@ export async function moveStockAction(
       to_level: targetLoc.level,
       reason: reason,
       moved_by: user.id,
-      moved_at: new Date().toISOString(),
+      moved_at: getIndonesianDateTime(),
     });
 
     // 5. Catat ke stock_movements (Log pergerakan global)

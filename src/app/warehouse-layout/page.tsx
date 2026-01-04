@@ -13,14 +13,14 @@ export default async function WarehouseLayoutPage() {
   // 1. Ambil Profil User
   const { data: profile } = await supabase
     .from("users")
-    .select("role, warehouse_id")
+    .select("role, warehouse_id, full_name, username")
     .eq("id", user.id)
     .single();
 
   if (!profile) redirect("/login");
 
   // 2. Ambil Data Konfigurasi Gudang (Real DB)
-  const [stocksRes, configsRes, homesRes] = await Promise.all([
+  const [stocksRes, configsRes, overridesRes, homesRes] = await Promise.all([
     supabase
       .from("stock_list")
       .select("*, products(id, product_code, product_name, default_cluster)")
@@ -30,6 +30,9 @@ export default async function WarehouseLayoutPage() {
       .select("*")
       .eq("warehouse_id", profile.warehouse_id)
       .eq("is_active", true),
+    supabase
+      .from("cluster_cell_overrides")
+      .select("*"),
     supabase
       .from("product_homes")
       .select("*")
@@ -42,6 +45,7 @@ export default async function WarehouseLayoutPage() {
         userProfile={profile}
         initialStocks={stocksRes.data || []}
         clusterConfigs={configsRes.data || []}
+        clusterCellOverrides={overridesRes.data || []}
         productHomes={homesRes.data || []}
       />
     </div>

@@ -4,18 +4,8 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { productMasterData, getProductByCode } from "@/lib/mock/product-master";
-import { stockListData, StockItem } from "@/lib/mock/stocklistmock";
-import {
-  getClusterConfig,
-  getBarisCountForLorong,
-  getPalletCapacityForCell,
-  getValidLocationsForProduct,
-  isInTransitLocation,
-  validateProductLocation,
-  clusterConfigs,
-} from "@/lib/mock/warehouse-config";
-import { nplHistoryData, NplHistory } from "@/lib/mock/npl-history";
+import { useRouter } from "next/navigation";
+import { submitNplAction } from "@/app/npl/actions";
 import { CheckCircle, XCircle, RotateCcw, Package, Truck } from "lucide-react";
 
 // --- CONSTANTS ---
@@ -73,8 +63,25 @@ const parseBBProduk = (bb: string): { expiredDate: string; kdPlant: string; isVa
   };
 };
 
-export function NplForm() {
-  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
+interface NplFormProps {
+  warehouseId: string;
+  products: any[];
+  initialStocks: any[];
+  clusterConfigs: any[];
+  productHomes: any[];
+  initialHistory: any[];
+}
+
+export function NplForm({ 
+  warehouseId, 
+  products, 
+  initialStocks, 
+  clusterConfigs, 
+  productHomes, 
+  initialHistory 
+}: NplFormProps) {
+  const router = useRouter();
+  const [isSubmitting, setIsSubmitting] = useState(false);
   // Form state
   const [namaPengemudi, setNamaPengemudi] = useState("");
   const [nomorPolisi, setNomorPolisi] = useState("");
@@ -107,7 +114,7 @@ export function NplForm() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showBatalConfirmModal, setShowBatalConfirmModal] = useState(false);
-  const [selectedNplForAction, setSelectedNplForAction] = useState<NplHistory | null>(null);
+  const [selectedNplForAction, setSelectedNplForAction] = useState<any | null>(null);
 
   // Notification helpers
   const showNotification = (title: string, message: string, type: "success" | "error" | "warning") => {
@@ -122,33 +129,23 @@ export function NplForm() {
 
   // Get selected product
   const selectedProduct = useMemo(() => {
-    return productCode ? getProductByCode(productCode) : null;
-  }, [productCode]);
+    return productCode ? products.find(p => p.product_code === productCode) : null;
+  }, [productCode, products]);
 
-  // Load warehouse context
-  useEffect(() => {
-    const userStr = localStorage.getItem("user");
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      setCurrentWarehouseId(user.warehouseId || null);
-    }
-  }, []);
-
-  // Product search filter with warehouse context
+  // Product search filter
   const filteredProducts = useMemo(() => {
-    const products = currentWarehouseId 
-      ? productMasterData.filter(p => p.warehouseId === currentWarehouseId)
-      : productMasterData;
-    
     if (!productSearch) return products.slice(0, 10);
     const search = productSearch.toLowerCase();
     return products
-      .filter((p) => p.productCode.toLowerCase().includes(search) || p.productName.toLowerCase().includes(search))
+      .filter((p) => 
+        p.product_code.toLowerCase().includes(search) || 
+        p.product_name.toLowerCase().includes(search)
+      )
       .slice(0, 10);
-  }, [productSearch, currentWarehouseId]);
+  }, [productSearch, products]);
 
   // Qty calculation (same as inbound)
-  const qtyPerPalletStd = selectedProduct?.qtyCartonPerPallet || 0;
+  const qtyPerPalletStd = selectedProduct?.qty_carton_per_pallet || 0;
 
   const { totalPallets, remainingCartons, totalCartons, shouldAttachReceh } = useMemo(() => {
     const palletInput = Number(qtyPalletInput) || 0;
@@ -157,7 +154,7 @@ export function NplForm() {
     const total = palletInput * qtyPerPalletStd + cartonInput;
 
     if (qtyPerPalletStd === 0) {
-      return { totalPallets: 0, remainingCartons: cartonInput, totalCartons: cartonInput, shouldAttachReceh: false };
+      return { totalPallets: 0, remainingCartons: total, totalCartons: total, shouldAttachReceh: false };
     }
 
     const calculatedPallets = Math.floor(total / qtyPerPalletStd);
@@ -173,38 +170,34 @@ export function NplForm() {
   }, [qtyPalletInput, qtyCartonInput, qtyPerPalletStd]);
 
   const isReceh = remainingCartons > 0;
-  const totalPalletsNeeded = shouldAttachReceh ? totalPallets : totalPallets + (isReceh ? 1 : 0);
+  const totalPalletsNeeded = shouldAttachReceh ? totalPallets : totalPallets + (remainingCartons > 0 ? 1 : 0);
 
   // Cluster & Location Options
-  const clusterOptions = useMemo(() => clusterConfigs.filter((c) => c.isActive).map((c) => c.clusterChar), []);
+  const clusterOptions = useMemo(() => clusterConfigs.filter((c: any) => c.is_active).map((c: any) => c.cluster_char), [clusterConfigs]);
 
   const lorongOptions = useMemo(() => {
     if (!manualCluster) return [];
-    const config = getClusterConfig(manualCluster);
+    const config = clusterConfigs.find((c: any) => c.cluster_char === manualCluster);
     if (!config) return [];
-    return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
-  }, [manualCluster]);
+    return Array.from({ length: config.default_lorong_count }, (_, i) => `L${i + 1}`);
+  }, [manualCluster, clusterConfigs]);
 
   const barisOptions = useMemo(() => {
     if (!manualCluster || !manualLorong) return [];
-    const lorongNum = parseInt(manualLorong.replace("L", ""));
-    const barisCount = getBarisCountForLorong(manualCluster, lorongNum);
-    return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+    // Default baris count adalah 9
+    return Array.from({ length: 9 }, (_, i) => `B${i + 1}`);
   }, [manualCluster, manualLorong]);
 
   const palletOptions = useMemo(() => {
     if (!manualCluster || !manualLorong || !manualBaris) return [];
-    const lorongNum = parseInt(manualLorong.replace("L", ""));
-    const barisNum = parseInt(manualBaris.replace("B", ""));
-    const palletCapacity = getPalletCapacityForCell(manualCluster, lorongNum, barisNum);
-    return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+    // Default pallet capacity adalah 3
+    return Array.from({ length: 3 }, (_, i) => `P${i + 1}`);
   }, [manualCluster, manualLorong, manualBaris]);
 
   // Today's NPL history
   const todayNplHistory = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    return nplHistoryData.filter((npl) => npl.return_time.startsWith(todayStr));
-  }, []);
+    return initialHistory; // Data sudah difilter 'today' di page.tsx
+  }, [initialHistory]);
 
   // Parse BB Produk on change
   useEffect(() => {
@@ -228,31 +221,31 @@ export function NplForm() {
     const locations: RecommendedLocation[] = [];
     let remainingPallets = palletsNeeded;
 
-    const clusterConfig = getClusterConfig(clusterChar);
+    const clusterConfig = clusterConfigs.find((c: any) => c.cluster_char === clusterChar);
     if (!clusterConfig) {
       return { locations: [], totalPalletsPlaced: 0, needsMultipleLocations: false };
     }
 
-    const validLocs = productCode ? getValidLocationsForProduct(productCode) : null;
+    const productHome = selectedProduct ? productHomes.find((h: any) => h.product_id === selectedProduct.id) : null;
 
-    const lorongStart = validLocs && validLocs.clusterChar === clusterChar ? validLocs.lorongRange[0] : 1;
-    const lorongEnd =
-      validLocs && validLocs.clusterChar === clusterChar ? validLocs.lorongRange[1] : clusterConfig.defaultLorongCount;
+    const lorongStart = productHome ? productHome.lorong_start : 1;
+    const lorongEnd = productHome ? productHome.lorong_end : clusterConfig.default_lorong_count;
 
     // PHASE 1: Primary product home locations
     for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
       if (remainingPallets === 0) break;
-      if (isInTransitLocation(clusterChar, lorongNum)) continue;
+      // Skip In Transit area (Cluster C, Lorong 8-11)
+      if (clusterChar === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
 
-      const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
-      const barisStart = validLocs && validLocs.clusterChar === clusterChar ? validLocs.barisRange[0] : 1;
-      const barisEnd = validLocs && validLocs.clusterChar === clusterChar ? Math.min(validLocs.barisRange[1], maxBaris) : maxBaris;
+      const maxBaris = 9; // Default baris count
+      const barisStart = productHome ? productHome.baris_start : 1;
+      const barisEnd = productHome ? Math.min(productHome.baris_end, maxBaris) : maxBaris;
 
       for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
         if (remainingPallets === 0) break;
 
-        const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
-        const productMaxPallet = validLocs ? validLocs.maxPalletPerLocation : 999;
+        const maxPallet = 3; // Default pallet capacity
+        const productMaxPallet = productHome?.max_pallet_per_location || 999;
         const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
 
         for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
@@ -262,17 +255,12 @@ export function NplForm() {
           const baris = `B${barisNum}`;
           const level = `P${palletNum}`;
 
-          if (productCode) {
-            const validation = validateProductLocation(productCode, clusterChar, lorongNum, barisNum);
-            if (!validation.isValid) continue;
-          }
-
-          const locationExists = stockListData.some(
-            (item) =>
+          const locationExists = initialStocks.some(
+            (item: any) =>
               item.cluster === clusterChar &&
-              item.lorong === parseInt(lorong.replace('L', '')) &&
-              item.baris === parseInt(baris.replace('B', '')) &&
-              item.level === parseInt(level.replace('P', ''))
+              item.lorong === lorongNum &&
+              item.baris === barisNum &&
+              item.level === palletNum
           );
 
           if (!locationExists) {
@@ -280,7 +268,7 @@ export function NplForm() {
             const qtyForThisLocation =
               isLastPallet && shouldAttachReceh
                 ? qtyPerPalletStd + remainingCartons
-                : isLastPallet && isReceh && !shouldAttachReceh
+                : isLastPallet && remainingCartons > 0 && !shouldAttachReceh
                 ? remainingCartons
                 : qtyPerPalletStd;
 
@@ -290,7 +278,7 @@ export function NplForm() {
               baris,
               level,
               qtyCarton: qtyForThisLocation,
-              isReceh: isLastPallet && isReceh,
+              isReceh: isLastPallet && remainingCartons > 0,
             });
             remainingPallets--;
           }
@@ -298,46 +286,46 @@ export function NplForm() {
       }
     }
 
-    // PHASE 2: In Transit if needed
+    // PHASE 2: In Transit if needed (Cluster C, Lorong 8-11)
     if (remainingPallets > 0) {
-      const transitConfig = clusterConfigs.find((c) => c.inTransitLorongRange);
-      if (transitConfig) {
-        const [transitStart, transitEnd] = transitConfig.inTransitLorongRange!;
-        for (let lorongNum = transitStart; lorongNum <= transitEnd; lorongNum++) {
+      const transitCluster = "C";
+      const transitStart = 8;
+      const transitEnd = 11;
+      
+      for (let lorongNum = transitStart; lorongNum <= transitEnd; lorongNum++) {
+        if (remainingPallets === 0) break;
+
+        const maxBaris = 9; // Default baris count
+        for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
           if (remainingPallets === 0) break;
 
-          const maxBaris = getBarisCountForLorong(transitConfig.clusterChar, lorongNum);
-          for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
+          const maxPallet = 3; // Default pallet capacity
+          for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
             if (remainingPallets === 0) break;
 
-            const maxPallet = getPalletCapacityForCell(transitConfig.clusterChar, lorongNum, barisNum);
-            for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
-              if (remainingPallets === 0) break;
+            const lorong = `L${lorongNum}`;
+            const baris = `B${barisNum}`;
+            const level = `P${palletNum}`;
 
-              const lorong = `L${lorongNum}`;
-              const baris = `B${barisNum}`;
-              const level = `P${palletNum}`;
+            const locationExists = initialStocks.some(
+              (item: any) =>
+                item.cluster === transitCluster &&
+                item.lorong === lorongNum &&
+                item.baris === barisNum &&
+                item.level === palletNum
+            );
 
-              const locationExists = stockListData.some(
-                (item) =>
-                  item.cluster === transitConfig.clusterChar &&
-                  item.lorong === parseInt(lorong.replace('L', '')) &&
-                  item.baris === parseInt(baris.replace('B', '')) &&
-                  item.level === parseInt(level.replace('P', ''))
-              );
-
-              if (!locationExists) {
-                const isLastPallet = remainingPallets === 1;
-                locations.push({
-                  clusterChar: transitConfig.clusterChar,
-                  lorong,
-                  baris,
-                  level,
-                  qtyCarton: isLastPallet && isReceh ? remainingCartons : qtyPerPalletStd,
-                  isReceh: isLastPallet && isReceh,
-                });
-                remainingPallets--;
-              }
+            if (!locationExists) {
+              const isLastPallet = remainingPallets === 1;
+              locations.push({
+                clusterChar: transitCluster,
+                lorong,
+                baris,
+                level,
+                qtyCarton: isLastPallet && remainingCartons > 0 ? remainingCartons : qtyPerPalletStd,
+                isReceh: isLastPallet && remainingCartons > 0,
+              });
+              remainingPallets--;
             }
           }
         }
@@ -366,8 +354,7 @@ export function NplForm() {
       return;
     }
 
-    const product = getProductByCode(productCode);
-    const homeCluster = product?.defaultCluster || "A";
+    const homeCluster = selectedProduct?.default_cluster || "A";
 
     const recommendation = findMultipleRecommendedLocations(homeCluster, totalPalletsNeeded);
 
@@ -435,6 +422,10 @@ export function NplForm() {
       error("Qty karton harus lebih dari 0.");
       return false;
     }
+    if (Number(qtyCartonInput) >= qtyPerPalletStd && qtyPerPalletStd > 0) {
+      error(`Input Karton Sisa (${qtyCartonInput}) tidak boleh melebihi atau sama dengan kapasitas 1 pallet (${qtyPerPalletStd}). Gunakan input Pallet Utuh.`);
+      return false;
+    }
     if (autoRecommend && (!multiLocationRec || multiLocationRec.locations.length === 0)) {
       error("Cari rekomendasi lokasi terlebih dahulu atau pilih manual.");
       return false;
@@ -445,8 +436,8 @@ export function NplForm() {
         return false;
       }
       // Check if manual location is occupied
-      const isOccupied = stockListData.some(
-        (s) =>
+      const isOccupied = initialStocks.some(
+        (s: any) =>
           s.cluster === manualCluster &&
           s.lorong === parseInt(manualLorong.replace('L', '')) &&
           s.baris === parseInt(manualBaris.replace('B', '')) &&
@@ -467,201 +458,100 @@ export function NplForm() {
   };
 
   // Confirm submit
-  const confirmSubmit = () => {
+  const confirmSubmit = async () => {
+    if (!selectedProduct || !expiredDate) return;
+
+    setIsSubmitting(true);
     setShowConfirmModal(false);
 
-    const product = getProductByCode(productCode)!;
-    const todayStr = new Date().toISOString().slice(0, 10);
-
-    let locationsToSave: RecommendedLocation[] = [];
-
-    if (autoRecommend && multiLocationRec) {
-      locationsToSave = multiLocationRec.locations;
-    } else {
-      // Manual single location
-      locationsToSave = [
-        {
-          clusterChar: manualCluster,
-          lorong: manualLorong,
-          baris: manualBaris,
-          level: manualPallet,
+    // 1. Siapkan data penempatan untuk dikirim ke DB
+    const placements = (autoRecommend && multiLocationRec) 
+      ? multiLocationRec.locations.map(loc => ({
+          cluster: loc.clusterChar,
+          lorong: parseInt(loc.lorong.replace('L', '')),
+          baris: parseInt(loc.baris.replace('B', '')),
+          level: parseInt(loc.level.replace('P', '')),
+          qtyCarton: loc.qtyCarton,
+          isReceh: loc.isReceh
+        }))
+      : [{
+          cluster: manualCluster,
+          lorong: parseInt(manualLorong.replace('L', '')),
+          baris: parseInt(manualBaris.replace('B', '')),
+          level: parseInt(manualPallet.replace('P', '')),
           qtyCarton: totalCartons,
-          isReceh: totalCartons < qtyPerPalletStd,
-        },
-      ];
-    }
+          isReceh: totalCartons < qtyPerPalletStd
+        }];
 
-    // Add stocks to stock list
-    locationsToSave.forEach((loc, idx) => {
-      const newStock: StockItem = {
-        id: `STOCK-NPL-${Date.now()}-${idx}`,
-        warehouseId: "WH001",
-        productId: product.id,
-        bbProduk: bbProduk,
-        cluster: loc.clusterChar,
-        lorong: parseInt(loc.lorong.replace('L', '')),
-        baris: parseInt(loc.baris.replace('B', '')),
-        level: parseInt(loc.level.replace('P', '')),
-        qtyPallet: 1,
-        qtyCarton: loc.qtyCarton,
-        expiredDate: expiredDate,
-        inboundDate: todayStr,
-        status: "release",
-        isReceh: loc.isReceh,
-        parentStockId: null,
-        createdBy: "USER001",
-        createdAt: todayStr,
-        updatedAt: todayStr,
-      };
-      stockListData.push(newStock);
-    });
+    // 2. Tentukan base status berdasarkan durasi hari (sama seperti Inbound)
+    const now = new Date();
+    const expDate = new Date(expiredDate);
+    const diffDays = Math.ceil((expDate.getTime() - now.getTime()) / (1000 * 3600 * 24));
+    const baseStatus = diffDays > 180 ? "hold" : "release";
 
-    // Create location string for history
-    const locationString = locationsToSave.map((l) => `${l.clusterChar}-${l.lorong}-${l.baris}-${l.level}`).join(", ");
-
-    // Add to NPL history
-    const transactionCode =
-      isEditMode && editId
-        ? editId
-        : `NPL-${todayStr.replace(/-/g, "")}-${String(nplHistoryData.length + 1).padStart(4, "0")}`;
-
-    const newNpl: NplHistory = {
-      id: `npl-${todayStr.replace(/-/g, "")}-${String(nplHistoryData.length + 1).padStart(3, "0")}`,
-      warehouse_id: "wh-001-cikarang",
-      transaction_code: transactionCode,
-      product_id: product.id,
-      bb_produk: bbProduk,
-      qty_carton: totalCartons,
-      expired_date: expiredDate,
-      locations: locationsToSave.map((l) => ({
-        cluster: l.clusterChar,
-        lorong: parseInt(l.lorong.replace('L', '')),
-        baris: parseInt(l.baris.replace('B', '')),
-        level: parseInt(l.level.replace('P', '')),
-        qty_carton: l.qtyCarton,
-        is_receh: l.isReceh,
-      })),
-      driver_name: namaPengemudi,
-      vehicle_number: nomorPolisi,
-      returned_by: "usr-003", // Dewi Lestari (admin_warehouse)
-      return_time: new Date().toISOString(),
-      notes: notes,
-      created_at: new Date().toISOString(),
+    const formData = {
+      warehouseId,
+      productId: selectedProduct.id,
+      bbProduk,
+      totalQty: totalCartons,
+      expiredDate,
+      driverName: namaPengemudi,
+      vehicleNumber: nomorPolisi,
+      notes,
+      baseStatus
     };
-    nplHistoryData.unshift(newNpl);
 
-    success(`NPL berhasil disimpan!\n${locationsToSave.length} lokasi: ${locationString}`);
+    try {
+      const res = await submitNplAction(formData, placements);
 
-    // Reset only location-related fields, keep driver info
-    setProductCode("");
-    setProductSearch("");
-    setBbProduk("");
-    setKdPlant("");
-    setExpiredDate("");
-    setQtyPalletInput("");
-    setQtyCartonInput("");
-    setNotes("");
-    setMultiLocationRec(null);
-    setManualCluster("");
-    setManualLorong("");
-    setManualBaris("");
-    setManualPallet("");
-    setIsEditMode(false);
-    setEditId(null);
+      if (res.success) {
+        success(`NPL Berhasil disimpan dengan kode: ${res.transactionCode}`);
+        resetForm();
+        router.refresh(); // Sinkronisasi database ke UI
+      } else {
+        error(res.message || "Gagal menyimpan NPL");
+      }
+    } catch (err) {
+      error("Terjadi kesalahan sistem saat submit NPL.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  // Edit NPL
-  const handleEditClick = (npl: NplHistory) => {
-    setSelectedNplForAction(npl);
-    setShowEditConfirmModal(true);
+  // Edit NPL (disabled - requires server action implementation)
+  const handleEditClick = (npl: any) => {
+    error("Fitur edit belum tersedia. Silakan hubungi administrator.");
+    return;
+    // setSelectedNplForAction(npl);
+    // setShowEditConfirmModal(true);
   };
 
   const confirmEdit = () => {
     if (!selectedNplForAction) return;
 
-    // Remove from history
-    const idx = nplHistoryData.findIndex((h) => h.id === selectedNplForAction.id);
-    if (idx !== -1) {
-      nplHistoryData.splice(idx, 1);
-    }
-
-    // Remove from stock
-    selectedNplForAction.locations.forEach((loc) => {
-      const stockIdx = stockListData.findIndex(
-        (s) =>
-          s.productId === selectedNplForAction.product_id &&
-          s.cluster === loc.cluster &&
-          s.lorong === loc.lorong &&
-          s.baris === loc.baris &&
-          s.level === loc.level
-      );
-      if (stockIdx !== -1) {
-        stockListData.splice(stockIdx, 1);
-      }
-    });
-
-    // Get product info for reverse calculation
-    const product = productMasterData.find((p) => p.id === selectedNplForAction.product_id);
-    const qtyPerPallet = product?.qtyCartonPerPallet || 1;
-    const totalCarton = selectedNplForAction.qty_carton;
-    const fullPallets = Math.floor(totalCarton / qtyPerPallet);
-    const remainingCartons = totalCarton % qtyPerPallet;
-
-    // Load into form
-    setNamaPengemudi(selectedNplForAction.driver_name);
-    setNomorPolisi(selectedNplForAction.vehicle_number);
-    setProductCode(product?.productCode || "");
-    setProductSearch(product?.productName || "");
-    setQtyPalletInput(String(fullPallets));
-    setQtyCartonInput(String(remainingCartons));
-    setBbProduk(selectedNplForAction.bb_produk);
-    setExpiredDate(selectedNplForAction.expired_date);
-    setKdPlant(selectedNplForAction.bb_produk.substring(6, 10));
-    setNotes(selectedNplForAction.notes || "");
-    setAutoRecommend(true);
-    setMultiLocationRec(null);
-    setIsEditMode(true);
-    setEditId(selectedNplForAction.transaction_code);
-
+    // TODO: Implement edit with server action
+    error("Fitur edit memerlukan implementasi server action untuk update database.");
+    
     setShowEditConfirmModal(false);
     setSelectedNplForAction(null);
-
-    success("Data NPL dimuat untuk diedit. Isi BB Produk dan cari lokasi.");
   };
 
-  // Cancel NPL
-  const handleCancelClick = (npl: NplHistory) => {
-    setSelectedNplForAction(npl);
-    setShowBatalConfirmModal(true);
+  // Cancel NPL (disabled - requires server action implementation)
+  const handleCancelClick = (npl: any) => {
+    error("Fitur batal belum tersedia. Silakan hubungi administrator.");
+    return;
+    // setSelectedNplForAction(npl);
+    // setShowBatalConfirmModal(true);
   };
 
   const confirmBatal = () => {
     if (!selectedNplForAction) return;
 
-    // Remove from history
-    const idx = nplHistoryData.findIndex((h) => h.id === selectedNplForAction.id);
-    if (idx !== -1) {
-      nplHistoryData.splice(idx, 1);
-    }
-
-    // Remove from stock
-    selectedNplForAction.locations.forEach((loc) => {
-      const stockIdx = stockListData.findIndex(
-        (s) =>
-          s.productId === selectedNplForAction.product_id &&
-          s.cluster === loc.cluster &&
-          s.lorong === loc.lorong &&
-          s.baris === loc.baris &&
-          s.level === loc.level
-      );
-      if (stockIdx !== -1) {
-        stockListData.splice(stockIdx, 1);
-      }
-    });
+    // TODO: Implement cancel with server action
+    error("Fitur batal memerlukan implementasi server action untuk delete dari database.");
 
     setShowBatalConfirmModal(false);
     setSelectedNplForAction(null);
-    success("Transaksi NPL berhasil dibatalkan.");
   };
 
   // Modal backdrop click handler
@@ -745,19 +635,19 @@ export function NplForm() {
                         <div className="mt-2 max-h-48 overflow-y-auto border-2 border-gray-100 rounded-xl bg-white">
                           {filteredProducts.map((p) => (
                             <button
-                              key={p.productCode}
+                              key={p.product_code}
                               type="button"
                               onClick={() => {
-                                setProductCode(p.productCode);
-                                setProductSearch(p.productName);
+                                setProductCode(p.product_code);
+                                setProductSearch(p.product_name);
                                 setMultiLocationRec(null);
                               }}
                               className={`w-full text-left px-4 py-2 hover:bg-teal-50 transition-colors ${
-                                productCode === p.productCode ? "bg-teal-100" : ""
+                                productCode === p.product_code ? "bg-teal-100" : ""
                               }`}
                             >
-                              <span className="font-medium text-gray-900">{p.productCode}</span>
-                              <span className="text-gray-500 text-sm ml-2">{p.productName}</span>
+                              <span className="font-medium text-gray-900">{p.product_code}</span>
+                              <span className="text-gray-500 text-sm ml-2">{p.product_name}</span>
                             </button>
                           ))}
                         </div>
@@ -767,11 +657,11 @@ export function NplForm() {
                     {selectedProduct && (
                       <div className="bg-teal-50 border border-teal-200 rounded-xl p-3">
                         <p className="text-sm text-teal-800">
-                          <strong>Produk Terpilih:</strong> {selectedProduct.productCode} - {selectedProduct.productName}
+                          <strong>Produk Terpilih:</strong> {selectedProduct.product_code} - {selectedProduct.product_name}
                         </p>
                         <p className="text-xs text-teal-600 mt-1">
-                          Home Cluster: {selectedProduct.defaultCluster || "N/A"} | Qty/Pallet:{" "}
-                          {selectedProduct.qtyCartonPerPallet} | Qty/Carton: {selectedProduct.qtyPerCarton}
+                          Home Cluster: {selectedProduct.default_cluster || "N/A"} | Qty/Pallet:{" "}
+                          {selectedProduct.qty_carton_per_pallet} | Qty/Carton: {selectedProduct.qty_per_carton}
                         </p>
                       </div>
                     )}
@@ -1030,9 +920,10 @@ export function NplForm() {
                   <button
                     type="button"
                     onClick={handleSubmitClick}
-                    className="flex-1 bg-teal-600 text-white py-3 rounded-xl font-semibold hover:bg-teal-700 transition-colors"
+                    disabled={isSubmitting}
+                    className="flex-1 bg-teal-600 text-white py-3 rounded-xl font-semibold hover:bg-teal-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
                   >
-                    {isEditMode ? "Update NPL" : "Simpan NPL"}
+                    {isSubmitting ? "Menyimpan..." : (isEditMode ? "Update NPL" : "Simpan NPL")}
                   </button>
                 </div>
               </div>
@@ -1070,22 +961,22 @@ export function NplForm() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {todayNplHistory.map((npl) => {
-                      const product = productMasterData.find((p) => p.id === npl.product_id);
+                    {todayNplHistory.map((npl: any) => {
+                      const product = npl.products; // Hasil join di page.tsx
                       return (
                         <tr key={npl.id} className="hover:bg-teal-50 transition-colors">
                           <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
-                            {new Date(npl.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                            {new Date(npl.return_time).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
                           </td>
                           <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">
                             {npl.driver_name}
                           </td>
                           <td className="px-3 py-3 text-sm">
-                            <div className="font-medium text-gray-900">{product?.productCode || npl.bb_produk}</div>
-                            <div className="text-gray-500 text-xs truncate max-w-[150px]">{product?.productName || "Unknown Product"}</div>
+                            <div className="font-medium text-gray-900 text-sm">{product?.product_code || "UNKNOWN"}</div>
+                            <div className="text-gray-500 text-xs truncate max-w-[150px]">{product?.product_name || "Unknown Product"}</div>
                           </td>
                           <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
-                            {npl.locations.length}
+                            {Array.isArray(npl.locations) ? npl.locations.length : 0}
                           </td>
                           <td className="px-2 py-3 text-sm text-center font-bold text-blue-600">
                             {npl.qty_carton}
@@ -1141,7 +1032,7 @@ export function NplForm() {
               <p className="text-gray-700 text-center mb-4">Yakin ingin menyimpan transaksi NPL ini?</p>
               <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm">
                 <p>
-                  <strong>Produk:</strong> {selectedProduct?.productName}
+                  <strong>Produk:</strong> {selectedProduct?.product_name}
                 </p>
                 <p>
                   <strong>Qty:</strong> {totalCartons} karton ({totalPalletsNeeded} lokasi)
@@ -1188,7 +1079,7 @@ export function NplForm() {
                   <strong>ID:</strong> {selectedNplForAction.transaction_code}
                 </p>
                 <p>
-                  <strong>Produk:</strong> {productMasterData.find(p => p.id === selectedNplForAction.product_id)?.productName || "Unknown Product"}
+                  <strong>Produk:</strong> {selectedNplForAction.products?.product_name || "Unknown Product"}
                 </p>
               </div>
               <div className="flex gap-3">
@@ -1229,7 +1120,7 @@ export function NplForm() {
                   <strong>ID:</strong> {selectedNplForAction.transaction_code}
                 </p>
                 <p>
-                  <strong>Produk:</strong> {productMasterData.find(p => p.id === selectedNplForAction.product_id)?.productName || "Unknown Product"}
+                  <strong>Produk:</strong> {selectedNplForAction.products?.product_name || "Unknown Product"}
                 </p>
                 <p>
                   <strong>Qty:</strong> {selectedNplForAction.qty_carton} karton
