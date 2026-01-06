@@ -1023,7 +1023,7 @@ export function InboundForm({
     const lorongStart = validLocs && validLocs.clusterChar === clusterChar ? validLocs.lorongRange[0] : 1;
     const lorongEnd = validLocs && validLocs.clusterChar === clusterChar 
       ? validLocs.lorongRange[1] 
-      : clusterConfig.defaultLorongCount;
+      : clusterConfig.default_lorong_count;
     
     for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
       if (remainingPallets === 0) break;
@@ -1062,9 +1062,9 @@ export function InboundForm({
           }
           
           // Check if location is empty (filter by current warehouse)
-          const locationExists = stockListData.some(
+          const locationExists = currentStock.some(
             (item: StockItem) =>
-              item.warehouseId === warehouseId && // Filter by current warehouse
+              item.warehouse_id === warehouseId && // Filter by current warehouse
               item.cluster === clusterChar &&
               item.lorong === parseInt(lorong.replace('L', '')) &&
               item.baris === parseInt(baris.replace('B', '')) &&
@@ -1124,7 +1124,7 @@ export function InboundForm({
               // Check if location is empty
               const locationExists = currentStock.some(
                 (item: StockItem) =>
-                  item.warehouseId === warehouseId && // Filter by current warehouse
+                  item.warehouse_id === warehouseId && // Filter by current warehouse
                   item.cluster === clusterChar &&
                   item.lorong === parseInt(lorong.replace('L', '')) &&
                   item.baris === parseInt(baris.replace('B', '')) &&
@@ -1181,7 +1181,7 @@ export function InboundForm({
                 // Check if location is empty in Cluster C In Transit
                 const locationExists = currentStock.some(
                   (item: StockItem) =>
-                    item.warehouseId === warehouseId && // Filter by current warehouse
+                    item.warehouse_id === warehouseId && // Filter by current warehouse
                     item.cluster === "C" &&
                     item.lorong === lorongNum &&
                     item.baris === barisNum &&
@@ -1215,7 +1215,7 @@ export function InboundForm({
   // Helper function for finding single location (kept for potential future use)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _findRecommendedLocation = (clusterChar: string): RecommendedLocation | null => {
-    const multiRec = findMultipleRecommendedLocations(clusterChar, 1, currentWarehouseId);
+    const multiRec = findMultipleRecommendedLocations(clusterChar, 1, warehouseId);
     if (multiRec.locations.length > 0) {
       return multiRec.locations[0];
     }
@@ -1274,19 +1274,22 @@ export function InboundForm({
       return;
     }
 
-    const cluster = selectedProduct?.defaultCluster || "";
+    const cluster = selectedProduct?.default_cluster || "";
     if (!cluster) { 
       error("Produk ini tidak memiliki Cluster Default."); 
       return; 
     }
     
-    const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded, currentWarehouseId);
-    
-    if (multiRec.locations.length < totalPalletsNeeded) {
+    try {
+      const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded, warehouseId);
+      
+      if (multiRec.locations.length < totalPalletsNeeded) {
         error(`Gudang penuh! Hanya ditemukan ${multiRec.locations.length} dari ${totalPalletsNeeded} lokasi yang dibutuhkan.`);
         setMultiLocationRec(null);
         setRecommendedLocation(null);
-        error(result.error || "Gagal mendapatkan rekomendasi.");
+      } else {
+        setMultiLocationRec(multiRec);
+        success(`✅ Ditemukan ${multiRec.locations.length} lokasi kosong yang sesuai!`);
       }
     } catch (err: any) {
       error("Terjadi kesalahan sistem saat meminta rekomendasi.");
@@ -1367,8 +1370,8 @@ export function InboundForm({
 
     // SMART FILTER: Filter hanya lokasi yang KOSONG
     const availableLocations = allLocations.filter(loc => {
-      const existingStock = stockListData.find(
-        s => s.warehouseId === currentWarehouseId &&
+      const existingStock = currentStock.find(
+        (s: StockItem) => s.warehouse_id === warehouseId &&
              s.cluster === loc.clusterChar && 
              s.lorong === parseInt(loc.lorong.replace('L', '')) && 
              s.baris === parseInt(loc.baris.replace('B', '')) && 
@@ -1716,51 +1719,52 @@ export function InboundForm({
     }
     // Case 2: Multi-pallet dengan auto recommend OFF (manual input)
     else if (totalPalletsNeeded > 1 && !autoRecommend) {
-        // Validasi semua manual locations harus diisi
-        const locationSet = new Set<string>();
-        let hasEmptyLocation = false;
-        
-        manualLocations.forEach((loc, index) => {
-            if (!loc.clusterChar || !loc.lorong || !loc.baris || !loc.pallet) {
-                hasEmptyLocation = true;
-                newErrors[`manualLoc${index}`] = `Lokasi ${index + 1} belum lengkap`;
-                errorList.push(`Lokasi ${index + 1} belum lengkap`);
-                return;
-            }
-            
-            const locationKey = `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
-            
-            // Check duplikat
-            if (locationSet.has(locationKey)) {
-                newErrors[`manualLoc${index}`] = `Lokasi ${index + 1} duplikat`;
-                errorList.push(`Lokasi ${index + 1} duplikat dengan lokasi sebelumnya`);
-                return;
-            }
-            
-            // Check apakah lokasi sudah terisi di stockList
-            const locationIsOccupied = stockListData.some(
-              (item) =>
-                item.warehouseId === currentWarehouseId && // Filter by current warehouse
-                item.cluster === loc.clusterChar &&
-                item.lorong === parseInt(loc.lorong.replace('L', '')) &&
-                item.baris === parseInt(loc.baris.replace('B', '')) &&
-                item.level === parseInt(loc.pallet.replace('P', ''))
-            );
-            
-            if (locationIsOccupied) {
-                newErrors[`manualLoc${index}`] = `Lokasi ${locationKey} sudah terisi`;
-                errorList.push(`Lokasi ${index + 1} (${locationKey}) sudah terisi`);
-                return;
-            }
-            
-            locationSet.add(locationKey);
-            locationsToSubmit.push({
-                clusterChar: loc.clusterChar,
-                lorong: loc.lorong,
-                baris: loc.baris,
-                level: loc.pallet,
-                palletsCanFit: 1,
-            });
+      // Validasi semua manual locations harus diisi
+      const locationSet = new Set<string>();
+      let hasEmptyLocation = false;
+
+      manualLocations.forEach((loc, index) => {
+        if (!loc.clusterChar || !loc.lorong || !loc.baris || !loc.pallet) {
+          hasEmptyLocation = true;
+          newErrors[`manualLoc${index}`] = `Lokasi ${index + 1} belum lengkap`;
+          errorList.push(`Lokasi ${index + 1} belum lengkap`);
+          return;
+        }
+
+        const locationKey = `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
+
+        // Check duplikat
+        if (locationSet.has(locationKey)) {
+          newErrors[`manualLoc${index}`] = `Lokasi ${index + 1} duplikat`;
+          errorList.push(
+            `Lokasi ${index + 1} duplikat dengan lokasi sebelumnya`
+          );
+          return;
+        }
+
+        // Check apakah lokasi sudah terisi di currentStock
+        const locationIsOccupied = currentStock.some(
+          (item) =>
+            item.warehouse_id === warehouseId &&
+            item.cluster === loc.clusterChar &&
+            item.lorong === parseInt(loc.lorong.replace("L", "")) &&
+            item.baris === parseInt(loc.baris.replace("B", "")) &&
+            item.level === parseInt(loc.pallet.replace("P", ""))
+        );
+
+        if (locationIsOccupied) {
+          newErrors[`manualLoc${index}`] = `Lokasi ${locationKey} sudah terisi`;
+          errorList.push(`Lokasi ${index + 1} (${locationKey}) sudah terisi`);
+          return;
+        }
+
+        locationSet.add(locationKey);
+        locationsToSubmit.push({
+          clusterChar: loc.clusterChar,
+          lorong: loc.lorong,
+          baris: loc.baris,
+          level: loc.pallet,
+          palletsCanFit: 1,
         });
       });
 
@@ -1799,20 +1803,7 @@ export function InboundForm({
           newErrors.pallet = `Lokasi ${form.clusterChar}-${form.lorong}-${form.baris}-${form.pallet} sudah terisi.`;
           errorList.push(newErrors.pallet);
         } else {
-            const locationIsOccupied = stockListData.some(
-              (item) =>
-                item.warehouseId === currentWarehouseId && // Filter by current warehouse
-                item.cluster === currentLoc.clusterChar &&
-                item.lorong === parseInt(currentLoc.lorong.replace('L', '')) &&
-                item.baris === parseInt(currentLoc.baris.replace('B', '')) &&
-                item.level === parseInt(currentLoc.level.replace('P', ''))
-            );
-            if (locationIsOccupied) {
-              newErrors.pallet = `Lokasi ${form.clusterChar}-${form.lorong}-${form.baris}-${form.pallet} sudah terisi.`;
-              errorList.push(newErrors.pallet);
-            } else {
-                locationsToSubmit.push(currentLoc);
-            }
+          locationsToSubmit.push(currentLoc);
         }
       }
     }
