@@ -21,7 +21,7 @@ export default async function PermutasiPage() {
   if (!profile) redirect("/login");
 
   // 2. Ambil Data yang dibutuhkan Form secara Paralel
-  const [stocksRes, configsRes, homesRes, historyRes] = await Promise.all([
+  const [stocksRes, configsRes, homesRes, overridesRes, historyRes] = await Promise.all([
     supabase
       .from("stock_list")
       .select("*, products(*)")
@@ -36,8 +36,17 @@ export default async function PermutasiPage() {
       .select("*")
       .eq("warehouse_id", profile.warehouse_id),
     supabase
+      .from("cluster_cell_overrides")
+      .select("*, cluster_configs!inner(warehouse_id)")
+      .eq("cluster_configs.warehouse_id", profile.warehouse_id)
+      .eq("is_disabled", false),
+    supabase
       .from("permutasi_history")
-      .select("*, products(product_code, product_name)")
+      .select(`
+        *,
+        products(product_code, product_name),
+        stock_list(fefo_status)
+      `)
       .eq("warehouse_id", profile.warehouse_id)
       .order("created_at", { ascending: false })
       .limit(50)
@@ -51,6 +60,7 @@ export default async function PermutasiPage() {
         initialStocks={stocksRes.data || []}
         clusterConfigs={configsRes.data || []}
         productHomes={homesRes.data || []}
+        clusterCellOverrides={overridesRes.data || []}
         initialHistory={historyRes.data || []}
       />
     </>

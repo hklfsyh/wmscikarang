@@ -27,6 +27,28 @@ interface MultiLocationRecommendation {
   needsMultipleLocations: boolean;
 }
 
+interface ManualLocationInput {
+  clusterChar: string;
+  lorong: string;
+  baris: string;
+  pallet: string;
+}
+
+interface ManualLocationRange {
+  clusterChar: string;
+  lorong: string;
+  barisStart: string;
+  barisEnd: string;
+  palletStart: string;
+  palletEnd: string;
+}
+
+interface LocationAvailability {
+  location: string;
+  isOccupied: boolean;
+  occupiedBy?: string;
+}
+
 // --- BB PRODUK PARSING ---
 // Format: YYMMDDXXXX (6 digit angka untuk tanggal + 4 karakter alphanumeric untuk kode plant)
 const parseBBProduk = (bb: string): { expiredDate: string; kdPlant: string; isValid: boolean } => {
@@ -70,6 +92,7 @@ interface NplFormProps {
   clusterConfigs: any[];
   productHomes: any[];
   initialHistory: any[];
+  clusterCellOverrides: any[];
 }
 
 export function NplForm({ 
@@ -78,7 +101,8 @@ export function NplForm({
   initialStocks, 
   clusterConfigs, 
   productHomes, 
-  initialHistory 
+  initialHistory,
+  clusterCellOverrides
 }: NplFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -101,10 +125,25 @@ export function NplForm({
   const [manualLorong, setManualLorong] = useState("");
   const [manualBaris, setManualBaris] = useState("");
   const [manualPallet, setManualPallet] = useState("");
+  
+  // Range mode state
+  const [useRangeMode, setUseRangeMode] = useState(false);
+  const [manualRange, setManualRange] = useState<ManualLocationRange>({
+    clusterChar: "",
+    lorong: "",
+    barisStart: "",
+    barisEnd: "",
+    palletStart: "",
+    palletEnd: "",
+  });
+  const [manualLocations, setManualLocations] = useState<ManualLocationInput[]>([]);
+  const [locationAvailability, setLocationAvailability] = useState<LocationAvailability[]>([]);
+  const [occupiedLocations, setOccupiedLocations] = useState<LocationAvailability[]>([]);
 
   // Edit mode
   const [isEditMode, setIsEditMode] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [originalLocations, setOriginalLocations] = useState<any[]>([]);  // Simpan lokasi asli dengan original_created_at
 
   // Modal states
   const [showNotificationModal, setShowNotificationModal] = useState(false);
@@ -126,6 +165,51 @@ export function NplForm({
 
   const success = (message: string) => showNotification("✅ Berhasil", message, "success");
   const error = (message: string) => showNotification("❌ Error", message, "error");
+
+  // Helper functions untuk dinamis baris dan pallet capacity (HARUS SEBELUM useMemo!)
+  const getBarisCountForLorong = (clusterChar: string, lorongNum: number): number => {
+    const config = clusterConfigs.find((c: any) => c.cluster_char === clusterChar);
+    if (!config) return 9;
+
+    const override = clusterCellOverrides.find(
+      (o: any) =>
+        o.cluster_config_id === config.id &&
+        lorongNum >= o.lorong_start &&
+        lorongNum <= o.lorong_end &&
+        o.custom_baris_count !== null
+    );
+
+    return override?.custom_baris_count || 9;
+  };
+
+  const getPalletCapacityForCell = (clusterChar: string, lorongNum: number, barisNum: number): number => {
+    const config = clusterConfigs.find((c: any) => c.cluster_char === clusterChar);
+    if (!config) return 3;
+
+    const override = clusterCellOverrides.find(
+      (o: any) => {
+        // Harus match cluster config ID
+        if (o.cluster_config_id !== config.id) return false;
+        
+        // Cek apakah lorongNum berada di range lorong_start sampai lorong_end
+        const inLorongRange = lorongNum >= o.lorong_start && lorongNum <= o.lorong_end;
+        if (!inLorongRange) return false;
+        
+        // Cek baris_start dan baris_end:
+        // - Jika keduanya null → berlaku untuk SEMUA baris di lorong tersebut
+        // - Jika ada nilai → cek apakah barisNum di dalam range
+        if (o.baris_start !== null && o.baris_end !== null) {
+          const inBarisRange = barisNum >= o.baris_start && barisNum <= o.baris_end;
+          if (!inBarisRange) return false;
+        }
+        
+        // Harus punya custom_pallet_level
+        return o.custom_pallet_level !== null;
+      }
+    );
+
+    return override?.custom_pallet_level || 3;
+  };
 
   // Get selected product
   const selectedProduct = useMemo(() => {
@@ -184,15 +268,45 @@ export function NplForm({
 
   const barisOptions = useMemo(() => {
     if (!manualCluster || !manualLorong) return [];
-    // Default baris count adalah 9
-    return Array.from({ length: 9 }, (_, i) => `B${i + 1}`);
+    const lorongNum = parseInt(manualLorong.replace("L", ""));
+    const barisCount = getBarisCountForLorong(manualCluster, lorongNum);
+    return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
   }, [manualCluster, manualLorong]);
 
   const palletOptions = useMemo(() => {
     if (!manualCluster || !manualLorong || !manualBaris) return [];
-    // Default pallet capacity adalah 3
-    return Array.from({ length: 3 }, (_, i) => `P${i + 1}`);
+    const lorongNum = parseInt(manualLorong.replace("L", ""));
+    const barisNum = parseInt(manualBaris.replace("B", ""));
+    const palletCapacity = getPalletCapacityForCell(manualCluster, lorongNum, barisNum);
+    return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
   }, [manualCluster, manualLorong, manualBaris]);
+
+  // Range mode dropdown options
+  const manualRangeLorongOptions = useMemo(() => {
+    if (!manualRange.clusterChar) return [];
+    const config = clusterConfigs.find((c: any) => c.cluster_char === manualRange.clusterChar);
+    if (!config) return [];
+    return Array.from({ length: config.default_lorong_count }, (_, i) => `L${i + 1}`);
+  }, [manualRange.clusterChar, clusterConfigs]);
+
+  const manualRangeBarisOptions = useMemo(() => {
+    if (!manualRange.clusterChar || !manualRange.lorong) return [];
+    const lorongNum = parseInt(manualRange.lorong.replace("L", ""));
+    const barisCount = getBarisCountForLorong(manualRange.clusterChar, lorongNum);
+    return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+  }, [manualRange.clusterChar, manualRange.lorong]);
+
+  const manualRangePalletOptions = useMemo(() => {
+    if (!manualRange.clusterChar || !manualRange.lorong || (!manualRange.barisStart && !manualRange.barisEnd)) return [];
+    const lorongNum = parseInt(manualRange.lorong.replace("L", ""));
+    const barisNumSample = manualRange.barisStart
+      ? parseInt(manualRange.barisStart.replace("B", ""))
+      : manualRange.barisEnd
+      ? parseInt(manualRange.barisEnd.replace("B", ""))
+      : 1;
+    const palletCapacity = getPalletCapacityForCell(manualRange.clusterChar, lorongNum, barisNumSample);
+    return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+  }, [manualRange.clusterChar, manualRange.lorong, manualRange.barisStart, manualRange.barisEnd]);
 
   // Today's NPL history
   const todayNplHistory = useMemo(() => {
@@ -237,14 +351,16 @@ export function NplForm({
       // Skip In Transit area (Cluster C, Lorong 8-11)
       if (clusterChar === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
 
-      const maxBaris = 9; // Default baris count
+      // Get baris count DINAMIS dari override
+      const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
       const barisStart = productHome ? productHome.baris_start : 1;
       const barisEnd = productHome ? Math.min(productHome.baris_end, maxBaris) : maxBaris;
 
       for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
         if (remainingPallets === 0) break;
 
-        const maxPallet = 3; // Default pallet capacity
+        // Get pallet capacity DINAMIS dari override
+        const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
         const productMaxPallet = productHome?.max_pallet_per_location || 999;
         const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
 
@@ -286,46 +402,76 @@ export function NplForm({
       }
     }
 
-    // PHASE 2: In Transit if needed (Cluster C, Lorong 8-11)
+    // PHASE 2: Overflow ke In Transit (dinamis dari cluster_cell_overrides)
     if (remainingPallets > 0) {
-      const transitCluster = "C";
-      const transitStart = 8;
-      const transitEnd = 11;
+      // Cari area transit dari clusterCellOverrides dengan is_transit_area = true
+      const transitOverrides = clusterCellOverrides.filter((o: any) => o.is_transit_area === true);
       
-      for (let lorongNum = transitStart; lorongNum <= transitEnd; lorongNum++) {
+      for (const transitOverride of transitOverrides) {
         if (remainingPallets === 0) break;
 
-        const maxBaris = 9; // Default baris count
-        for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
+        // Cari cluster config untuk transit ini
+        const transitConfig = clusterConfigs.find((c: any) => c.id === transitOverride.cluster_config_id);
+        if (!transitConfig) continue;
+
+        const transitCluster = transitConfig.cluster_char;
+        const lorongStart = transitOverride.lorong_start;
+        const lorongEnd = transitOverride.lorong_end;
+
+        for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
           if (remainingPallets === 0) break;
 
-          const maxPallet = 3; // Default pallet capacity
-          for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
+          // Cari baris count untuk lorong ini (bisa custom atau default 9)
+          const barisOverride = clusterCellOverrides.find(
+            (o: any) =>
+              o.cluster_config_id === transitConfig.id &&
+              lorongNum >= o.lorong_start &&
+              lorongNum <= o.lorong_end &&
+              o.custom_baris_count !== null
+          );
+          const maxBaris = barisOverride?.custom_baris_count || 9;
+
+          for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
             if (remainingPallets === 0) break;
 
-            const lorong = `L${lorongNum}`;
-            const baris = `B${barisNum}`;
-            const level = `P${palletNum}`;
-
-            const locationExists = initialStocks.some(
-              (item: any) =>
-                item.cluster === transitCluster &&
-                item.lorong === lorongNum &&
-                item.baris === barisNum &&
-                item.level === palletNum
+            // Cari pallet level untuk cell ini (bisa custom atau default 3)
+            const palletOverride = clusterCellOverrides.find(
+              (o: any) =>
+                o.cluster_config_id === transitConfig.id &&
+                lorongNum >= o.lorong_start &&
+                lorongNum <= o.lorong_end &&
+                (o.baris_start === null || (barisNum >= o.baris_start && barisNum <= (o.baris_end || barisNum))) &&
+                o.custom_pallet_level !== null
             );
+            const maxPallet = palletOverride?.custom_pallet_level || 3;
 
-            if (!locationExists) {
-              const isLastPallet = remainingPallets === 1;
-              locations.push({
-                clusterChar: transitCluster,
-                lorong,
-                baris,
-                level,
-                qtyCarton: isLastPallet && remainingCartons > 0 ? remainingCartons : qtyPerPalletStd,
-                isReceh: isLastPallet && remainingCartons > 0,
-              });
-              remainingPallets--;
+            for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
+              if (remainingPallets === 0) break;
+
+              const lorong = `L${lorongNum}`;
+              const baris = `B${barisNum}`;
+              const level = `P${palletNum}`;
+
+              const locationExists = initialStocks.some(
+                (item: any) =>
+                  item.cluster === transitCluster &&
+                  item.lorong === lorongNum &&
+                  item.baris === barisNum &&
+                  item.level === palletNum
+              );
+
+              if (!locationExists) {
+                const isLastPallet = remainingPallets === 1;
+                locations.push({
+                  clusterChar: transitCluster,
+                  lorong,
+                  baris,
+                  level,
+                  qtyCarton: isLastPallet && remainingCartons > 0 ? remainingCartons : qtyPerPalletStd,
+                  isReceh: isLastPallet && remainingCartons > 0,
+                });
+                remainingPallets--;
+              }
             }
           }
         }
@@ -337,6 +483,100 @@ export function NplForm({
       totalPalletsPlaced: palletsNeeded - remainingPallets,
       needsMultipleLocations: locations.length > 1,
     };
+  };
+
+  // Expand range to individual locations
+  const expandRangeToLocations = () => {
+    const { clusterChar, lorong, barisStart, barisEnd, palletStart, palletEnd } = manualRange;
+
+    if (!clusterChar || !lorong || !barisStart || !barisEnd || !palletStart || !palletEnd) {
+      error("Semua field range harus diisi!");
+      return;
+    }
+
+    const barisStartNum = parseInt(barisStart.replace(/[^0-9]/g, ""));
+    const barisEndNum = parseInt(barisEnd.replace(/[^0-9]/g, ""));
+    const palletStartNum = parseInt(palletStart.replace(/[^0-9]/g, ""));
+    const palletEndNum = parseInt(palletEnd.replace(/[^0-9]/g, ""));
+    const lorongNum = parseInt(lorong.replace("L", ""));
+
+    if (isNaN(barisStartNum) || isNaN(barisEndNum) || isNaN(palletStartNum) || isNaN(palletEndNum) || isNaN(lorongNum)) {
+      error("Format lorong/baris/pallet tidak valid! Contoh: L1, B1, P1");
+      return;
+    }
+
+    if (barisStartNum > barisEndNum || palletStartNum > palletEndNum) {
+      error("Range tidak valid! Start harus ≤ End");
+      return;
+    }
+
+    // Generate all locations from range
+    const allLocations: ManualLocationInput[] = [];
+    for (let b = barisStartNum; b <= barisEndNum; b++) {
+      for (let p = palletStartNum; p <= palletEndNum; p++) {
+        allLocations.push({
+          clusterChar,
+          lorong,
+          baris: `B${b}`,
+          pallet: `P${p}`,
+        });
+      }
+    }
+
+    // Filter hanya lokasi yang KOSONG
+    const availableLocations = allLocations.filter((loc) => {
+      const lorongNumCheck = parseInt(loc.lorong.replace("L", ""));
+      const barisNumCheck = parseInt(loc.baris.replace("B", ""));
+      const palletNumCheck = parseInt(loc.pallet.replace("P", ""));
+
+      const existingStock = initialStocks.find(
+        (s: any) =>
+          s.cluster === loc.clusterChar &&
+          s.lorong === lorongNumCheck &&
+          s.baris === barisNumCheck &&
+          s.level === palletNumCheck
+      );
+
+      return !existingStock;
+    });
+
+    const occupiedCount = allLocations.length - availableLocations.length;
+
+    if (availableLocations.length < totalPalletsNeeded) {
+      error(
+        `Range menghasilkan ${allLocations.length} lokasi (${occupiedCount} terisi, ${availableLocations.length} kosong).\nButuh ${totalPalletsNeeded} lokasi kosong, hanya tersedia ${availableLocations.length}!`
+      );
+      return;
+    }
+
+    // Ambil lokasi kosong sesuai kebutuhan
+    const locationsToUse = availableLocations.slice(0, totalPalletsNeeded);
+
+    if (occupiedCount > 0) {
+      success(
+        `✅ Range diproses!\n\nTotal: ${allLocations.length} lokasi\n- Terisi: ${occupiedCount} lokasi (di-skip)\n- Kosong: ${availableLocations.length} lokasi\n- Digunakan: ${locationsToUse.length} lokasi`
+      );
+    } else {
+      success(`✅ ${locationsToUse.length} lokasi kosong siap digunakan!`);
+    }
+
+    setManualLocations(locationsToUse);
+    setLocationAvailability([]);
+    setOccupiedLocations([]);
+  };
+
+  const resetManualRange = () => {
+    setManualRange({
+      clusterChar: "",
+      lorong: "",
+      barisStart: "",
+      barisEnd: "",
+      palletStart: "",
+      palletEnd: "",
+    });
+    setManualLocations([]);
+    setLocationAvailability([]);
+    setOccupiedLocations([]);
   };
 
   // Handle recommend button
@@ -394,6 +634,9 @@ export function NplForm({
     setManualPallet("");
     setIsEditMode(false);
     setEditId(null);
+    setOriginalLocations([]);  // Clear original locations
+    setUseRangeMode(false);
+    resetManualRange();
   };
 
   // Validate form
@@ -431,21 +674,34 @@ export function NplForm({
       return false;
     }
     if (!autoRecommend) {
-      if (!manualCluster || !manualLorong || !manualBaris || !manualPallet) {
-        error("Lengkapi lokasi manual.");
-        return false;
-      }
-      // Check if manual location is occupied
-      const isOccupied = initialStocks.some(
-        (s: any) =>
-          s.cluster === manualCluster &&
-          s.lorong === parseInt(manualLorong.replace('L', '')) &&
-          s.baris === parseInt(manualBaris.replace('B', '')) &&
-          s.level === parseInt(manualPallet.replace('P', ''))
-      );
-      if (isOccupied) {
-        error("Lokasi tujuan sudah terisi!");
-        return false;
+      // Range mode check
+      if (useRangeMode) {
+        if (manualLocations.length === 0) {
+          error("Generate lokasi dari range terlebih dahulu.");
+          return false;
+        }
+        if (manualLocations.length < totalPalletsNeeded) {
+          error(`Lokasi yang tersedia (${manualLocations.length}) kurang dari yang dibutuhkan (${totalPalletsNeeded}).`);
+          return false;
+        }
+      } else {
+        // Single location mode check
+        if (!manualCluster || !manualLorong || !manualBaris || !manualPallet) {
+          error("Lengkapi lokasi manual.");
+          return false;
+        }
+        // Check if manual location is occupied
+        const isOccupied = initialStocks.some(
+          (s: any) =>
+            s.cluster === manualCluster &&
+            s.lorong === parseInt(manualLorong.replace('L', '')) &&
+            s.baris === parseInt(manualBaris.replace('B', '')) &&
+            s.level === parseInt(manualPallet.replace('P', ''))
+        );
+        if (isOccupied) {
+          error("Lokasi tujuan sudah terisi!");
+          return false;
+        }
       }
     }
     return true;
@@ -466,29 +722,57 @@ export function NplForm({
 
     // 1. Siapkan data penempatan untuk dikirim ke DB
     const placements = (autoRecommend && multiLocationRec) 
-      ? multiLocationRec.locations.map(loc => ({
-          cluster: loc.clusterChar,
-          lorong: parseInt(loc.lorong.replace('L', '')),
-          baris: parseInt(loc.baris.replace('B', '')),
-          level: parseInt(loc.level.replace('P', '')),
-          qtyCarton: loc.qtyCarton,
-          isReceh: loc.isReceh
-        }))
+      ? multiLocationRec.locations.map((loc, idx) => {
+          const placement: any = {
+            cluster: loc.clusterChar,
+            lorong: parseInt(loc.lorong.replace('L', '')),
+            baris: parseInt(loc.baris.replace('B', '')),
+            level: parseInt(loc.level.replace('P', '')),
+            qtyCarton: loc.qtyCarton,
+            isReceh: loc.isReceh
+          };
+          // PENTING: Jika edit mode, preserve original_created_at untuk menjaga urutan FEFO
+          if (isEditMode && originalLocations[idx]?.original_created_at) {
+            placement.original_created_at = originalLocations[idx].original_created_at;
+          }
+          return placement;
+        })
+      : useRangeMode
+      ? manualLocations.slice(0, totalPalletsNeeded).map((loc, idx) => {
+          const isLastLoc = idx === totalPalletsNeeded - 1;
+          const qtyForThisLocation =
+            isLastLoc && shouldAttachReceh
+              ? qtyPerPalletStd + remainingCartons
+              : isLastLoc && remainingCartons > 0 && !shouldAttachReceh
+              ? remainingCartons
+              : qtyPerPalletStd;
+          const placement: any = {
+            cluster: loc.clusterChar,
+            lorong: parseInt(loc.lorong.replace('L', '')),
+            baris: parseInt(loc.baris.replace('B', '')),
+            level: parseInt(loc.pallet.replace('P', '')),
+            qtyCarton: qtyForThisLocation,
+            isReceh: isLastLoc && remainingCartons > 0,
+            ...(isEditMode && originalLocations[0]?.original_created_at && {
+              original_created_at: originalLocations[0].original_created_at
+            })
+          };
+          return placement;
+        })
       : [{
           cluster: manualCluster,
           lorong: parseInt(manualLorong.replace('L', '')),
           baris: parseInt(manualBaris.replace('B', '')),
           level: parseInt(manualPallet.replace('P', '')),
           qtyCarton: totalCartons,
-          isReceh: totalCartons < qtyPerPalletStd
+          isReceh: totalCartons < qtyPerPalletStd,
+          // Preserve untuk manual juga
+          ...(isEditMode && originalLocations[0]?.original_created_at && {
+            original_created_at: originalLocations[0].original_created_at
+          })
         }];
 
-    // 2. Tentukan base status berdasarkan durasi hari (sama seperti Inbound)
-    const now = new Date();
-    const expDate = new Date(expiredDate);
-    const diffDays = Math.ceil((expDate.getTime() - now.getTime()) / (1000 * 3600 * 24));
-    const baseStatus = diffDays > 180 ? "hold" : "release";
-
+    // 2. Siapkan formData (tanpa baseStatus manual - biarkan trigger database menentukan)
     const formData = {
       warehouseId,
       productId: selectedProduct.id,
@@ -497,8 +781,7 @@ export function NplForm({
       expiredDate,
       driverName: namaPengemudi,
       vehicleNumber: nomorPolisi,
-      notes,
-      baseStatus
+      notes
     };
 
     try {
@@ -518,40 +801,92 @@ export function NplForm({
     }
   };
 
-  // Edit NPL (disabled - requires server action implementation)
+  // Edit NPL (Soft Delete - Hapus stok, populate form)
   const handleEditClick = (npl: any) => {
-    error("Fitur edit belum tersedia. Silakan hubungi administrator.");
-    return;
-    // setSelectedNplForAction(npl);
-    // setShowEditConfirmModal(true);
+    setSelectedNplForAction(npl);
+    setShowEditConfirmModal(true);
   };
 
-  const confirmEdit = () => {
+  const confirmEdit = async () => {
     if (!selectedNplForAction) return;
 
-    // TODO: Implement edit with server action
-    error("Fitur edit memerlukan implementasi server action untuk update database.");
-    
     setShowEditConfirmModal(false);
-    setSelectedNplForAction(null);
+    setIsSubmitting(true);
+
+    try {
+      // Import cancelNplAction
+      const { cancelNplAction } = await import("@/app/npl/actions");
+      const result = await cancelNplAction(selectedNplForAction.id);
+
+      if (result.success) {
+        // Populate form dengan data lama
+        const npl = selectedNplForAction;
+        const product = products.find(p => p.id === npl.product_id);
+        
+        if (product) {
+          setProductCode(product.product_code);
+          setProductSearch(product.product_name);
+        }
+        setBbProduk(npl.bb_produk);
+        setNamaPengemudi(npl.driver_name);
+        setNomorPolisi(npl.vehicle_number);
+        setNotes(npl.notes || "");
+        
+        // Set qty dari total carton
+        if (product) {
+          const fullPallets = Math.floor(npl.qty_carton / product.qty_carton_per_pallet);
+          const remaining = npl.qty_carton % product.qty_carton_per_pallet;
+          setQtyPalletInput(fullPallets.toString());
+          setQtyCartonInput(remaining.toString());
+        }
+
+        // PENTING: Simpan original locations untuk preserve created_at
+        setOriginalLocations(npl.locations || []);
+
+        setIsEditMode(true);
+        setEditId(npl.id);
+
+        success("Data NPL dimuat ke form. Silakan edit dan submit ulang.");
+        router.refresh();
+      } else {
+        error(result.message || "Gagal memuat data NPL");
+      }
+    } catch (err) {
+      error("Terjadi kesalahan saat memuat data NPL.");
+    } finally {
+      setIsSubmitting(false);
+      setSelectedNplForAction(null);
+    }
   };
 
-  // Cancel NPL (disabled - requires server action implementation)
+  // Cancel NPL (Hard Delete)
   const handleCancelClick = (npl: any) => {
-    error("Fitur batal belum tersedia. Silakan hubungi administrator.");
-    return;
-    // setSelectedNplForAction(npl);
-    // setShowBatalConfirmModal(true);
+    setSelectedNplForAction(npl);
+    setShowBatalConfirmModal(true);
   };
 
-  const confirmBatal = () => {
+  const confirmBatal = async () => {
     if (!selectedNplForAction) return;
-
-    // TODO: Implement cancel with server action
-    error("Fitur batal memerlukan implementasi server action untuk delete dari database.");
 
     setShowBatalConfirmModal(false);
-    setSelectedNplForAction(null);
+    setIsSubmitting(true);
+
+    try {
+      const { cancelNplAction } = await import("@/app/npl/actions");
+      const result = await cancelNplAction(selectedNplForAction.id);
+
+      if (result.success) {
+        success("Transaksi NPL berhasil dibatalkan.");
+        router.refresh();
+      } else {
+        error(result.message || "Gagal membatalkan NPL");
+      }
+    } catch (err) {
+      error("Terjadi kesalahan saat membatalkan NPL.");
+    } finally {
+      setIsSubmitting(false);
+      setSelectedNplForAction(null);
+    }
   };
 
   // Modal backdrop click handler
@@ -831,79 +1166,347 @@ export function NplForm({
                       )}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-700 mb-1">Cluster</label>
-                        <select
-                          value={manualCluster}
-                          onChange={(e) => {
-                            setManualCluster(e.target.value);
-                            setManualLorong("");
-                            setManualBaris("");
-                            setManualPallet("");
-                          }}
-                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
-                        >
-                          <option value="">Pilih</option>
-                          {clusterOptions.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
+                    <div className="space-y-4">
+                      {/* Toggle Single vs Range */}
+                      <div className="flex gap-4 mb-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            checked={!useRangeMode}
+                            onChange={() => {
+                              setUseRangeMode(false);
+                              resetManualRange();
+                            }}
+                            className="w-4 h-4 text-orange-600"
+                          />
+                          <span className="text-xs font-medium text-gray-700">Single Location</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            checked={useRangeMode}
+                            onChange={() => {
+                              setUseRangeMode(true);
+                              setManualCluster("");
+                              setManualLorong("");
+                              setManualBaris("");
+                              setManualPallet("");
+                            }}
+                            className="w-4 h-4 text-orange-600"
+                          />
+                          <span className="text-xs font-medium text-gray-700">Range Mode</span>
+                        </label>
                       </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-700 mb-1">Lorong</label>
-                        <select
-                          value={manualLorong}
-                          onChange={(e) => {
-                            setManualLorong(e.target.value);
-                            setManualBaris("");
-                            setManualPallet("");
-                          }}
-                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
-                        >
-                          <option value="">Pilih</option>
-                          {lorongOptions.map((l) => (
-                            <option key={l} value={l}>
-                              {l}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-700 mb-1">Baris</label>
-                        <select
-                          value={manualBaris}
-                          onChange={(e) => {
-                            setManualBaris(e.target.value);
-                            setManualPallet("");
-                          }}
-                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
-                        >
-                          <option value="">Pilih</option>
-                          {barisOptions.map((b) => (
-                            <option key={b} value={b}>
-                              {b}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-700 mb-1">Pallet</label>
-                        <select
-                          value={manualPallet}
-                          onChange={(e) => setManualPallet(e.target.value)}
-                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
-                        >
-                          <option value="">Pilih</option>
-                          {palletOptions.map((p) => (
-                            <option key={p} value={p}>
-                              {p}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+
+                      {!useRangeMode ? (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">Cluster</label>
+                            <select
+                              value={manualCluster}
+                              onChange={(e) => {
+                                setManualCluster(e.target.value);
+                                setManualLorong("");
+                                setManualBaris("");
+                                setManualPallet("");
+                              }}
+                              className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                            >
+                              <option value="">Pilih</option>
+                              {clusterOptions.map((c) => (
+                                <option key={c} value={c}>
+                                  {c}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">Lorong</label>
+                            <select
+                              value={manualLorong}
+                              onChange={(e) => {
+                                setManualLorong(e.target.value);
+                                setManualBaris("");
+                                setManualPallet("");
+                              }}
+                              className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                            >
+                              <option value="">Pilih</option>
+                              {lorongOptions.map((l) => (
+                                <option key={l} value={l}>
+                                  {l}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">Baris</label>
+                            <select
+                              value={manualBaris}
+                              onChange={(e) => {
+                                setManualBaris(e.target.value);
+                                setManualPallet("");
+                              }}
+                              className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                            >
+                              <option value="">Pilih</option>
+                              {barisOptions.map((b) => (
+                                <option key={b} value={b}>
+                                  {b}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">Pallet</label>
+                            <select
+                              value={manualPallet}
+                              onChange={(e) => setManualPallet(e.target.value)}
+                              className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                            >
+                              <option value="">Pilih</option>
+                              {palletOptions.map((p) => (
+                                <option key={p} value={p}>
+                                  {p}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {/* Range Input */}
+                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                            <div className="grid grid-cols-3 gap-3 mb-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                  Cluster <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={manualRange.clusterChar}
+                                  onChange={(e) =>
+                                    setManualRange((prev) => ({
+                                      ...prev,
+                                      clusterChar: e.target.value,
+                                      lorong: "",
+                                      barisStart: "",
+                                      barisEnd: "",
+                                      palletStart: "",
+                                      palletEnd: "",
+                                    }))
+                                  }
+                                  className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                                >
+                                  <option value="">-- Pilih --</option>
+                                  {clusterOptions.map((opt) => (
+                                    <option key={opt} value={opt}>
+                                      {opt}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                  Lorong <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={manualRange.lorong}
+                                  onChange={(e) =>
+                                    setManualRange((prev) => ({
+                                      ...prev,
+                                      lorong: e.target.value,
+                                      barisStart: "",
+                                      barisEnd: "",
+                                      palletStart: "",
+                                      palletEnd: "",
+                                    }))
+                                  }
+                                  className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                                  disabled={!manualRange.clusterChar}
+                                >
+                                  <option value="">-- Pilih --</option>
+                                  {manualRangeLorongOptions.map((opt) => (
+                                    <option key={opt} value={opt}>
+                                      {opt}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">&nbsp;</label>
+                                <button
+                                  type="button"
+                                  onClick={resetManualRange}
+                                  className="w-full px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                                >
+                                  🔄 Reset
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Baris Range */}
+                            <div className="grid grid-cols-2 gap-3 mb-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                  Baris Start <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={manualRange.barisStart}
+                                  onChange={(e) =>
+                                    setManualRange((prev) => ({
+                                      ...prev,
+                                      barisStart: e.target.value,
+                                      palletStart: "",
+                                      palletEnd: "",
+                                    }))
+                                  }
+                                  className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                                  disabled={!manualRange.clusterChar || !manualRange.lorong}
+                                >
+                                  <option value="">-- Pilih --</option>
+                                  {manualRangeBarisOptions.map((opt) => (
+                                    <option key={opt} value={opt}>
+                                      {opt}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                  Baris End <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={manualRange.barisEnd}
+                                  onChange={(e) =>
+                                    setManualRange((prev) => ({
+                                      ...prev,
+                                      barisEnd: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                                  disabled={!manualRange.clusterChar || !manualRange.lorong}
+                                >
+                                  <option value="">-- Pilih --</option>
+                                  {manualRangeBarisOptions.map((opt) => (
+                                    <option key={opt} value={opt}>
+                                      {opt}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Pallet Range */}
+                            <div className="grid grid-cols-2 gap-3 mb-4">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                  Pallet Start <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={manualRange.palletStart}
+                                  onChange={(e) =>
+                                    setManualRange((prev) => ({
+                                      ...prev,
+                                      palletStart: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                                  disabled={
+                                    !manualRange.clusterChar ||
+                                    !manualRange.lorong ||
+                                    !manualRange.barisStart
+                                  }
+                                >
+                                  <option value="">-- Pilih --</option>
+                                  {manualRangePalletOptions.map((opt) => (
+                                    <option key={opt} value={opt}>
+                                      {opt}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                  Pallet End <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={manualRange.palletEnd}
+                                  onChange={(e) =>
+                                    setManualRange((prev) => ({
+                                      ...prev,
+                                      palletEnd: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
+                                  disabled={
+                                    !manualRange.clusterChar ||
+                                    !manualRange.lorong ||
+                                    !manualRange.barisStart
+                                  }
+                                >
+                                  <option value="">-- Pilih --</option>
+                                  {manualRangePalletOptions.map((opt) => (
+                                    <option key={opt} value={opt}>
+                                      {opt}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={expandRangeToLocations}
+                              disabled={totalPalletsNeeded === 0}
+                              className="w-full bg-orange-500 text-white py-3 rounded-lg font-semibold hover:bg-orange-600 transition-colors shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed"
+                            >
+                              🔍 Generate & Cek Ketersediaan Lokasi ({totalPalletsNeeded} dibutuhkan)
+                            </button>
+                          </div>
+
+                          {/* Preview Generated Locations */}
+                          {manualLocations.length > 0 && (
+                            <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <h4 className="font-semibold text-green-900">
+                                  ✅ {manualLocations.length} Lokasi Siap Digunakan
+                                </h4>
+                              </div>
+                              <div className="max-h-48 overflow-y-auto space-y-1">
+                                {manualLocations.slice(0, totalPalletsNeeded).map((loc, idx) => {
+                                  const locationKey = `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.pallet}`;
+                                  const isLastLoc = idx === totalPalletsNeeded - 1;
+                                  const qtyForThisLocation =
+                                    isLastLoc && shouldAttachReceh
+                                      ? qtyPerPalletStd + remainingCartons
+                                      : isLastLoc && remainingCartons > 0 && !shouldAttachReceh
+                                      ? remainingCartons
+                                      : qtyPerPalletStd;
+                                  const isRecehLoc = isLastLoc && remainingCartons > 0;
+
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`flex items-center justify-between p-2 rounded-lg text-sm ${
+                                        isRecehLoc ? "bg-blue-100 border border-blue-300" : "bg-white border border-green-200"
+                                      }`}
+                                    >
+                                      <span className="font-semibold">
+                                        #{idx + 1}: {locationKey}
+                                      </span>
+                                      <span className="text-xs font-semibold">
+                                        {qtyForThisLocation} karton {isRecehLoc && "🔵 Receh"}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

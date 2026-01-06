@@ -62,9 +62,25 @@ interface ProductHome {
 }
 
 interface ClusterConfig {
-  clusterChar: string;
-  defaultLorongCount: number;
-  isActive: boolean;
+  id: string;
+  cluster_char: string;
+  default_lorong_count: number;
+  is_active: boolean;
+  warehouse_id: string;
+}
+
+interface ClusterOverride {
+  id: string;
+  cluster_config_id: string;
+  lorong_start: number;
+  lorong_end: number;
+  baris_start: number | null;
+  baris_end: number | null;
+  custom_baris_count: number | null;
+  custom_pallet_level: number | null;
+  is_transit_area: boolean;
+  is_disabled: boolean;
+  note: string | null;
 }
 
 interface InboundHistory {
@@ -101,7 +117,8 @@ interface InboundFormProps {
   productHomes: ProductHome[];
   warehouseId: string;
   clusterConfigs: ClusterConfig[];
-  todayInboundHistory: InboundHistory[]; // Tambahkan baris ini
+  clusterOverrides: ClusterOverride[];
+  todayInboundHistory: InboundHistory[];
   users: User[];
 }
 
@@ -239,6 +256,7 @@ export function InboundForm({
   productHomes,
   warehouseId,
   clusterConfigs,
+  clusterOverrides,
   todayInboundHistory,
   users,
 }: InboundFormProps) {
@@ -251,14 +269,32 @@ export function InboundForm({
   };
 
   const getClusterConfig = (clusterChar: string) => {
-    return clusterConfigs.find((c) => c.clusterChar === clusterChar);
+    return clusterConfigs.find((c) => c.cluster_char === clusterChar);
   };
 
   const getBarisCountForLorong = (
     clusterChar: string,
     lorongNum: number
   ): number => {
-    // Default 9 baris per lorong (bisa disesuaikan dengan config dari database jika ada)
+    // Cari cluster config untuk mendapatkan cluster_config_id
+    const config = getClusterConfig(clusterChar);
+    if (!config) return 9; // Default fallback
+
+    // Cari override untuk lorong ini
+    const override = clusterOverrides.find(
+      (o) =>
+        o.cluster_config_id === config.id &&
+        lorongNum >= o.lorong_start &&
+        lorongNum <= o.lorong_end &&
+        !o.is_disabled
+    );
+
+    // Jika ada override dengan custom_baris_count, gunakan itu
+    if (override && override.custom_baris_count !== null) {
+      return override.custom_baris_count;
+    }
+
+    // Default 9 baris per lorong
     return 9;
   };
 
@@ -267,7 +303,25 @@ export function InboundForm({
     lorongNum: number,
     barisNum: number
   ): number => {
-    // Default 3 pallet per cell (bisa disesuaikan dengan config dari database jika ada)
+    // Cari cluster config untuk mendapatkan cluster_config_id
+    const config = getClusterConfig(clusterChar);
+    if (!config) return 3; // Default fallback
+
+    // Cari override untuk lorong ini
+    const override = clusterOverrides.find(
+      (o) =>
+        o.cluster_config_id === config.id &&
+        lorongNum >= o.lorong_start &&
+        lorongNum <= o.lorong_end &&
+        !o.is_disabled
+    );
+
+    // Jika ada override dengan custom_pallet_level, gunakan itu
+    if (override && override.custom_pallet_level !== null) {
+      return override.custom_pallet_level;
+    }
+
+    // Default 3 pallet per cell
     return 3;
   };
 
@@ -409,7 +463,8 @@ export function InboundForm({
 
         setTimeout(() => {
           setShowSuccess(false);
-          setForm(initialState);
+          // JANGAN RESET FORM - Biarkan data tetap untuk memudahkan input berikutnya
+          // Hanya reset state yang berkaitan dengan submission
           setMultiLocationRec(null);
           setRecommendedLocation(null);
           setFinalSubmissionData(null);
@@ -504,6 +559,61 @@ export function InboundForm({
       if (savedPoliceNos) setPoliceNoHistory(JSON.parse(savedPoliceNos));
     }
   }, []);
+
+  // Handle Edit Mode - Load data from localStorage when in edit mode
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const mode = urlParams.get('mode');
+      
+      if (mode === 'edit') {
+        const editDataStr = localStorage.getItem('inbound_edit_data');
+        if (editDataStr) {
+          try {
+            const editData: InboundHistory = JSON.parse(editDataStr);
+            const product = products.find(p => p.id === editData.productId);
+            
+            if (product && editData) {
+              // Populate form dengan data yang akan diedit
+              setForm({
+                ekspedisi: editData.expeditionId,
+                tanggal: editData.arrivalTime.split('T')[0] || today,
+                namaPengemudi: editData.driverName,
+                noDN: editData.dnNumber,
+                nomorPolisi: editData.vehicleNumber,
+                productCode: product.product_code,
+                bbProduk: editData.bbProduk,
+                kdPlant: editData.bbProduk.substring(6, 10),
+                expiredDate: editData.expiredDate,
+                qtyPalletInput: "", // Will be calculated from locations
+                qtyCartonInput: "", // Will be calculated from locations
+                bbReceh: [],
+                clusterChar: editData.locations[0]?.cluster || "",
+                lorong: editData.locations[0]?.lorong.toString() || "",
+                baris: editData.locations[0]?.baris.toString() || "",
+                pallet: editData.locations[0]?.level.toString() || "",
+              });
+
+              // Show notification that form is in edit mode
+              showNotification(
+                "Mode Edit",
+                `Data transaksi ${editData.transactionCode} berhasil dimuat. Silakan ubah data yang diperlukan kemudian submit.`,
+                "warning"
+              );
+
+              // Clear localStorage setelah dimuat
+              localStorage.removeItem('inbound_edit_data');
+              
+              // Change URL to remove edit mode parameter
+              window.history.replaceState({}, '', '/inbound');
+            }
+          } catch (error) {
+            console.error('Error loading edit data:', error);
+          }
+        }
+      }
+    }
+  }, [products]);
 
   // Products sudah di-filter di server component, langsung pakai dari props
   const filteredProducts = products;
@@ -612,44 +722,72 @@ export function InboundForm({
     ? getValidLocationsForProduct(form.productCode)
     : null;
 
-  // Cluster options - ambil dari clusterConfigs yang aktif (dari props)
+  // ========== DROPDOWN DINAMIS BERDASARKAN DATA AKTUAL DATABASE ==========
+  
+  // 1. CLUSTER OPTIONS - Dari cluster_configs yang aktif (untuk INBOUND, tampilkan semua yang aktif)
   const clusterOptions = useMemo(() => {
     if (!clusterConfigs || clusterConfigs.length === 0) return [];
-    return clusterConfigs.filter((c) => c.isActive).map((c) => c.clusterChar);
+    
+    // Langsung ambil semua cluster yang statusnya is_active dari database config
+    // Tidak perlu filter berdasarkan data yang sudah ada, karena Inbound bisa ke cluster kosong
+    return clusterConfigs
+      .filter((c) => c.is_active)
+      .map((c) => c.cluster_char)
+      .sort((a, b) => a.localeCompare(b)); // Sort alphabetically
   }, [clusterConfigs]);
 
-  // Generate dynamic lorong options
+  // 2. LORONG OPTIONS - Dari data aktual stock_list + product_homes untuk cluster tertentu
   const lorongOptions = useMemo(() => {
-    if (!form.clusterChar) {
-      const config = getClusterConfig(form.clusterChar || _autoCluster);
-      if (!config) return Array.from({ length: 11 }, (_, i) => `L${i + 1}`);
-      return Array.from(
-        { length: config.defaultLorongCount },
-        (_, i) => `L${i + 1}`
-      );
-    }
-    const config = getClusterConfig(form.clusterChar);
+    const targetCluster = form.clusterChar || _autoCluster;
+    if (!targetCluster) return [];
+
+    const config = getClusterConfig(targetCluster);
     if (!config) return [];
 
-    // MANUAL MODE: User bebas pilih semua lorong tanpa batasan product home
+    // MANUAL MODE: Ambil lorong yang benar-benar ada datanya
     if (!autoRecommend) {
-      return Array.from(
-        { length: config.defaultLorongCount },
-        (_, i) => `L${i + 1}`
-      );
+      const lorongSet = new Set<number>();
+      
+      // Dari stock_list
+      currentStock
+        .filter((stock) => stock.cluster === targetCluster)
+        .forEach((stock) => lorongSet.add(stock.lorong));
+      
+      // Dari product_homes
+      productHomes
+        .filter((home) => home.cluster === targetCluster)
+        .forEach((home) => {
+          // Tambahkan semua lorong dalam range
+          for (let l = home.lorong_start; l <= home.lorong_end; l++) {
+            lorongSet.add(l);
+          }
+        });
+      
+      // Jika tidak ada data, fallback ke config
+      if (lorongSet.size === 0) {
+        return Array.from(
+          { length: config.default_lorong_count },
+          (_, i) => `L${i + 1}`
+        );
+      }
+      
+      // Return lorong yang sudah sorted
+      return Array.from(lorongSet)
+        .sort((a, b) => a - b)
+        .map((l) => `L${l}`);
     }
 
     // AUTO MODE: If product has home assignment, limit to allowed lorong range
     if (
       productValidLocations &&
-      productValidLocations.clusterChar === form.clusterChar
+      productValidLocations.clusterChar === targetCluster
     ) {
       const [start, end] = productValidLocations.lorongRange;
       return Array.from({ length: end - start + 1 }, (_, i) => `L${start + i}`);
     }
 
     return Array.from(
-      { length: config.defaultLorongCount },
+      { length: config.default_lorong_count },
       (_, i) => `L${i + 1}`
     );
   }, [
@@ -658,24 +796,60 @@ export function InboundForm({
     productValidLocations,
     _autoCluster,
     autoRecommend,
+    currentStock,
+    productHomes,
   ]);
 
-  // Generate dynamic baris options
+  // 3. BARIS OPTIONS - Dari data aktual stock_list + product_homes untuk cluster + lorong tertentu
   const barisOptions = useMemo(() => {
-    if (!form.clusterChar || !form.lorong)
-      return Array.from({ length: 9 }, (_, i) => `B${i + 1}`);
+    const targetCluster = form.clusterChar || _autoCluster;
+    if (!targetCluster || !form.lorong) return [];
+    
     const lorongNum = parseInt(form.lorong.replace("L", ""));
-    const barisCount = getBarisCountForLorong(form.clusterChar, lorongNum);
+    const barisCount = getBarisCountForLorong(targetCluster, lorongNum);
 
-    // MANUAL MODE: User bebas pilih semua baris tanpa batasan product home
+    // MANUAL MODE: Ambil baris yang benar-benar ada datanya
     if (!autoRecommend) {
-      return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+      const barisSet = new Set<number>();
+      
+      // Dari stock_list
+      currentStock
+        .filter(
+          (stock) =>
+            stock.cluster === targetCluster && stock.lorong === lorongNum
+        )
+        .forEach((stock) => barisSet.add(stock.baris));
+      
+      // Dari product_homes (ambil baris dalam range untuk lorong ini)
+      productHomes
+        .filter(
+          (home) =>
+            home.cluster === targetCluster &&
+            lorongNum >= home.lorong_start &&
+            lorongNum <= home.lorong_end
+        )
+        .forEach((home) => {
+          // Tambahkan semua baris dalam range
+          for (let b = home.baris_start; b <= home.baris_end; b++) {
+            barisSet.add(b);
+          }
+        });
+      
+      // Jika tidak ada data, fallback ke default count
+      if (barisSet.size === 0) {
+        return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+      }
+      
+      // Return baris yang sudah sorted
+      return Array.from(barisSet)
+        .sort((a, b) => a - b)
+        .map((b) => `B${b}`);
     }
 
     // AUTO MODE: If product has home assignment, limit to allowed baris range
     if (
       productValidLocations &&
-      productValidLocations.clusterChar === form.clusterChar
+      productValidLocations.clusterChar === targetCluster
     ) {
       const [start, end] = productValidLocations.barisRange;
       const maxBaris = Math.min(end, barisCount);
@@ -691,24 +865,48 @@ export function InboundForm({
     form.lorong,
     form.productCode,
     productValidLocations,
+    _autoCluster,
     autoRecommend,
+    currentStock,
+    productHomes,
   ]);
 
-  // Generate dynamic pallet options
+  // 4. PALLET OPTIONS - Dari data aktual stock_list untuk cluster + lorong + baris tertentu
   const palletOptions = useMemo(() => {
-    if (!form.clusterChar || !form.lorong || !form.baris)
-      return Array.from({ length: 3 }, (_, i) => `P${i + 1}`);
+    const targetCluster = form.clusterChar || _autoCluster;
+    if (!targetCluster || !form.lorong || !form.baris) return [];
+    
     const lorongNum = parseInt(form.lorong.replace("L", ""));
     const barisNum = parseInt(form.baris.replace("B", ""));
     const palletCapacity = getPalletCapacityForCell(
-      form.clusterChar,
+      targetCluster,
       lorongNum,
       barisNum
     );
 
-    // MANUAL MODE: User bebas pilih semua pallet level tanpa batasan product max pallet
+    // MANUAL MODE: Ambil level pallet yang benar-benar ada datanya
     if (!autoRecommend) {
-      return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+      const palletSet = new Set<number>();
+      
+      // Dari stock_list
+      currentStock
+        .filter(
+          (stock) =>
+            stock.cluster === targetCluster &&
+            stock.lorong === lorongNum &&
+            stock.baris === barisNum
+        )
+        .forEach((stock) => palletSet.add(stock.level));
+      
+      // Jika tidak ada data, return semua level dari capacity
+      if (palletSet.size === 0) {
+        return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+      }
+      
+      // Return level yang sudah sorted
+      return Array.from(palletSet)
+        .sort((a, b) => a - b)
+        .map((p) => `P${p}`);
     }
 
     // AUTO MODE: If product has max pallet limit, use minimum
@@ -723,8 +921,80 @@ export function InboundForm({
     form.baris,
     form.productCode,
     productValidLocations,
+    _autoCluster,
     autoRecommend,
+    currentStock,
   ]);
+  // ========== AKHIR DROPDOWN DINAMIS ==========
+
+  // ========== DROPDOWN DINAMIS UNTUK MANUAL RANGE INPUT ==========
+  
+  // Manual Range: Lorong Options
+  const manualRangeLorongOptions = useMemo(() => {
+    if (!manualRange.clusterChar) return [];
+
+    // MANUAL MODE: Tampilkan SEMUA lorong dari config cluster (tidak peduli kosong atau penuh)
+    const config = getClusterConfig(manualRange.clusterChar);
+    if (!config) return [];
+    
+    // Generate semua lorong dari 1 sampai default_lorong_count
+    return Array.from(
+      { length: config.default_lorong_count },
+      (_, i) => `L${i + 1}`
+    );
+  }, [manualRange.clusterChar, clusterConfigs]);
+
+  // Manual Range: Baris Options
+  const manualRangeBarisOptions = useMemo(() => {
+    if (!manualRange.clusterChar || !manualRange.lorong) return [];
+    
+    // MANUAL MODE: Tampilkan SEMUA baris dari config (tidak peduli kosong atau penuh)
+    const lorongNum = parseInt(manualRange.lorong.replace("L", ""));
+    const barisCount = getBarisCountForLorong(
+      manualRange.clusterChar,
+      lorongNum
+    );
+    
+    // Generate semua baris dari 1 sampai barisCount (default 9)
+    return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+  }, [manualRange.clusterChar, manualRange.lorong]);
+
+  // Manual Range: Pallet Options
+  const manualRangePalletOptions = useMemo(() => {
+    if (
+      !manualRange.clusterChar ||
+      !manualRange.lorong ||
+      (!manualRange.barisStart && !manualRange.barisEnd)
+    )
+      return [];
+
+    // MANUAL MODE: Tampilkan SEMUA pallet dari config (tidak peduli kosong atau penuh)
+    const lorongNum = parseInt(manualRange.lorong.replace("L", ""));
+    
+    // Ambil range baris untuk menentukan max pallet
+    // Gunakan barisStart jika ada, atau barisEnd
+    const barisNumSample = manualRange.barisStart
+      ? parseInt(manualRange.barisStart.replace("B", ""))
+      : manualRange.barisEnd
+      ? parseInt(manualRange.barisEnd.replace("B", ""))
+      : 1;
+
+    const palletCapacity = getPalletCapacityForCell(
+      manualRange.clusterChar,
+      lorongNum,
+      barisNumSample
+    );
+
+    // Generate semua pallet dari 1 sampai palletCapacity (default 3)
+    return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+  }, [
+    manualRange.clusterChar,
+    manualRange.lorong,
+    manualRange.barisStart,
+    manualRange.barisEnd,
+  ]);
+  
+  // ========== AKHIR DROPDOWN MANUAL RANGE ==========
 
   const findMultipleRecommendedLocations = (
     clusterChar: string,
@@ -756,7 +1026,7 @@ export function InboundForm({
     const lorongEnd =
       validLocs && validLocs.clusterChar === clusterChar
         ? validLocs.lorongRange[1]
-        : clusterConfig.defaultLorongCount;
+        : clusterConfig.default_lorong_count;
 
     for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
       if (remainingPallets === 0) break;
@@ -1037,9 +1307,7 @@ export function InboundForm({
 
       if (result.success && result.locations) {
         // DEBUG: Log hasil rekomendasi
-        console.log("=== SMART RECOMMENDATION RESULT ===");
-        console.log("Total locations found:", result.locations.length);
-        console.log("First location:", result.locations[0]);
+
 
         // 1. Update State UI
         setMultiLocationRec({
@@ -1052,7 +1320,7 @@ export function InboundForm({
         if (firstLoc) {
           // Pastikan mengambil 'clusterChar' dari server
           const clusterValue = firstLoc.clusterChar;
-          console.log("Setting form.clusterChar to:", clusterValue);
+
 
           setForm((prev) => ({
             ...prev,
@@ -1155,14 +1423,16 @@ export function InboundForm({
     const barisEndNum = parseInt(barisEnd.replace(/[^0-9]/g, ""));
     const palletStartNum = parseInt(palletStart.replace(/[^0-9]/g, ""));
     const palletEndNum = parseInt(palletEnd.replace(/[^0-9]/g, ""));
+    const lorongNum = parseInt(lorong.replace("L", ""));
 
     if (
       isNaN(barisStartNum) ||
       isNaN(barisEndNum) ||
       isNaN(palletStartNum) ||
-      isNaN(palletEndNum)
+      isNaN(palletEndNum) ||
+      isNaN(lorongNum)
     ) {
-      error("Format baris/pallet tidak valid! Contoh: B1, P1");
+      error("Format lorong/baris/pallet tidak valid! Contoh: L1, B1, P1");
       return;
     }
 
@@ -1184,17 +1454,27 @@ export function InboundForm({
       }
     }
 
+
+
     // SMART FILTER: Filter hanya lokasi yang KOSONG
     const availableLocations = allLocations.filter((loc) => {
+      const lorongNumCheck = parseInt(loc.lorong.replace("L", ""));
+      const barisNumCheck = parseInt(loc.baris.replace("B", ""));
+      const palletNumCheck = parseInt(loc.pallet.replace("P", ""));
+      
       const existingStock = currentStock.find(
         (s) =>
-          s.warehouse_id === warehouseId &&
           s.cluster === loc.clusterChar &&
-          s.lorong === parseInt(loc.lorong.replace("L", "")) &&
-          s.baris === parseInt(loc.baris.replace("B", "")) &&
-          s.level === parseInt(loc.pallet.replace("P", ""))
+          s.lorong === lorongNumCheck &&
+          s.baris === barisNumCheck &&
+          s.level === palletNumCheck
       );
-      return !existingStock; // Hanya ambil yang kosong
+      
+      const isEmpty = !existingStock;
+      if (!isEmpty) {
+
+      }
+      return isEmpty; // Hanya ambil yang kosong
     });
 
     // Count occupied locations for info
@@ -1245,6 +1525,15 @@ export function InboundForm({
     setExpandedLocations(locationsToUse);
     setLocationAvailability([]);
     setOccupiedLocations([]);
+    
+    // IMPORTANT: Update form.clusterChar untuk pass validasi cluster
+    setForm((prev) => ({
+      ...prev,
+      clusterChar: clusterChar,
+      lorong: lorong,
+      baris: locationsToUse[0]?.baris || "",
+      pallet: locationsToUse[0]?.pallet || "",
+    }));
   };
 
   // Check if locations are available (legacy function, now simplified)
@@ -1359,12 +1648,67 @@ export function InboundForm({
     setShowEditConfirmModal(true);
   };
 
-  const confirmEdit = () => {
+  const confirmEdit = async () => {
     if (!selectedItemForAction) return;
 
-    // Edit: Load data ke form untuk di-edit
-    warning("Fitur Edit akan membuka form dengan data transaksi ini");
-    // TODO: Implementasi load data ke form state
+    try {
+      // 1. Soft delete - Batalkan transaksi lama (hapus dari stock dan database)
+      const result = await cancelInboundAction(selectedItemForAction.id);
+
+      if (result.success) {
+        // 2. Populate form dengan data dari transaksi yang dibatalkan
+        const item = selectedItemForAction;
+        const product = products.find(p => p.id === item.productId);
+        
+        if (product) {
+          // Total qty dari semua lokasi
+          const totalQtyCarton = item.locations.reduce((sum, loc) => sum + loc.qtyCarton, 0);
+          const qtyPerPalletStd = product.qty_carton_per_pallet || 1;
+          const fullPallets = Math.floor(totalQtyCarton / qtyPerPalletStd);
+          const remainingCartons = totalQtyCarton % qtyPerPalletStd;
+
+          // Set form dengan data lama
+          setForm({
+            ekspedisi: item.expeditionId,
+            tanggal: item.arrivalTime.split('T')[0] || today,
+            namaPengemudi: item.driverName,
+            noDN: item.dnNumber,
+            nomorPolisi: item.vehicleNumber,
+            productCode: product.product_code,
+            bbProduk: item.bbProduk,
+            kdPlant: item.bbProduk.substring(6, 10),
+            expiredDate: item.expiredDate,
+            qtyPalletInput: fullPallets > 0 ? fullPallets.toString() : "",
+            qtyCartonInput: remainingCartons > 0 ? remainingCartons.toString() : "",
+            bbReceh: [],
+            clusterChar: item.locations[0]?.cluster || "",
+            lorong: item.locations[0]?.lorong ? `L${item.locations[0].lorong}` : "",
+            baris: item.locations[0]?.baris ? `B${item.locations[0].baris}` : "",
+            pallet: item.locations[0]?.level ? `P${item.locations[0].level}` : "",
+          });
+
+          // Reset recommendations dan manual locations
+          setRecommendedLocation(null);
+          setMultiLocationRec(null);
+          setManualLocations([]);
+
+          // Refresh untuk update list
+          router.refresh();
+
+          // Tampilkan notifikasi
+          showNotification(
+            "Mode Edit Aktif",
+            `Transaksi ${item.transactionCode} berhasil dibatalkan. Data sudah dimuat ke form. Silakan ubah dan submit ulang.`,
+            "warning"
+          );
+        }
+      } else {
+        error(result.message || "Gagal membatalkan transaksi untuk edit");
+      }
+    } catch (err: any) {
+      error(err?.message || "Terjadi kesalahan saat memproses edit");
+    }
+
     setShowEditConfirmModal(false);
     setSelectedItemForAction(null);
   };
@@ -1400,11 +1744,7 @@ export function InboundForm({
     e.preventDefault();
 
     // DEBUG: Log state saat submit
-    console.log("=== HANDLE SUBMIT DEBUG ===");
-    console.log("form.clusterChar:", form.clusterChar);
-    console.log("autoRecommend:", autoRecommend);
-    console.log("multiLocationRec:", multiLocationRec);
-    console.log("totalPalletsNeeded:", totalPalletsNeeded);
+
 
     const newErrors: Record<string, string> = {};
     const errorList: string[] = [];
@@ -1459,11 +1799,8 @@ export function InboundForm({
     console.log("Cluster validation - form.clusterChar:", form.clusterChar);
 
     if (!form.clusterChar && !skipClusterValidation) {
-      console.log("❌ Cluster validation FAILED");
       newErrors.clusterChar = "Cluster harus diisi";
       errorList.push("Cluster harus diisi");
-    } else {
-      console.log("✅ Cluster validation PASSED");
     }
 
     // --- VALIDASI LOKASI FINAL SEBELUM SUBMISSION ---
@@ -1648,7 +1985,7 @@ export function InboundForm({
     });
 
     setFinalSubmissionData(finalSubmissions);
-    console.log("FINAL INBOUND BATCH SUBMISSION:", finalSubmissions);
+
 
     // Show confirmation modal first
     setShowConfirmModal(true);
@@ -2817,16 +3154,23 @@ export function InboundForm({
                               setManualRange((prev) => ({
                                 ...prev,
                                 clusterChar: e.target.value,
+                                lorong: "", // Reset cascade
+                                barisStart: "",
+                                barisEnd: "",
+                                palletStart: "",
+                                palletEnd: "",
                               }))
                             }
                             className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
                           >
                             <option value="">-- Pilih --</option>
-                            {clusterOptions.map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
+                            {clusterConfigs
+                              .filter((c) => c.is_active)
+                              .map((c) => (
+                                <option key={c.cluster_char} value={c.cluster_char}>
+                                  {c.cluster_char}
+                                </option>
+                              ))}
                           </select>
                         </div>
 
@@ -2840,28 +3184,21 @@ export function InboundForm({
                               setManualRange((prev) => ({
                                 ...prev,
                                 lorong: e.target.value,
+                                barisStart: "", // Reset cascade
+                                barisEnd: "",
+                                palletStart: "",
+                                palletEnd: "",
                               }))
                             }
                             className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
                             disabled={!manualRange.clusterChar}
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.clusterChar &&
-                              (() => {
-                                const config = getClusterConfig(
-                                  manualRange.clusterChar
-                                );
-                                if (!config) return null;
-                                const options = Array.from(
-                                  { length: config.defaultLorongCount },
-                                  (_, i) => `L${i + 1}`
-                                );
-                                return options.map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {opt}
-                                  </option>
-                                ));
-                              })()}
+                            {manualRangeLorongOptions.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
                           </select>
                         </div>
 
@@ -2891,6 +3228,8 @@ export function InboundForm({
                               setManualRange((prev) => ({
                                 ...prev,
                                 barisStart: e.target.value,
+                                palletStart: "", // Reset cascade
+                                palletEnd: "",
                               }))
                             }
                             className="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-100 focus:border-orange-500 transition-all"
@@ -2899,26 +3238,11 @@ export function InboundForm({
                             }
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.clusterChar &&
-                              manualRange.lorong &&
-                              (() => {
-                                const lorongNum = parseInt(
-                                  manualRange.lorong.replace("L", "")
-                                );
-                                const barisCount = getBarisCountForLorong(
-                                  manualRange.clusterChar,
-                                  lorongNum
-                                );
-                                const options = Array.from(
-                                  { length: barisCount },
-                                  (_, i) => `B${i + 1}`
-                                );
-                                return options.map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {opt}
-                                  </option>
-                                ));
-                              })()}
+                            {manualRangeBarisOptions.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div>
@@ -2939,26 +3263,11 @@ export function InboundForm({
                             }
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.clusterChar &&
-                              manualRange.lorong &&
-                              (() => {
-                                const lorongNum = parseInt(
-                                  manualRange.lorong.replace("L", "")
-                                );
-                                const barisCount = getBarisCountForLorong(
-                                  manualRange.clusterChar,
-                                  lorongNum
-                                );
-                                const options = Array.from(
-                                  { length: barisCount },
-                                  (_, i) => `B${i + 1}`
-                                );
-                                return options.map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {opt}
-                                  </option>
-                                ));
-                              })()}
+                            {manualRangeBarisOptions.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
                           </select>
                         </div>
                       </div>
@@ -2985,31 +3294,11 @@ export function InboundForm({
                             }
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.clusterChar &&
-                              manualRange.lorong &&
-                              manualRange.barisStart &&
-                              (() => {
-                                const lorongNum = parseInt(
-                                  manualRange.lorong.replace("L", "")
-                                );
-                                const barisNum = parseInt(
-                                  manualRange.barisStart.replace("B", "")
-                                );
-                                const palletCapacity = getPalletCapacityForCell(
-                                  manualRange.clusterChar,
-                                  lorongNum,
-                                  barisNum
-                                );
-                                const options = Array.from(
-                                  { length: palletCapacity },
-                                  (_, i) => `P${i + 1}`
-                                );
-                                return options.map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {opt}
-                                  </option>
-                                ));
-                              })()}
+                            {manualRangePalletOptions.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div>
@@ -3032,31 +3321,11 @@ export function InboundForm({
                             }
                           >
                             <option value="">-- Pilih --</option>
-                            {manualRange.clusterChar &&
-                              manualRange.lorong &&
-                              manualRange.barisStart &&
-                              (() => {
-                                const lorongNum = parseInt(
-                                  manualRange.lorong.replace("L", "")
-                                );
-                                const barisNum = parseInt(
-                                  manualRange.barisStart.replace("B", "")
-                                );
-                                const palletCapacity = getPalletCapacityForCell(
-                                  manualRange.clusterChar,
-                                  lorongNum,
-                                  barisNum
-                                );
-                                const options = Array.from(
-                                  { length: palletCapacity },
-                                  (_, i) => `P${i + 1}`
-                                );
-                                return options.map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {opt}
-                                  </option>
-                                ));
-                              })()}
+                            {manualRangePalletOptions.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
                           </select>
                         </div>
                       </div>
@@ -3743,15 +4012,18 @@ export function InboundForm({
                 <div className="p-6">
                   <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mb-4">
                     <p className="text-amber-800 font-medium text-sm">
-                      ⚠️ Tindakan ini akan:
+                      ⚠️ Proses Edit (Soft Delete):
                     </p>
                     <ul className="text-amber-700 text-sm mt-2 space-y-1 list-disc list-inside">
                       <li>
-                        Membatalkan transaksi{" "}
+                        Batalkan transaksi{" "}
                         <strong>{selectedItemForAction.transactionCode}</strong>
                       </li>
-                      <li>Menghapus stock dari lokasi yang tercatat</li>
-                      <li>Memuat data ke form untuk di-edit ulang</li>
+                      <li>Hapus stock dari semua lokasi yang tercatat</li>
+                      <li>Hapus record dari database & history</li>
+                      <li className="text-amber-900 font-semibold">
+                        ✓ Data otomatis dimuat ke form untuk diedit dan submit ulang
+                      </li>
                     </ul>
                   </div>
                   <div className="bg-gray-50 rounded-xl p-4 mb-4">

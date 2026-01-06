@@ -24,7 +24,9 @@ export default async function WarehouseLayoutPage() {
     supabase
       .from("stock_list")
       .select("*, products(id, product_code, product_name, default_cluster)")
-      .eq("warehouse_id", profile.warehouse_id),
+      .eq("warehouse_id", profile.warehouse_id)
+      .order("fefo_status", { ascending: false }) // Release first
+      .order("bb_produk", { ascending: true }), // Then by BB Produk
     supabase
       .from("cluster_configs")
       .select("*")

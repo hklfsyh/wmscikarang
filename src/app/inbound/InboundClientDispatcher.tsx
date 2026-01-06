@@ -4,7 +4,7 @@ import { InboundForm } from "@/components/inbound-form";
 import { InboundHistoryPage } from "@/components/inbound-history";
 
 export default function InboundClientDispatcher({ 
-  profile, expeditions, products, currentStock, productHomes, warehouseId, clusterConfigs, historyData, users
+  profile, expeditions, products, currentStock, productHomes, warehouseId, clusterConfigs, clusterOverrides, historyData, users
 }: any) {
   
   if (profile.role === "admin_cabang") {
@@ -28,6 +28,7 @@ export default function InboundClientDispatcher({
       productHomes={productHomes}
       warehouseId={warehouseId}
       clusterConfigs={clusterConfigs}
+      clusterOverrides={clusterOverrides}
       todayInboundHistory={historyData}
       users={users}
     />

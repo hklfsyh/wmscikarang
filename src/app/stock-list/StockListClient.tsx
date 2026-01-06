@@ -19,6 +19,7 @@ interface StockItem {
   expiredDate: string;
   inboundDate: string;
   status: string;
+  fefoStatus: string; // TAMBAHAN: 'release' atau 'hold' dari trigger database
   isReceh: boolean;
   parentStockId?: string | null;
   productInfo?: {
@@ -53,6 +54,7 @@ export default function StockListClient({
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCluster, setFilterCluster] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterFefoStatus, setFilterFefoStatus] = useState("all");
   const [filterProduct, setFilterProduct] = useState("all");
   const [sortBy, setSortBy] = useState<"expiredDate" | "inboundDate" | "productName">("expiredDate");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
@@ -93,9 +95,28 @@ export default function StockListClient({
       filtered = filtered.filter((item) => item.cluster === filterCluster);
     }
 
-    // Filter Status
+    // Filter Status Kondisi (Fisik)
     if (filterStatus !== "all") {
-      filtered = filtered.filter((item) => item.status === filterStatus);
+      filtered = filtered.filter((item) => {
+        if (filterStatus === "receh") {
+          return item.status === "receh" || item.isReceh;
+        }
+        if (filterStatus === "salah-cluster") {
+          return item.status === "salah-cluster";
+        }
+        if (filterStatus === "expired") {
+          return item.status === "expired";
+        }
+        if (filterStatus === "normal") {
+          return item.status !== "receh" && !item.isReceh && item.status !== "salah-cluster" && item.status !== "expired";
+        }
+        return true;
+      });
+    }
+
+    // Filter FEFO Status
+    if (filterFefoStatus !== "all") {
+      filtered = filtered.filter((item) => item.fefoStatus === filterFefoStatus);
     }
 
     // Filter Product
@@ -117,12 +138,12 @@ export default function StockListClient({
     });
 
     return filtered;
-  }, [initialStock, searchTerm, filterCluster, filterStatus, filterProduct, sortBy, sortOrder]);
+  }, [initialStock, searchTerm, filterCluster, filterStatus, filterFefoStatus, filterProduct, sortBy, sortOrder]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterCluster, filterStatus, filterProduct]);
+  }, [searchTerm, filterCluster, filterStatus, filterFefoStatus, filterProduct]);
 
   // Pagination
   const totalPages = Math.ceil(filteredAndSortedData.length / itemsPerPage);
@@ -140,9 +161,9 @@ export default function StockListClient({
     const data = filteredAndSortedData;
     const totalItems = data.length;
     const totalExpired = data.filter((item) => item.status === "expired").length;
-    const totalHold = data.filter((item) => item.status === "hold").length;
-    const totalRelease = data.filter((item) => item.status === "release").length;
-    const totalReceh = data.filter((item) => item.status === "receh").length;
+    const totalHold = data.filter((item) => item.fefoStatus === "hold").length;
+    const totalRelease = data.filter((item) => item.fefoStatus === "release").length;
+    const totalReceh = data.filter((item) => item.status === "receh" || item.isReceh).length;
     const totalSalahCluster = data.filter((item) => item.status === "salah-cluster").length;
     const totalQtyCarton = data.reduce((sum, item) => sum + item.qtyCarton, 0);
 
@@ -157,25 +178,105 @@ export default function StockListClient({
     return { totalItems, totalExpired, totalHold, totalRelease, totalReceh, totalSalahCluster, totalQtyCarton, expiringSoon };
   }, [filteredAndSortedData]);
 
-  // Status Badge
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      "expired": "bg-red-600 text-white",
-      "hold": "bg-yellow-100 text-yellow-700",
-      "release": "bg-green-100 text-green-700",
-      "receh": "bg-purple-100 text-purple-700",
-      "salah-cluster": "bg-red-100 text-red-700",
-    };
-    const labels: Record<string, string> = {
-      "expired": "Expired",
-      "hold": "Hold",
-      "release": "Release",
-      "receh": "Receh",
-      "salah-cluster": "Salah Cluster",
-    };
+  // Status Badge - PRIORITAS: salah-cluster > receh > release/hold
+  const getStatusBadge = (item: StockItem) => {
+    // Priority 1: Salah Cluster
+    if (item.status === 'salah-cluster') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap bg-red-100 text-red-600">
+          SALAH CLUSTER
+        </span>
+      );
+    }
+    
+    // Priority 2: Receh
+    if (item.status === 'receh' || item.isReceh) {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap bg-blue-100 text-blue-600">
+          RECEH
+        </span>
+      );
+    }
+    
+    // Priority 3: Expired
+    if (item.status === 'expired') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap bg-red-100 text-red-600">
+          EXPIRED
+        </span>
+      );
+    }
+    
+    // Priority 4: FEFO Status (Release or Hold)
+    if (item.fefoStatus === 'release') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap bg-green-100 text-green-600">
+          RELEASE
+        </span>
+      );
+    }
+    
+    if (item.fefoStatus === 'hold') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap bg-yellow-100 text-yellow-600">
+          HOLD
+        </span>
+      );
+    }
+    
+    // Default: Normal
     return (
-      <span className={`px-1.5 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap ${styles[status] || "bg-gray-100 text-gray-700"}`}>
-        {labels[status] || status}
+      <span className="px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap bg-slate-100 text-slate-600">
+        NORMAL
+      </span>
+    );
+  };
+
+  // Badge untuk Modal Detail - Status Kondisi (Fisik)
+  const getConditionBadges = (item: StockItem) => {
+    const badges = [];
+    
+    if (item.status === 'salah-cluster') {
+      badges.push(
+        <span key="salah-cluster" className="px-2 py-1 rounded text-xs font-semibold whitespace-nowrap bg-red-100 text-red-600">
+          SALAH CLUSTER
+        </span>
+      );
+    }
+    
+    if (item.status === 'receh' || item.isReceh) {
+      badges.push(
+        <span key="receh" className="px-2 py-1 rounded text-xs font-semibold whitespace-nowrap bg-blue-100 text-blue-600">
+          RECEH
+        </span>
+      );
+    }
+    
+    // Jika tidak salah-cluster dan tidak receh, tampilkan Normal
+    if (badges.length === 0) {
+      badges.push(
+        <span key="normal" className="px-2 py-1 rounded text-xs font-semibold whitespace-nowrap bg-slate-100 text-slate-600">
+          NORMAL
+        </span>
+      );
+    }
+    
+    return <div className="flex flex-wrap gap-1">{badges}</div>;
+  };
+
+  // Badge untuk Modal Detail - Status FEFO
+  const getFefoBadge = (fefoStatus: string) => {
+    if (fefoStatus === 'release') {
+      return (
+        <span className="px-2 py-1 rounded text-xs font-semibold whitespace-nowrap bg-green-100 text-green-600">
+          RELEASE
+        </span>
+      );
+    }
+    
+    return (
+      <span className="px-2 py-1 rounded text-xs font-semibold whitespace-nowrap bg-yellow-100 text-yellow-600">
+        HOLD
       </span>
     );
   };
@@ -309,20 +410,33 @@ export default function StockListClient({
                 </select>
               </div>
 
-              {/* Filter Status */}
+              {/* Filter Status Kondisi */}
               <div>
-                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">Status</label>
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">Status Kondisi</label>
                 <select
                   value={filterStatus}
                   onChange={(e) => setFilterStatus(e.target.value)}
                   className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
                 >
                   <option value="all">Semua</option>
-                  <option value="expired">Expired</option>
-                  <option value="release">Release</option>
-                  <option value="hold">Hold</option>
+                  <option value="normal">Normal</option>
                   <option value="receh">Receh</option>
                   <option value="salah-cluster">Salah Cluster</option>
+                  <option value="expired">Expired</option>
+                </select>
+              </div>
+
+              {/* Filter FEFO Status */}
+              <div>
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">Status FEFO</label>
+                <select
+                  value={filterFefoStatus}
+                  onChange={(e) => setFilterFefoStatus(e.target.value)}
+                  className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
+                >
+                  <option value="all">Semua</option>
+                  <option value="release">Release</option>
+                  <option value="hold">Hold</option>
                 </select>
               </div>
 
@@ -382,7 +496,12 @@ export default function StockListClient({
                     </tr>
                   ) : (
                     currentData.map((item, index) => (
-                      <tr key={item.id} className="border-b border-gray-100 hover:bg-blue-50 transition-colors">
+                      <tr 
+                        key={item.id} 
+                        className={`border-b border-gray-100 hover:bg-blue-50 transition-colors ${
+                          item.fefoStatus === 'release' ? 'bg-green-50/30' : ''
+                        }`}
+                      >
                         <td className="px-2 py-1.5 text-[10px] sm:text-xs text-gray-600">{startIndex + index + 1}</td>
                         <td className="px-2 py-1.5">
                           <div className="font-semibold text-gray-800 text-[10px] sm:text-xs line-clamp-1">{item.productName || 'N/A'}</div>
@@ -399,7 +518,7 @@ export default function StockListClient({
                           <div className="text-[10px] sm:text-xs text-gray-700">{formatDate(item.expiredDate)}</div>
                           <div className="text-[9px] sm:text-[10px]">{getDaysToExpired(item.expiredDate)}</div>
                         </td>
-                        <td className="px-2 py-1.5 text-center">{getStatusBadge(item.status)}</td>
+                        <td className="px-2 py-1.5 text-center">{getStatusBadge(item)}</td>
                         <td className="px-2 py-1.5 text-center">
                           <button
                             onClick={() => handleViewDetail(item)}
@@ -532,17 +651,33 @@ export default function StockListClient({
                   </div>
                 </div>
 
-                {/* Status */}
+                {/* Status Kondisi */}
                 <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-xs font-medium text-slate-500 mb-2">Status</p>
-                  <div className="flex items-center gap-2">
-                    {getStatusBadge(selectedItem.status)}
-                    <span className="text-xs text-slate-600">
-                      {selectedItem.status === "expired" && "⚠️ Produk sudah expired, harus segera dikeluarkan!"}
-                      {selectedItem.status === "release" && "- Expired dekat, prioritas keluar (FEFO)"}
-                      {selectedItem.status === "hold" && "- Expired masih jauh, belum perlu keluar"}
-                      {selectedItem.status === "receh" && "- Pallet tidak penuh, ada sisa"}
-                      {selectedItem.status === "salah-cluster" && "- Produk tidak sesuai cluster, perlu relokasi"}
+                  <p className="text-xs font-medium text-slate-500 mb-2">Status Kondisi (Fisik)</p>
+                  <div className="flex items-start gap-2">
+                    {getConditionBadges(selectedItem)}
+                    <span className="text-xs text-slate-600 flex-1">
+                      {(() => {
+                        const isSalahCluster = selectedItem.status === "salah-cluster";
+                        const isReceh = selectedItem.status === "receh" || selectedItem.isReceh;
+                        
+                        if (isSalahCluster && isReceh) return "Salah cluster & pallet tidak penuh";
+                        if (isSalahCluster) return "Produk tidak sesuai cluster, perlu relokasi";
+                        if (isReceh) return "Pallet tidak penuh, ada sisa";
+                        return "Kondisi normal, sesuai cluster";
+                      })()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Status FEFO */}
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-xs font-medium text-slate-500 mb-2">Status FEFO (Antrian Keluar)</p>
+                  <div className="flex items-start gap-2">
+                    {getFefoBadge(selectedItem.fefoStatus)}
+                    <span className="text-xs text-slate-600 flex-1">
+                      {selectedItem.fefoStatus === "release" && "Prioritas keluar pertama (First Expired First Out)"}
+                      {selectedItem.fefoStatus === "hold" && "Belum prioritas keluar, masih dalam antrian"}
                     </span>
                   </div>
                 </div>

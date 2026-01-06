@@ -47,3 +47,5 @@ next-env.d.ts
 # *.dbml
 filesql
 *.sql
+src/components/inbound-history-old.tsx
+src/components/inbound-form-old.tsx

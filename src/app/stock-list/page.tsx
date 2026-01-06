@@ -35,7 +35,8 @@ export default async function StockListPage() {
       )
     `)
     .eq("warehouse_id", profile.warehouse_id) // Filter Database
-    .order("expired_date", { ascending: true });
+    .order("fefo_status", { ascending: false }) // Release dulu (R > H)
+    .order("bb_produk", { ascending: true }); // Kemudian urutkan berdasarkan BB Produk
 
   // 4. Ambil Master Produk untuk Filter Dropdown
   const { data: productsMaster } = await supabase
@@ -60,6 +61,7 @@ export default async function StockListPage() {
     expiredDate: item.expired_date,
     inboundDate: item.inbound_date,
     status: item.status,
+    fefoStatus: item.fefo_status, // TAMBAHAN: Status FEFO dari trigger database
     isReceh: item.is_receh,
     parentStockId: item.parent_stock_id,
     productInfo: {

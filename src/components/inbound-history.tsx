@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, Calendar, TruckIcon, FileDown, ArrowLeft } from "lucide-react";
+import { Search, Calendar, TruckIcon, FileDown, ArrowLeft, Edit, Trash2 } from "lucide-react";
 import * as XLSX from 'xlsx';
 import { Navigation } from "@/components/navigation";
+import { cancelInboundAction } from "@/app/inbound/actions";
+import { useRouter } from "next/navigation";
 
 // --- INTERFACES ---
 interface Product {
@@ -65,12 +67,18 @@ export function InboundHistoryPage({
   expeditions = [],
   users = []
 }: InboundHistoryPageProps) {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<"all" | "completed" | "partial">("all");
   const [selectedItem, setSelectedItem] = useState<InboundHistory | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  
+  // Modal confirmations
+  const [showBatalModal, setShowBatalModal] = useState(false);
+  const [itemToBatal, setItemToBatal] = useState<InboundHistory | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- LOGIKA FILTER (MENGGUNAKAN DATA DARI PROPS) ---
   const filteredData = useMemo(() => {
@@ -138,6 +146,44 @@ export function InboundHistoryPage({
   const handleCloseDetail = () => {
     setShowDetailModal(false);
     setSelectedItem(null);
+  };
+
+  // Handle Edit - Populate form di inbound-form component
+  const handleEdit = (item: InboundHistory) => {
+    // Store data to localStorage untuk dipopulate di form
+    localStorage.setItem('inbound_edit_data', JSON.stringify(item));
+    router.push('/inbound?mode=edit');
+  };
+
+  // Handle Batal - Show confirmation modal
+  const handleBatal = (item: InboundHistory) => {
+    setItemToBatal(item);
+    setShowBatalModal(true);
+  };
+
+  // Confirm Batal Action
+  const confirmBatal = async () => {
+    if (!itemToBatal) return;
+    
+    setIsSubmitting(true);
+    try {
+      const result = await cancelInboundAction(itemToBatal.id);
+      
+      if (result.success) {
+        alert(`✓ ${result.message}`);
+        setShowBatalModal(false);
+        setItemToBatal(null);
+        setShowDetailModal(false);
+        setSelectedItem(null);
+        router.refresh(); // Refresh data
+      } else {
+        alert(`✗ ${result.message}`);
+      }
+    } catch (error: any) {
+      alert(`✗ Error: ${error.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // --- EXPORT TO EXCEL ---
@@ -449,13 +495,94 @@ export function InboundHistoryPage({
                 </div>
               </div>
 
-              {/* Modal Footer */}
+              {/* Modal Footer with Edit/Batal Buttons */}
               <div className="bg-gray-50 p-4 sticky bottom-0 border-t">
+                <div className="flex gap-2">
+                  {userProfile?.role === "admin_warehouse" && (
+                    <>
+                      <button
+                        onClick={() => handleEdit(selectedItem)}
+                        className="flex-1 px-4 py-3 bg-amber-500 text-white rounded-xl font-semibold hover:bg-amber-600 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Edit className="w-4 h-4" />
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleBatal(selectedItem)}
+                        className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Batal
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={handleCloseDetail}
+                    className={`${userProfile?.role === "admin_warehouse" ? 'flex-1' : 'w-full'} px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors`}
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Batal Confirmation Modal */}
+        {showBatalModal && itemToBatal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+              <div className="bg-red-500 p-4 text-white rounded-t-2xl">
+                <h3 className="text-xl font-bold flex items-center gap-2">
+                  <Trash2 className="w-6 h-6" />
+                  Konfirmasi Pembatalan
+                </h3>
+              </div>
+              <div className="p-6 space-y-4">
+                <p className="text-gray-700">
+                  Apakah Anda yakin ingin <strong className="text-red-600">membatalkan</strong> transaksi ini?
+                </p>
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg">
+                  <p className="text-sm text-red-800 font-semibold mb-2">⚠️ Peringatan:</p>
+                  <ul className="text-xs text-red-700 space-y-1 list-disc list-inside">
+                    <li>Semua stock dari transaksi ini akan dihapus</li>
+                    <li>Trigger FEFO akan otomatis memperbarui antrian</li>
+                    <li>Data transaksi akan dihapus permanent</li>
+                    <li>Aksi ini <strong>TIDAK BISA</strong> dibatalkan</li>
+                  </ul>
+                </div>
+                <div className="bg-gray-100 p-3 rounded-lg">
+                  <p className="text-xs text-gray-600 mb-1">Kode Transaksi:</p>
+                  <p className="font-mono font-bold text-gray-900">{itemToBatal.transactionCode}</p>
+                </div>
+              </div>
+              <div className="bg-gray-50 p-4 flex gap-2 rounded-b-2xl">
                 <button
-                  onClick={handleCloseDetail}
-                  className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+                  onClick={() => {
+                    setShowBatalModal(false);
+                    setItemToBatal(null);
+                  }}
+                  disabled={isSubmitting}
+                  className="flex-1 px-4 py-2.5 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Tutup
+                  Tidak, Kembali
+                </button>
+                <button
+                  onClick={confirmBatal}
+                  disabled={isSubmitting}
+                  className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <span className="animate-spin">⏳</span>
+                      Memproses...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      Ya, Batalkan
+                    </>
+                  )}
                 </button>
               </div>
             </div>

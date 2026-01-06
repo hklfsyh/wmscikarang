@@ -16,7 +16,8 @@ interface StockItem {
   expired_date: string;
   status: string;
   is_receh: boolean;
-  bb_produk: string; // TAMBAHKAN INI AGAR TIDAK ERROR
+  bb_produk: string;
+  fefo_status: string;
   products: {
     id: string;
     product_code: string;
@@ -37,6 +38,8 @@ export type WarehouseCell = {
   qtyPallet?: number;
   qtyCarton?: number;
   status?: string;
+  fefoStatus?: string;
+  isReceh?: boolean;
   colorCode: "green" | "yellow" | "blue" | "red" | "empty";
   isInTransit?: boolean;
 };
@@ -62,11 +65,12 @@ export default function WarehouseLayoutClient({
   clusterCellOverrides: any[];
   productHomes: any[];
 }) {
-  console.log("User Profile:", userProfile);
+
 
   const [selectedCell, setSelectedCell] = useState<WarehouseCell | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "release" | "hold" | "receh" | "wrong_cluster">("ALL");
+  const [filterStatus, setFilterStatus] = useState<"all" | "normal" | "receh" | "salah-cluster" | "expired">("all");
+  const [filterFefoStatus, setFilterFefoStatus] = useState<"all" | "release" | "hold">("all");
   const [clusterFilter, setClusterFilter] = useState<string>("ALL");
   const [productFilter, setProductFilter] = useState<string>("ALL");
   const [lorongFilter, setLorongFilter] = useState<string>("ALL");
@@ -80,6 +84,62 @@ export default function WarehouseLayoutClient({
       else newSet.add(cluster);
       return newSet;
     });
+  };
+
+  // Helper functions for badges (matching Stock List)
+  const getConditionBadges = (cell: WarehouseCell) => {
+    const badges = [];
+    
+    // Physical condition badges
+    if (cell.status === "salah-cluster" || cell.status === "wrong_cluster") {
+      badges.push(
+        <span key="salah-cluster" className="px-2 py-1 rounded-md text-xs font-medium bg-red-100 text-red-600">
+          Salah Cluster
+        </span>
+      );
+    }
+    if (cell.status === "receh" || cell.isReceh) {
+      badges.push(
+        <span key="receh" className="px-2 py-1 rounded-md text-xs font-medium bg-blue-100 text-blue-600">
+          Receh
+        </span>
+      );
+    }
+    if (cell.status === "expired") {
+      badges.push(
+        <span key="expired" className="px-2 py-1 rounded-md text-xs font-medium bg-red-100 text-red-600">
+          Expired
+        </span>
+      );
+    }
+    
+    // If no special condition, show normal
+    if (badges.length === 0) {
+      badges.push(
+        <span key="normal" className="px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600">
+          Normal
+        </span>
+      );
+    }
+    
+    return badges;
+  };
+
+  const getFefoBadge = (fefoStatus: string) => {
+    if (fefoStatus === "release") {
+      return (
+        <span className="px-2 py-1 rounded-md text-xs font-medium bg-green-100 text-green-600">
+          Release
+        </span>
+      );
+    } else if (fefoStatus === "hold") {
+      return (
+        <span className="px-2 py-1 rounded-md text-xs font-medium bg-yellow-100 text-yellow-600">
+          Hold
+        </span>
+      );
+    }
+    return null;
   };
 
   const warehouseCells = useMemo(() => {
@@ -161,20 +221,19 @@ export default function WarehouseLayoutClient({
               // Check if product is in wrong cluster
               const isWrongCluster = stock.cluster !== stock.products?.default_cluster;
 
+              // PRIORITY LOGIC: salah-cluster > receh > expired > release/hold
               if (isTransitLorong) {
                 color = "red"; // In Transit always red
-              } else if (isWrongCluster) {
-                color = "red"; // Wrong cluster
+              } else if (isWrongCluster || stock.status === "salah-cluster") {
+                color = "red"; // Wrong cluster or salah-cluster status
               } else if (stock.status === "receh" || stock.is_receh) {
-                color = "blue";
-              } else if (stock.status === "hold") {
-                color = "yellow";
-              } else {
-                // Calculate expiry for green (Release)
-                const daysToExpiry = Math.ceil(
-                  (new Date(stock.expired_date).getTime() - Date.now()) / (1000 * 3600 * 24)
-                );
-                color = daysToExpiry < 90 ? "green" : "yellow";
+                color = "blue"; // Receh
+              } else if (stock.status === "expired") {
+                color = "red"; // Expired
+              } else if (stock.fefo_status === "release") {
+                color = "green"; // Release
+              } else if (stock.fefo_status === "hold") {
+                color = "yellow"; // Hold
               }
 
               cells.push({
@@ -189,6 +248,8 @@ export default function WarehouseLayoutClient({
                 qtyPallet: stock.qty_pallet,
                 qtyCarton: stock.qty_carton,
                 status: isWrongCluster ? "wrong_cluster" : stock.status,
+                fefoStatus: stock.fefo_status,
+                isReceh: stock.is_receh,
                 colorCode: color,
                 isInTransit: isTransitLorong,
               });
@@ -233,9 +294,20 @@ export default function WarehouseLayoutClient({
         return false;
       }
       
-      // Filter by status
-      if (statusFilter !== "ALL" && cell.status !== statusFilter) {
-        return false;
+      // Filter by Status Kondisi (physical status)
+      if (filterStatus !== "all") {
+        if (filterStatus === "receh") {
+          if (cell.status !== "receh" && !cell.isReceh) return false;
+        } else if (filterStatus === "normal") {
+          if (cell.status === "receh" || cell.isReceh || cell.status === "salah-cluster" || cell.status === "expired" || cell.status === "wrong_cluster") return false;
+        } else {
+          if (cell.status !== filterStatus && (filterStatus !== "salah-cluster" || cell.status !== "wrong_cluster")) return false;
+        }
+      }
+      
+      // Filter by Status FEFO (queue status)
+      if (filterFefoStatus !== "all") {
+        if (cell.fefoStatus !== filterFefoStatus) return false;
       }
       
       // Filter by search query (product name, product code, BB pallet, or location)
@@ -261,7 +333,7 @@ export default function WarehouseLayoutClient({
       
       return true;
     });
-  }, [warehouseCells, clusterFilter, lorongFilter, barisFilter, productFilter, statusFilter, searchQuery]);
+  }, [warehouseCells, clusterFilter, lorongFilter, barisFilter, productFilter, filterStatus, filterFefoStatus, searchQuery]);
 
   // Get unique products for filter
   const uniqueProducts = useMemo(() => {
@@ -409,7 +481,7 @@ export default function WarehouseLayoutClient({
             </div>
 
             {/* Advanced Filters */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
               {/* Cluster Filter */}
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
@@ -489,21 +561,37 @@ export default function WarehouseLayoutClient({
                 </select>
               </div>
 
-              {/* Status Filter */}
+              {/* Status Kondisi Filter */}
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
-                  Status
+                  Status Kondisi
                 </label>
                 <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as "ALL" | "release" | "hold" | "receh" | "wrong_cluster")}
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value as "all" | "normal" | "receh" | "salah-cluster" | "expired")}
                   className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
                 >
-                  <option value="ALL">Semua</option>
+                  <option value="all">Semua</option>
+                  <option value="normal">Normal</option>
+                  <option value="receh">Receh</option>
+                  <option value="salah-cluster">Salah Cluster</option>
+                  <option value="expired">Expired</option>
+                </select>
+              </div>
+
+              {/* Status FEFO Filter */}
+              <div>
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">
+                  Status FEFO
+                </label>
+                <select
+                  value={filterFefoStatus}
+                  onChange={(e) => setFilterFefoStatus(e.target.value as "all" | "release" | "hold")}
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
+                >
+                  <option value="all">Semua</option>
                   <option value="release">Release</option>
                   <option value="hold">Hold</option>
-                  <option value="receh">Receh</option>
-                  <option value="wrong_cluster">Wrong Cluster</option>
                 </select>
               </div>
             </div>
@@ -520,7 +608,8 @@ export default function WarehouseLayoutClient({
                   setLorongFilter("ALL");
                   setBarisFilter("ALL");
                   setProductFilter("ALL");
-                  setStatusFilter("ALL");
+                  setFilterStatus("all");
+                  setFilterFefoStatus("all");
                 }}
                 className="px-3 py-1.5 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-semibold flex items-center gap-1"
               >
@@ -681,7 +770,16 @@ export default function WarehouseLayoutClient({
                       
                         {/* Legend */}
                         <div className="mt-3 pt-3 border-t border-slate-200">
+                          <p className="text-xs font-semibold text-slate-700 mb-2">Kode Warna</p>
                           <div className="flex flex-wrap gap-2 sm:gap-3 text-[10px] sm:text-xs text-slate-600">
+                            <div className="flex items-center gap-1">
+                              <div className="w-2.5 h-2.5 rounded bg-red-500" />
+                              <span>Salah Cluster / Expired</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <div className="w-2.5 h-2.5 rounded bg-blue-500" />
+                              <span>Receh</span>
+                            </div>
                             <div className="flex items-center gap-1">
                               <div className="w-2.5 h-2.5 rounded bg-green-500" />
                               <span>Release</span>
@@ -689,14 +787,6 @@ export default function WarehouseLayoutClient({
                             <div className="flex items-center gap-1">
                               <div className="w-2.5 h-2.5 rounded bg-yellow-400" />
                               <span>Hold</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <div className="w-2.5 h-2.5 rounded bg-blue-500" />
-                              <span>Receh</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <div className="w-2.5 h-2.5 rounded bg-red-500" />
-                              <span>Salah Cluster</span>
                             </div>
                             {/* Check if this cluster has any in-transit overrides */}
                             {clusterCellOverrides.some((o: any) => 
@@ -802,28 +892,53 @@ export default function WarehouseLayoutClient({
                 </div>
               </div>
               
-              {/* Status */}
-              <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
-                <p className="text-xs font-medium text-slate-500 mb-1">Status</p>
-                <p className={`font-semibold text-sm ${
-                  selectedCell.colorCode === "green" ? "text-green-600" :
-                  selectedCell.colorCode === "yellow" ? "text-yellow-600" :
-                  selectedCell.colorCode === "blue" ? "text-blue-600" :
-                  "text-red-600"
-                }`}>
-                  {selectedCell.colorCode === "green" ? "✓ RELEASE (Expired dekat, prioritas keluar)" :
-                   selectedCell.colorCode === "yellow" ? "⏸ HOLD (Expired jauh, belum perlu keluar)" :
-                   selectedCell.colorCode === "blue" ? "📦 RECEH (Ada sisa, tidak full)" :
-                   "⚠️ SALAH CLUSTER (Perlu relokasi)"}
-                </p>
-                
-                {selectedCell.isInTransit && (
-                  <div className="p-3 mt-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs">
-                    <p className="font-bold">⚠️ IN TRANSIT AREA</p>
-                    <p>Lokasi buffer sementara untuk barang yang akan dipindahkan.</p>
+              {/* Status Kondisi & Status FEFO */}
+              <div className="space-y-3">
+                {/* Status Kondisi (Physical Status) */}
+                <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
+                  <p className="text-xs font-medium text-slate-500 mb-2">Status Kondisi</p>
+                  <div className="flex flex-wrap gap-2">
+                    {getConditionBadges(selectedCell)}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    {(() => {
+                      if (selectedCell.status === "salah-cluster" || selectedCell.status === "wrong_cluster") 
+                        return "Produk berada di cluster yang salah";
+                      if (selectedCell.status === "receh" || selectedCell.isReceh) 
+                        return "Pallet tidak penuh, ada sisa";
+                      if (selectedCell.status === "expired") 
+                        return "Produk sudah expired";
+                      return "Kondisi pallet normal";
+                    })()}
+                  </p>
+                </div>
+
+                {/* Status FEFO (Queue Status) */}
+                {selectedCell.fefoStatus && (
+                  <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
+                    <p className="text-xs font-medium text-slate-500 mb-2">Status FEFO</p>
+                    <div className="flex flex-wrap gap-2">
+                      {getFefoBadge(selectedCell.fefoStatus)}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2">
+                      {(() => {
+                        if (selectedCell.fefoStatus === "release") 
+                          return "Prioritas untuk dikeluarkan (BB Produk terdekat)";
+                        if (selectedCell.fefoStatus === "hold") 
+                          return "Ditahan, belum waktunya keluar";
+                        return "";
+                      })()}
+                    </p>
                   </div>
                 )}
               </div>
+                
+              {selectedCell.isInTransit && (
+                <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs">
+                  <p className="font-bold">⚠️ IN TRANSIT AREA</p>
+                  <p>Lokasi buffer sementara untuk barang yang akan dipindahkan.</p>
+                </div>
+              )}
             </div>
 
             <div className="px-4 sm:px-6 pb-4 sm:pb-6">

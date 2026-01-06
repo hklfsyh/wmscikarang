@@ -34,7 +34,7 @@ export async function moveStockAction(
       .substr(2, 4)
       .toUpperCase()}`;
 
-    // 3. Update stock_list (Pindah lokasi)
+    // 3. Update stock_list (Pindah lokasi - PRESERVE created_at!)
     const { error: errUpdate } = await supabase
       .from("stock_list")
       .update({
@@ -43,39 +43,46 @@ export async function moveStockAction(
         baris: targetLoc.baris,
         level: targetLoc.level,
         updated_at: getIndonesianDateTime(),
+        // CRITICAL: Jangan update created_at agar urutan FEFO tetap konsisten!
       })
       .eq("id", stockId);
 
     if (errUpdate) throw errUpdate;
 
-    // 4. Catat ke permutasi_history
-    await supabase.from("permutasi_history").insert({
-      warehouse_id: warehouseId,
-      transaction_code: transactionCode,
-      stock_id: stockId,
-      product_id: oldStock.product_id,
-      qty_carton: oldStock.qty_carton,
-      from_cluster: oldStock.cluster,
-      from_lorong: oldStock.lorong,
-      from_baris: oldStock.baris,
-      from_level: oldStock.level,
-      to_cluster: targetLoc.cluster,
-      to_lorong: targetLoc.lorong,
-      to_baris: targetLoc.baris,
-      to_level: targetLoc.level,
-      reason: reason,
-      moved_by: user.id,
-      moved_at: getIndonesianDateTime(),
-    });
+    // 4. Catat ke permutasi_history dan dapatkan ID untuk reference
+    const { data: historyEntry, error: errHistory } = await supabase
+      .from("permutasi_history")
+      .insert({
+        warehouse_id: warehouseId,
+        transaction_code: transactionCode,
+        stock_id: stockId,
+        product_id: oldStock.product_id,
+        qty_carton: oldStock.qty_carton,
+        from_cluster: oldStock.cluster,
+        from_lorong: oldStock.lorong,
+        from_baris: oldStock.baris,
+        from_level: oldStock.level,
+        to_cluster: targetLoc.cluster,
+        to_lorong: targetLoc.lorong,
+        to_baris: targetLoc.baris,
+        to_level: targetLoc.level,
+        reason: reason,
+        moved_by: user.id,
+        moved_at: getIndonesianDateTime(),
+      })
+      .select()
+      .single();
 
-    // 5. Catat ke stock_movements (Log pergerakan global)
+    if (errHistory || !historyEntry) throw errHistory || new Error("Gagal menyimpan history");
+
+    // 5. Catat ke stock_movements (Log pergerakan global dengan reference_id UUID)
     await supabase.from("stock_movements").insert({
       warehouse_id: warehouseId,
       stock_id: stockId,
       product_id: oldStock.product_id,
       movement_type: "permutasi",
       reference_type: "permutasi_history",
-      reference_id: transactionCode, // atau UUID history
+      reference_id: historyEntry.id, // UUID dari permutasi_history, bukan transactionCode
       qty_before: oldStock.qty_carton,
       qty_change: 0, // Permutasi tidak mengubah jumlah barang
       qty_after: oldStock.qty_carton,

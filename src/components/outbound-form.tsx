@@ -7,6 +7,7 @@ import { QRCodeSVG } from "qrcode.react";
 import {
   getFEFOAllocationAction,
   submitOutboundAction,
+  cancelOutboundAction,
 } from "@/app/outbound/actions";
 import { useRouter } from "next/navigation";
 
@@ -23,11 +24,23 @@ interface Product {
 interface FEFOLocation {
   stockId: string;
   location: string;
+  cluster: string;
+  lorong: number;
+  baris: number;
+  level: number;
+  bbProduk: string;
   bbPallet: string | string[];
   expiredDate: string;
   availableQtyPallet: number;
   allocatedQtyPallet: number;
   daysToExpire: number;
+  qtyBefore: number;
+  qtyTaken: number;
+  qtyAfter: number;
+  fefo_status: string; // 'release' or 'hold'
+  status: string; // 'normal', 'receh', 'salah-cluster', etc
+  is_receh: boolean;
+  is_fefo_violation: boolean; // true if picking hold while release available
 }
 
 // Type untuk outbound history (untuk fitur Edit/Batal yang belum aktif)
@@ -230,6 +243,7 @@ export function OutboundForm({
       return;
     }
 
+    // Langsung buka modal konfirmasi (user mengikuti rekomendasi sistem)
     setShowConfirmModal(true);
   };
 
@@ -268,10 +282,9 @@ export function OutboundForm({
           setPoliceNoHistory
         );
 
-        // Reset form setelah 2 detik
+        // JANGAN reset form (data retention) - hanya reset FEFO locations dan modal
         setTimeout(() => {
           setShowSuccessModal(false);
-          setForm(initialState);
           setFefoLocations([]);
           setIsSubmitting(false);
           router.refresh(); // Refresh data dari server
@@ -302,11 +315,10 @@ export function OutboundForm({
       );
 
       if (result.success && result.allocation) {
-        // PERBAIKAN: Mapping hasil server dengan semua field yang diperlukan backend
+        // Mapping hasil server dengan semua field yang diperlukan backend + UI
         const mappedAllocation = result.allocation.map((loc) => ({
           stockId: loc.stockId,
           location: loc.location,
-          // Pastikan semua field ini ada untuk dikirim ke submitOutboundAction
           cluster: loc.cluster,
           lorong: loc.lorong,
           baris: loc.baris,
@@ -317,14 +329,18 @@ export function OutboundForm({
           qtyTaken: loc.qtyTaken,
           qtyAfter: loc.qtyAfter,
           daysToExpire: loc.daysToExpire,
-          // Field tambahan untuk UI
-          clusterChar: loc.cluster,
+          fefo_status: loc.fefo_status,
+          status: loc.status,
+          is_receh: loc.is_receh,
+          is_fefo_violation: loc.is_fefo_violation,
+          // Field tambahan untuk UI compatibility
           bbPallet: loc.bbProduk,
           availableQtyPallet: 1,
           allocatedQtyPallet: 1,
         }));
 
         setFefoLocations(mappedAllocation);
+        
         success(
           `✓ Berhasil! Ditemukan ${mappedAllocation.length} lokasi berdasarkan FEFO.`
         );
@@ -353,150 +369,54 @@ export function OutboundForm({
     setShowEditConfirmModal(true);
   };
 
-  const confirmEdit = () => {
+  const confirmEdit = async () => {
     if (!selectedItemForAction) return;
 
-    // CATATAN: Fitur Edit Transaksi dinonaktifkan sementara
-    // Perlu integrasi dengan database untuk:
-    // 1. Mengembalikan stok ke database (update/insert stock_list)
-    // 2. Menghapus record dari outbound_history
-    // 3. Load data transaksi ke form untuk di-edit ulang
+    setIsSubmitting(true);
 
-    error(
-      "Fitur Edit Transaksi sedang dalam pengembangan. Hubungi administrator."
-    );
-    setShowEditConfirmModal(false);
-    setSelectedItemForAction(null);
+    try {
+      // 1. Cancel outbound (soft delete + stock reversal)
+      const result = await cancelOutboundAction(selectedItemForAction.id);
 
-    /* KODE LAMA MENGGUNAKAN MOCK DATA - AKAN DIIMPLEMENTASI ULANG
-    // 1. Kembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)
-    selectedItemForAction.locations.forEach((locationItem) => {
-      // Cek apakah lokasi sudah terisi oleh produk lain
-      const existingStock = stockListData.find(
-        (s) =>
-          s.cluster === locationItem.cluster &&
-          s.lorong === locationItem.lorong &&
-          s.baris === locationItem.baris &&
-          s.level === locationItem.level
+      if (!result.success) {
+        error(result.message || "Gagal membatalkan transaksi untuk edit.");
+        setIsSubmitting(false);
+        setShowEditConfirmModal(false);
+        return;
+      }
+
+      // 2. Populate form dengan data transaksi yang dibatalkan
+      const selectedProd = products.find(p => p.id === selectedItemForAction.product_id);
+      const qtyPerPallet = selectedProd?.qty_carton_per_pallet || 1;
+      const totalCarton = selectedItemForAction.qty_carton;
+      const fullPallets = Math.floor(totalCarton / qtyPerPallet);
+      const remainingCartons = totalCarton % qtyPerPallet;
+
+      setForm({
+        tanggal: selectedItemForAction.departure_time.slice(0, 10),
+        namaPengemudi: selectedItemForAction.driver_name,
+        nomorPolisi: selectedItemForAction.vehicle_number,
+        productCode: selectedProd?.product_code || '',
+        qtyPalletInput: String(fullPallets),
+        qtyCartonInput: String(remainingCartons),
+      });
+
+      // 3. Reset state
+      setShowEditConfirmModal(false);
+      setSelectedItemForAction(null);
+      setFefoLocations([]);
+      setIsSubmitting(false);
+
+      success(
+        `✓ Transaksi ${selectedItemForAction.transaction_code} dibatalkan. Data dimuat ke form. Silakan edit dan submit ulang.`
       );
 
-      // Ambil data produk
-      const productData = productMasterData.find(p => p.id === selectedItemForAction.product_id);
-
-      if (existingStock) {
-        // Lokasi sudah terisi, pindahkan ke In Transit (Cluster C)
-        const inTransitLoc = findAvailableInTransitLocation();
-        if (inTransitLoc) {
-          const todayStr = new Date().toISOString().slice(0, 10);
-          stockListData.push({
-            id: `STK-RETURN-${Date.now()}-${Math.random()
-              .toString(36)
-              .substr(2, 9)}`,
-            warehouseId: "WH001",
-            productId: productData?.id || "UNKNOWN",
-            bbProduk: "RETURNED",
-            cluster: inTransitLoc.clusterChar,
-            lorong: parseInt(inTransitLoc.lorong.replace('L', '')),
-            baris: parseInt(inTransitLoc.baris.replace('B', '')),
-            level: parseInt(inTransitLoc.level.replace('P', '')),
-            qtyPallet: 1,
-            qtyCarton: locationItem.qtyCarton,
-            expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
-              .toISOString()
-              .slice(0, 10),
-            inboundDate: todayStr,
-            status: "release",
-            isReceh: false,
-            parentStockId: null,
-            createdBy: "USER001",
-            createdAt: todayStr,
-            updatedAt: todayStr,
-          });
-        }
-      } else {
-        // Lokasi kosong, kembalikan ke lokasi asal
-        const todayStr = new Date().toISOString().slice(0, 10);
-        stockListData.push({
-          id: `STK-RETURN-${Date.now()}-${Math.random()
-            .toString(36)
-            .substr(2, 9)}`,
-          warehouseId: "WH001",
-          productId: productData?.id || "UNKNOWN",
-          bbProduk: "RETURNED",
-          cluster: locationItem.cluster,
-          lorong: locationItem.lorong,
-          baris: locationItem.baris,
-          level: locationItem.level,
-          qtyPallet: 1,
-          qtyCarton: locationItem.qtyCarton,
-          expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .slice(0, 10),
-          inboundDate: todayStr,
-          status: "release",
-          isReceh: false,
-          parentStockId: null,
-          createdBy: "USER001",
-          createdAt: todayStr,
-          updatedAt: todayStr,
-        });
-      }
-    });
-
-    // 2. Hapus dari history
-    const historyIndex = outboundHistoryData.findIndex(
-      (h) => h.id === selectedItemForAction.id
-    );
-    if (historyIndex !== -1) {
-      outboundHistoryData.splice(historyIndex, 1);
+      // 4. Refresh data
+      router.refresh();
+    } catch (err: any) {
+      error("Terjadi kesalahan sistem saat edit transaksi.");
+      setIsSubmitting(false);
     }
-
-    // 3. Load data ke form untuk di-edit
-    const selectedProd = products.find(p => p.id === selectedItemForAction.product_id);
-    const qtyPerPallet = selectedProd?.qty_carton_per_pallet || 1;
-    const totalCarton = selectedItemForAction.qty_carton;
-    const fullPallets = Math.floor(totalCarton / qtyPerPallet);
-    const remainingCartons = totalCarton % qtyPerPallet;
-
-    setForm({
-      tanggal: selectedItemForAction.departureTime.slice(0, 10),
-      namaPengemudi: selectedItemForAction.driverName,
-      nomorPolisi: selectedItemForAction.vehicleNumber,
-      productCode: selectedProd?.product_code || '',
-      qtyPalletInput: String(fullPallets),
-      qtyCartonInput: String(remainingCartons),
-    });
-
-    // 4. Reset state
-    setShowEditConfirmModal(false);
-    setSelectedItemForAction(null);
-    setFefoLocations([]);
-
-    success(
-      `Data transaksi ${selectedItemForAction.transaction_code} telah dimuat ke form. Stock dikembalikan. Silakan edit dan submit ulang.`
-    );
-    */
-  };
-
-  // Helper: Cari lokasi In Transit yang kosong
-  const findAvailableInTransitLocation = () => {
-    /* DISABLED - Fitur In Transit untuk mock data
-    // In Transit area di Cluster C, Lorong L11-L12
-    for (let lorong = 11; lorong <= 12; lorong++) {
-      for (let baris = 1; baris <= 9; baris++) {
-        for (let pallet = 1; pallet <= 3; pallet++) {
-          const loc = {
-            clusterChar: "C",
-            lorong: `L${lorong}`,
-            baris: `B${baris}`,
-            level: `P${pallet}`,
-          };
-          if (!exists) return loc;
-        }
-      }
-    }
-    */
-    return null;
   };
 
   // --- HANDLE BATAL TRANSAKSI ---
@@ -505,77 +425,37 @@ export function OutboundForm({
     setShowBatalConfirmModal(true);
   };
 
-  const confirmBatal = () => {
+  const confirmBatal = async () => {
     if (!selectedItemForAction) return;
 
-    // CATATAN: Fitur Batal Transaksi dinonaktifkan sementara
-    // Perlu integrasi dengan database untuk mengembalikan stok
+    setIsSubmitting(true);
 
-    error(
-      "Fitur Batal Transaksi sedang dalam pengembangan. Hubungi administrator."
-    );
-    setShowBatalConfirmModal(false);
-    setSelectedItemForAction(null);
+    try {
+      // Cancel outbound (hard delete + stock reversal)
+      const result = await cancelOutboundAction(selectedItemForAction.id);
 
-    /* KODE LAMA MENGGUNAKAN MOCK DATA - AKAN DIIMPLEMENTASI ULANG
-    // 1. Kembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)
-    selectedItemForAction.locations.forEach((locationItem) => {
-      // Cek apakah lokasi sudah terisi oleh produk lain
-      const existingStock = stockListData.find(
-        (s) =>
-          s.cluster === locationItem.cluster &&
-          s.lorong === locationItem.lorong &&
-          s.baris === locationItem.baris &&
-          s.level === locationItem.level
+      if (!result.success) {
+        error(result.message || "Gagal membatalkan transaksi.");
+        setIsSubmitting(false);
+        setShowBatalConfirmModal(false);
+        return;
+      }
+
+      // Reset state
+      setShowBatalConfirmModal(false);
+      setSelectedItemForAction(null);
+      setIsSubmitting(false);
+
+      success(
+        `✓ Transaksi ${selectedItemForAction.transaction_code} telah dibatalkan. Stock dikembalikan.`
       );
 
-      // Ambil data produk
-      const productData = productMasterData.find(p => p.id === selectedItemForAction.product_id);
-
-      if (existingStock) {
-        // Lokasi sudah terisi, pindahkan ke In Transit
-        const inTransitLoc = findAvailableInTransitLocation();
-        if (inTransitLoc) {
-          const todayStr = new Date().toISOString().slice(0, 10);
-          stockListData.push({
-            id: `STK-RETURN-${Date.now()}-${Math.random()
-              .toString(36)
-              .substr(2, 9)}`,
-            warehouseId: "WH001",
-            productId: productData?.id || "UNKNOWN",
-            bbProduk: "RETURNED",
-            cluster: inTransitLoc.clusterChar,
-            lorong: parseInt(inTransitLoc.lorong.replace('L', '')),
-            baris: parseInt(inTransitLoc.baris.replace('B', '')),
-            level: parseInt(inTransitLoc.level.replace('P', '')),
-            qtyPallet: 1,
-            qtyCarton: locationItem.qtyCarton,
-            expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
-              .toISOString()
-              .slice(0, 10),
-            inboundDate: todayStr,
-            status: "release",
-            isReceh: false,
-            parentStockId: null,
-            createdBy: "USER001",
-            createdAt: todayStr,
-            updatedAt: todayStr,
-          });
-        }
-    selectedItemForAction.locations.forEach((locationItem) => {
-      // Logic untuk kembalikan stock akan diimplementasi dengan database
-    });
-
-    // 2. Hapus dari history - akan diimplementasi dengan database
-    
-    // 3. Reset state
-    setShowBatalConfirmModal(false);
-    setSelectedItemForAction(null);
-
-    success(
-      `Transaksi ${selectedItemForAction.transaction_code} telah dibatalkan. Stock telah dikembalikan.`
-    );
-    */
+      // Refresh data
+      router.refresh();
+    } catch (err: any) {
+      error("Terjadi kesalahan sistem saat membatalkan transaksi.");
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -905,7 +785,10 @@ export function OutboundForm({
                         BB Produk
                       </th>
                       <th className="px-4 py-3 text-left text-sm font-bold">
-                        Qty Ambil (Pallet)
+                        Qty Ambil
+                      </th>
+                      <th className="px-4 py-3 text-left text-sm font-bold">
+                        Sisa di Rak
                       </th>
                       <th className="px-4 py-3 text-left text-sm font-bold">
                         Expired Date
@@ -946,9 +829,34 @@ export function OutboundForm({
                               {index + 1}
                             </td>
                             <td className="px-4 py-3">
-                              <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-semibold">
-                                {loc.location}
-                              </span>
+                              <div className="flex flex-col gap-1.5">
+                                <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-semibold">
+                                  {loc.location}
+                                </span>
+                                <div className="flex gap-1.5 flex-wrap">
+                                  {/* Badge Status Fisik */}
+                                  {loc.status === 'receh' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700 border border-blue-300">
+                                      🔵 Receh
+                                    </span>
+                                  )}
+                                  {loc.status === 'salah-cluster' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 border border-red-300">
+                                      🔴 Salah Cluster
+                                    </span>
+                                  )}
+                                  {/* Badge FEFO Status */}
+                                  {loc.fefo_status === 'release' ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700 border border-green-300">
+                                      🟢 RELEASE
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-700 border border-yellow-300">
+                                      🟡 HOLD
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-sm font-medium text-gray-700">
                               {Array.isArray(loc.bbPallet)
@@ -956,12 +864,38 @@ export function OutboundForm({
                                 : loc.bbPallet}
                             </td>
                             <td className="px-4 py-3">
-                              <div className="text-sm font-bold text-orange-700">
-                                {loc.allocatedQtyPallet} Pallet
+                              <div className="flex flex-col gap-1">
+                                <div className="text-sm font-bold text-orange-700">
+                                  {loc.allocatedQtyPallet} Pallet
+                                </div>
+                                {/* Detail karton yang harus diambil */}
+                                <div className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 inline-block">
+                                  Ambil {displayCartons} Carton
+                                </div>
                               </div>
-                              {/* INSTRUKSI BARU: Menunjukkan detail karton yang harus diambil */}
-                              <div className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 inline-block mt-1">
-                                Ambil {displayCartons} Carton
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col gap-1">
+                                {/* Sisa Stok di Rak setelah diambil */}
+                                <div className={`text-sm font-bold ${
+                                  loc.qtyAfter === 0 
+                                    ? "text-red-600" 
+                                    : loc.qtyAfter < 10 
+                                    ? "text-yellow-600" 
+                                    : "text-green-600"
+                                }`}>
+                                  {loc.qtyAfter} Carton
+                                </div>
+                                {loc.qtyAfter === 0 && (
+                                  <div className="text-xs font-semibold text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-200 inline-block">
+                                    ⚠️ Rak Kosong
+                                  </div>
+                                )}
+                                {loc.qtyAfter > 0 && loc.qtyAfter < 10 && (
+                                  <div className="text-xs font-semibold text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded border border-yellow-200 inline-block">
+                                    ⚡ Stok Tipis
+                                  </div>
+                                )}
                               </div>
                             </td>
                             <td className="px-4 py-3">
@@ -1103,98 +1037,129 @@ export function OutboundForm({
           onClick={() => setShowConfirmModal(false)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[70vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6">
-              <h2 className="text-2xl font-bold text-gray-800 mb-4">
-                Konfirmasi Pengambilan Barang
+            {/* Sticky Header */}
+            <div className="sticky top-0 bg-linear-to-r from-orange-500 to-red-600 px-4 py-3 flex-shrink-0">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                ✓ Konfirmasi Pengambilan
               </h2>
+            </div>
 
-              <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mb-6">
-                <p className="text-amber-800 font-medium">
-                  ⚠️ Pastikan Anda akan mengambil barang dari lokasi-lokasi
-                  berikut sesuai urutan FEFO:
+            {/* Scrollable Content */}
+            <div className="overflow-y-auto flex-1 p-4 space-y-3">
+              {/* Warning Box */}
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-3">
+                <p className="text-amber-900 text-xs flex items-start gap-2">
+                  <span className="flex-shrink-0">⚠️</span>
+                  <span>Barang akan diambil sesuai urutan FEFO</span>
                 </p>
               </div>
 
-              <div className="space-y-4 mb-6">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-600">Pengemudi:</p>
-                    <p className="font-semibold text-gray-900">
-                      {form.namaPengemudi}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Nomor Polisi:</p>
-                    <p className="font-semibold text-gray-900">
-                      {form.nomorPolisi}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Produk:</p>
-                    <p className="font-semibold text-gray-900">
-                      {selectedProduct?.product_name}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Total Qty:</p>
-                    <p className="font-semibold text-gray-900">
-                      {totalCartons} karton / {totalPcs.toLocaleString()} pcs
-                    </p>
-                  </div>
+              {/* Info Grid */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <p className="text-xs text-gray-600">Pengemudi</p>
+                  <p className="font-semibold text-gray-900 text-xs truncate">
+                    {form.namaPengemudi}
+                  </p>
                 </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <p className="text-xs text-gray-600">Nomor Polisi</p>
+                  <p className="font-semibold text-gray-900 text-xs truncate">
+                    {form.nomorPolisi}
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <p className="text-xs text-gray-600">Produk</p>
+                  <p className="font-semibold text-gray-900 text-xs truncate">
+                    {selectedProduct?.product_name}
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <p className="text-xs text-gray-600">Total Qty</p>
+                  <p className="font-semibold text-orange-600 text-xs">
+                    {totalCartons} ktn / {totalPcs.toLocaleString()} pcs
+                  </p>
+                </div>
+              </div>
 
-                <div className="border-t-2 border-gray-200 pt-4">
-                  <h3 className="font-semibold text-gray-800 mb-3">
-                    Daftar Lokasi Pengambilan:
-                  </h3>
-                  <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {fefoLocations.map((loc, index) => (
-                      <div
-                        key={index}
-                        className="bg-gray-50 rounded-lg p-3 flex justify-between items-center"
-                      >
-                        <div>
-                          <p className="font-semibold text-gray-900">
-                            {index + 1}. {loc.location}
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            BB:{" "}
-                            {Array.isArray(loc.bbPallet)
-                              ? loc.bbPallet.join(", ")
-                              : loc.bbPallet}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            Exp: {loc.expiredDate} ({loc.daysToExpire} hari)
-                          </p>
+              {/* Locations List */}
+              <div>
+                <h3 className="font-bold text-gray-800 text-xs mb-2">
+                  📍 Lokasi Pengambilan ({fefoLocations.length})
+                </h3>
+                <div className="space-y-2">
+                  {fefoLocations.map((loc, index) => (
+                    <div
+                      key={index}
+                      className="bg-gray-50 rounded-lg p-2 border border-gray-200"
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="flex-shrink-0 w-5 h-5 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                              {index + 1}
+                            </span>
+                            <p className="font-bold text-gray-900 text-xs truncate">
+                              {loc.location}
+                            </p>
+                          </div>
+                          <div className="ml-6 space-y-0.5">
+                            <p className="text-xs text-gray-700 truncate">
+                              BB: {Array.isArray(loc.bbPallet) ? loc.bbPallet.join(", ") : loc.bbPallet}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              Exp: {loc.expiredDate} ({loc.daysToExpire}h)
+                            </p>
+                            {/* FEFO Badges */}
+                            <div className="flex gap-1 mt-1 flex-wrap">
+                              {loc.fefo_status === 'release' ? (
+                                <span className="px-1.5 py-0.5 bg-green-100 text-green-700 border border-green-300 rounded text-xs">
+                                  🟢 RELEASE
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 border border-yellow-300 rounded text-xs">
+                                  🟡 HOLD
+                                </span>
+                              )}
+                              {loc.status === 'receh' && (
+                                <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 border border-blue-300 rounded text-xs">
+                                  🔵 Receh
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-bold text-orange-600">
-                            {loc.allocatedQtyPallet} pallet
+                        <div className="flex-shrink-0 text-right">
+                          <p className="font-bold text-orange-600 text-xs">
+                            {loc.qtyTaken} Ctn
                           </p>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               </div>
+            </div>
 
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowConfirmModal(false)}
-                  className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
-                >
-                  Batal
-                </button>
-                <button
-                  onClick={confirmOutbound}
-                  className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors"
-                >
-                  Ya, Konfirmasi Pengambilan
-                </button>
-              </div>
+            {/* Sticky Footer */}
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-2 flex-shrink-0">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                disabled={isSubmitting}
+                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-semibold hover:bg-gray-300 transition-colors disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                onClick={confirmOutbound}
+                disabled={isSubmitting}
+                className="flex-1 bg-green-500 text-white py-2 rounded-lg text-sm font-semibold hover:bg-green-600 transition-colors disabled:opacity-50"
+              >
+                {isSubmitting ? 'Proses...' : 'Konfirmasi'}
+              </button>
             </div>
           </div>
         </div>
@@ -1399,7 +1364,7 @@ export function OutboundForm({
 
       {/* Tabel Transaksi Hari Ini */}
       <div className="mt-8 bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="bg-gradient-to-r from-orange-500 to-red-600 px-6 py-4">
+        <div className="bg-linear-to-r from-orange-500 to-red-600 px-6 py-4">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <span className="text-2xl">📋</span>
             Transaksi Hari Ini
@@ -1559,7 +1524,7 @@ export function OutboundForm({
             {/* Content */}
             <div className="overflow-y-auto max-h-[calc(90vh-140px)] p-6 space-y-6">
               {/* Informasi Pengiriman */}
-              <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-xl p-4 border border-orange-200">
+              <div className="bg-linear-to-br from-orange-50 to-red-50 rounded-xl p-4 border border-orange-200">
                 <h3 className="font-bold text-orange-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">🚚</span> Informasi Pengiriman
                 </h3>
@@ -1593,7 +1558,7 @@ export function OutboundForm({
               </div>
 
               {/* Informasi Produk */}
-              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
+              <div className="bg-linear-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
                 <h3 className="font-bold text-green-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">📦</span> Informasi Produk
                 </h3>
@@ -1652,7 +1617,7 @@ export function OutboundForm({
               </div>
 
               {/* Lokasi Pengambilan FEFO dengan QR Code */}
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-200">
+              <div className="bg-linear-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-200">
                 <h3 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">📍</span> Lokasi Pengambilan FEFO
                 </h3>
@@ -1674,7 +1639,32 @@ export function OutboundForm({
                                 {locationItem.baris}-P{locationItem.level}
                               </span>
                             </div>
-                            <div className="text-sm space-y-1">
+                            <div className="text-sm space-y-2">
+                              {/* FEFO & Status Badges (jika ada) */}
+                              {(locationItem.fefo_status || locationItem.status) && (
+                                <div className="flex gap-1.5 flex-wrap mb-2">
+                                  {locationItem.status === 'receh' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700 border border-blue-300">
+                                      🔵 Receh
+                                    </span>
+                                  )}
+                                  {locationItem.status === 'salah-cluster' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 border border-red-300">
+                                      🔴 Salah Cluster
+                                    </span>
+                                  )}
+                                  {locationItem.fefo_status === 'release' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700 border border-green-300">
+                                      🟢 RELEASE
+                                    </span>
+                                  )}
+                                  {locationItem.fefo_status === 'hold' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-700 border border-yellow-300">
+                                      🟡 HOLD
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               <div>
                                 <span className="text-gray-600">
                                   BB Produk:
@@ -1712,7 +1702,7 @@ export function OutboundForm({
               </div>
 
               {/* Waktu Input */}
-              <div className="bg-gradient-to-br from-gray-50 to-slate-50 rounded-xl p-4 border border-gray-200">
+              <div className="bg-linear-to-br from-gray-50 to-slate-50 rounded-xl p-4 border border-gray-200">
                 <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">⏰</span> Waktu Input
                 </h3>
@@ -1738,7 +1728,7 @@ export function OutboundForm({
               </div>
 
               {/* Status */}
-              <div className="bg-gradient-to-br from-slate-50 to-gray-50 rounded-xl p-4 border border-slate-200">
+              <div className="bg-linear-to-br from-slate-50 to-gray-50 rounded-xl p-4 border border-slate-200">
                 <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">✓</span> Status Transaksi
                 </h3>
@@ -1773,7 +1763,7 @@ export function OutboundForm({
             className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-4">
+            <div className="bg-linear-to-r from-amber-500 to-orange-600 px-6 py-4">
               <h2 className="text-xl font-bold text-white">
                 ✏️ Edit Transaksi
               </h2>
@@ -1858,7 +1848,7 @@ export function OutboundForm({
             className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="bg-gradient-to-r from-red-500 to-pink-600 px-6 py-4">
+            <div className="bg-linear-to-r from-red-500 to-pink-600 px-6 py-4">
               <h2 className="text-xl font-bold text-white">
                 ❌ Batalkan Transaksi
               </h2>

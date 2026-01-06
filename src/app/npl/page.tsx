@@ -21,7 +21,7 @@ export default async function NplPage() {
   if (!profile) redirect("/login");
 
   // 2. Ambil Data Pendukung secara Paralel untuk Performa
-  const [productsRes, stocksRes, configsRes, homesRes, historyRes] = await Promise.all([
+  const [productsRes, stocksRes, configsRes, homesRes, historyRes, overridesRes] = await Promise.all([
     // Ambil produk yang tersedia di gudang tersebut
     supabase
       .from("products")
@@ -54,7 +54,13 @@ export default async function NplPage() {
       .select("*, products(product_code, product_name)")
       .eq("warehouse_id", profile.warehouse_id)
       .gte("created_at", new Date().toISOString().slice(0, 10))
-      .order("created_at", { ascending: false })
+      .order("created_at", { ascending: false }),
+
+    // Ambil cluster_cell_overrides untuk transit area dan custom capacity
+    supabase
+      .from("cluster_cell_overrides")
+      .select("*")
+      .eq("is_disabled", false)
   ]);
 
   return (
@@ -68,6 +74,7 @@ export default async function NplPage() {
           clusterConfigs={configsRes.data || []}
           productHomes={homesRes.data || []}
           initialHistory={historyRes.data || []}
+          clusterCellOverrides={overridesRes.data || []}
         />
       </div>
     </>

@@ -40,7 +40,14 @@ export default async function InboundPage() {
   const { data: clusterConfigs } = await supabase
     .from("cluster_configs")
     .select("*")
-    .eq("warehouse_id", profile.warehouse_id);
+    .eq("warehouse_id", profile.warehouse_id)
+    .eq("is_active", true);
+
+  // Ambil cluster_cell_overrides untuk custom baris/pallet per lorong
+  const { data: clusterOverrides } = await supabase
+    .from("cluster_cell_overrides")
+    .select("*")
+    .eq("is_disabled", false);
 
   // Ambil data users untuk mapping received_by
   const { data: users } = await supabase
@@ -90,6 +97,7 @@ export default async function InboundPage() {
       productHomes={productHomes || []}
       warehouseId={profile.warehouse_id}
       clusterConfigs={clusterConfigs || []}
+      clusterOverrides={clusterOverrides || []}
       historyData={formattedHistory}
       users={users || []}
     />
