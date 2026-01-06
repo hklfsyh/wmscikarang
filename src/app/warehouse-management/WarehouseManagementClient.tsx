@@ -159,7 +159,7 @@ export default function WarehouseManagementClient({
     <>
       <Navigation userProfile={userProfile} />
 
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 lg:pl-64">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 lg:pl-8">
         <div className="w-full max-w-full space-y-3 sm:space-y-4 p-4">
           {/* Header */}
           <div className="bg-white rounded-2xl shadow-xl p-6 flex justify-between items-center">

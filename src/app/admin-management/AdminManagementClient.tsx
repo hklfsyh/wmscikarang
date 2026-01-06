@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Navigation } from "@/components/navigation";
 import { ConfirmationModal } from "@/components/confirmation-modal";
 import { createClient } from "@/utils/supabase/client";
@@ -28,6 +28,12 @@ interface UserProfile {
   warehouse_id?: string | null;
 }
 
+interface Warehouse {
+  id: string;
+  warehouseCode: string;
+  cityName: string;
+}
+
 export default function AdminManagementClient({
   userProfile,
   initialUsers,
@@ -38,6 +44,7 @@ export default function AdminManagementClient({
   const supabase = createClient();
   const router = useRouter();
   const [users] = useState<User[]>(initialUsers);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -62,6 +69,28 @@ export default function AdminManagementClient({
     role: "admin_warehouse" as "developer" | "admin_cabang" | "admin_warehouse",
     warehouseId: userProfile.warehouse_id || "",
   });
+
+  // Fetch warehouses data
+  useEffect(() => {
+    const fetchWarehouses = async () => {
+      const { data } = await supabase
+        .from("warehouses")
+        .select("id, warehouse_code, city_name")
+        .eq("is_active", true)
+        .order("city_name", { ascending: true });
+
+      if (data) {
+        setWarehouses(
+          data.map((wh: any) => ({
+            id: wh.id,
+            warehouseCode: wh.warehouse_code,
+            cityName: wh.city_name,
+          }))
+        );
+      }
+    };
+    fetchWarehouses();
+  }, [supabase]);
 
   const resetForm = () => {
     setFormData({
@@ -89,6 +118,18 @@ export default function AdminManagementClient({
         title: "Validasi Gagal",
         message:
           "Username, Nama Lengkap, Email, dan Password wajib diisi untuk pendaftaran Auth!",
+        onConfirm: () => {},
+      });
+      return;
+    }
+
+    // Validasi warehouse untuk role non-developer
+    if (formData.role !== "developer" && !formData.warehouseId) {
+      setConfirmModal({
+        isOpen: true,
+        type: "error",
+        title: "Validasi Gagal",
+        message: "Warehouse harus dipilih untuk role Admin Cabang dan Admin Warehouse!",
         onConfirm: () => {},
       });
       return;
@@ -485,6 +526,40 @@ export default function AdminManagementClient({
                     >
                       <option value="admin_warehouse">Admin Warehouse</option>
                       <option value="admin_cabang">Admin Cabang</option>
+                      <option value="developer">Developer</option>
+                    </select>
+                  </div>
+                )}
+                {/* Warehouse Selection - Only show if role is NOT developer */}
+                {formData.role !== "developer" && (
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 mb-1 block">
+                      PILIH WAREHOUSE *
+                    </label>
+                    <select
+                      disabled={loading || userProfile.role === "admin_cabang"}
+                      value={formData.warehouseId}
+                      onChange={(e) =>
+                        setFormData({ ...formData, warehouseId: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border rounded-xl text-sm bg-white"
+                    >
+                      <option value="">-- Pilih Gudang --</option>
+                      {userProfile.role === "developer"
+                        ? // Developer bisa pilih semua warehouse
+                          warehouses.map((wh) => (
+                            <option key={wh.id} value={wh.id}>
+                              {wh.cityName} ({wh.warehouseCode})
+                            </option>
+                          ))
+                        : // Admin Cabang hanya bisa pilih warehouse miliknya (auto-selected & disabled)
+                          warehouses
+                            .filter((wh) => wh.id === userProfile.warehouse_id)
+                            .map((wh) => (
+                              <option key={wh.id} value={wh.id}>
+                                {wh.cityName} ({wh.warehouseCode})
+                              </option>
+                            ))}
                     </select>
                   </div>
                 )}
