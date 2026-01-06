@@ -221,7 +221,7 @@ Semua 3 minor issues yang teridentifikasi sudah diperbaiki pada 26 Desember 2025
 
 ---
 
-## 🚀 IMPLEMENTATION ROADMAP
+## � IMPLEMENTATION ROADMAP
 
 ### Phase 1: Setup & Master Data (Week 1)
 

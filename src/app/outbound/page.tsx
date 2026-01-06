@@ -1,40 +1,65 @@
-"use client";
+// src/app/outbound/page.tsx
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { createClient } from "@/utils/supabase/server";
 import { OutboundForm } from "@/components/outbound-form";
 import { OutboundHistoryPage } from "@/components/outbound-history";
+import { redirect } from "next/navigation";
 
-export default function OutboundPage() {
-  const router = useRouter();
-  const [userRole, setUserRole] = useState<string | null>(null);
+export default async function OutboundPage() {
+  const supabase = await createClient();
 
-  useEffect(() => {
-    const userStr = localStorage.getItem("user");
-    if (!userStr) {
-      router.push("/login");
-      return;
-    }
+  // 1. Cek Sesi User
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
 
-    const user = JSON.parse(userStr);
-    setUserRole(user.role);
-  }, [router]);
+  // 2. Ambil Profil & Role User
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role, warehouse_id")
+    .eq("id", user.id)
+    .single();
 
-  if (!userRole) {
+  if (!profile) redirect("/login");
+
+  // 3. Ambil Data Produk Real (Hanya untuk gudang user tersebut)
+  const { data: products } = await supabase
+    .from("products")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id)
+    .order("product_name", { ascending: true });
+
+  // 3. LOGIKA BARU: Jika Admin Cabang, ambil SEMUA riwayat riil
+  if (profile.role === "admin_cabang") {
+    const { data: realHistory } = await supabase
+      .from("outbound_history")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id)
+      .order("created_at", { ascending: false });
+
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <div className="text-6xl mb-4">🔒</div>
-          <p className="text-xl font-semibold text-gray-700">Memeriksa akses...</p>
-        </div>
-      </div>
+      <OutboundHistoryPage
+        history={realHistory || []}
+        products={products || []}
+      />
     );
   }
 
-  // Admin Cabang sees history, Admin Warehouse sees form
-  if (userRole === "admin_cabang") {
-    return <OutboundHistoryPage />;
-  }
+  // 4. Jika Admin Warehouse (Tetap seperti sebelumnya)
+  const todayStart = new Date().toISOString().slice(0, 10);
+  const { data: historyToday } = await supabase
+    .from("outbound_history")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id)
+    .gte("created_at", todayStart)
+    .order("created_at", { ascending: false });
 
-  return <OutboundForm />;
+  return (
+    <OutboundForm
+      products={products || []}
+      warehouseId={profile.warehouse_id || ""}
+      history={historyToday || []}
+    />
+  );
 }

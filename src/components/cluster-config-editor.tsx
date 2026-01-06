@@ -4,6 +4,7 @@ import { useState } from "react";
 import { type ClusterConfig, type ClusterCellOverride } from "@/lib/mock/warehouse-config";
 import { useToast, ToastContainer } from "./toast";
 import { Save, Plus, Trash2, Edit2, X } from "lucide-react";
+import { updateClusterConfigAction } from "@/app/stock-list-master/actions";
 
 interface ClusterConfigEditorProps {
   clusters: ClusterConfig[];
@@ -19,6 +20,9 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
   const [editData, setEditData] = useState<ClusterConfig | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  
+  // Local state for overrides during edit mode
+  const [localOverrides, setLocalOverrides] = useState<ClusterCellOverride[]>([]);
 
   const [formData, setFormData] = useState<ClusterConfig>({
     id: "",
@@ -45,15 +49,18 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
   const handleEditCluster = () => {
     if (!selectedCluster) return;
     setEditData(JSON.parse(JSON.stringify(selectedCluster))); // Deep clone
+    // Initialize local overrides with current overrides for this cluster
+    setLocalOverrides(cellOverrides.filter(o => o.clusterConfigId === selectedCluster.id));
     setEditMode(true);
   };
 
   const handleCancelEdit = () => {
     setEditMode(false);
     setEditData(null);
+    setLocalOverrides([]);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editData) return;
 
     if (!editData.clusterChar || !editData.clusterName) {
@@ -61,12 +68,40 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
       return;
     }
 
-    onUpdate(clusters.map((c) => (c.id === selectedCluster?.id ? editData : c)));
-    success("Konfigurasi cluster berhasil diupdate!");
+    try {
+      // Update cluster config in database
+      const result = await updateClusterConfigAction(editData.id, {
+        cluster_name: editData.clusterName,
+        default_lorong_count: editData.defaultLorongCount,
+        default_baris_count: editData.defaultBarisCount,
+        default_pallet_level: editData.defaultPalletLevel,
+        is_active: editData.isActive,
+      });
 
-    setSelectedCluster(editData);
-    setEditMode(false);
-    setEditData(null);
+      if (!result.success) {
+        error(result.message || "Gagal mengupdate konfigurasi cluster");
+        return;
+      }
+
+      // Update cluster config in UI
+      onUpdate(clusters.map((c) => (c.id === selectedCluster?.id ? editData : c)));
+      
+      // Update only overrides for this specific cluster
+      // Keep all overrides from other clusters unchanged, replace only current cluster's overrides
+      const otherClusterOverrides = cellOverrides.filter(o => o.clusterConfigId !== selectedCluster?.id);
+      const updatedAllOverrides = [...otherClusterOverrides, ...localOverrides];
+      
+      onUpdateOverrides(updatedAllOverrides);
+      
+      success("Konfigurasi cluster berhasil diupdate!");
+
+      setSelectedCluster(editData);
+      setEditMode(false);
+      setEditData(null);
+      setLocalOverrides([]);
+    } catch (err: any) {
+      error(err.message || "Terjadi kesalahan saat menyimpan");
+    }
   };
 
   const handleAdd = () => {
@@ -113,6 +148,10 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
 
   // Helper function to get overrides for current cluster
   const getClusterOverrides = (clusterId: string) => {
+    // In edit mode, use local overrides; otherwise use props
+    if (editMode && selectedCluster?.id === clusterId) {
+      return localOverrides;
+    }
     return cellOverrides.filter(override => override.clusterConfigId === clusterId);
   };
 
@@ -136,20 +175,23 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
       updatedAt: new Date().toISOString(),
     };
 
-    onUpdateOverrides([...cellOverrides, newOverride]);
+    // Add to local state only
+    setLocalOverrides([...localOverrides, newOverride]);
   };
 
   const handleUpdateCellOverride = (overrideId: string, field: string, value: string | number | boolean | null) => {
-    const updated = cellOverrides.map(override =>
+    // Update local state only
+    const updated = localOverrides.map(override =>
       override.id === overrideId
         ? { ...override, [field]: value, updatedAt: new Date().toISOString() }
         : override
     );
-    onUpdateOverrides(updated);
+    setLocalOverrides(updated);
   };
 
   const handleRemoveCellOverride = (overrideId: string) => {
-    onUpdateOverrides(cellOverrides.filter(override => override.id !== overrideId));
+    // Remove from local state only
+    setLocalOverrides(localOverrides.filter(override => override.id !== overrideId));
   };
 
   const displayCluster = editMode ? editData : selectedCluster;
@@ -167,6 +209,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
           </p>
         </div>
         <button
+          type="button"
           onClick={handleAdd}
           className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
         >
@@ -194,11 +237,11 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-blue-500 text-white flex items-center justify-center font-bold text-lg">
+                    <div className="w-14 h-14 rounded-lg bg-blue-500 text-white flex items-center justify-center font-bold text-2xl flex-shrink-0">
                       {cluster.clusterChar}
                     </div>
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-slate-800">{cluster.clusterName}</h4>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-slate-800 truncate">{cluster.clusterName}</h4>
                       <p className="text-xs text-slate-500">
                         {cluster.defaultLorongCount} Lorong × {cluster.defaultBarisCount} Baris
                       </p>
@@ -231,7 +274,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
           ) : (
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               {/* Header */}
-              <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-6 text-white">
+              <div className="bg-linear-to-r from-blue-500 to-blue-600 p-6 text-white">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-2xl font-bold mb-1">
@@ -243,6 +286,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
                     {!editMode ? (
                       <>
                         <button
+                          type="button"
                           onClick={handleEditCluster}
                           className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg flex items-center gap-2 transition-all"
                         >
@@ -250,6 +294,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
                           <span>Edit</span>
                         </button>
                         <button
+                          type="button"
                           onClick={handleDelete}
                           className="px-4 py-2 bg-red-500 hover:bg-red-600 rounded-lg flex items-center gap-2 transition-all"
                         >
@@ -260,6 +305,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
                     ) : (
                       <>
                         <button
+                          type="button"
                           onClick={handleSaveEdit}
                           className="px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg flex items-center gap-2 transition-all"
                         >
@@ -267,6 +313,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
                           <span>Simpan</span>
                         </button>
                         <button
+                          type="button"
                           onClick={handleCancelEdit}
                           className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg flex items-center gap-2 transition-all"
                         >
@@ -377,6 +424,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
                     <h4 className="font-semibold text-purple-900">Cell Overrides</h4>
                     {editMode && (
                       <button
+                        type="button"
                         onClick={handleAddCellOverride}
                         className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 flex items-center gap-1"
                       >
@@ -496,6 +544,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
                             </div>
                             <div className="flex justify-end">
                               <button
+                                type="button"
                                 onClick={() => handleRemoveCellOverride(override.id)}
                                 className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
                               >
@@ -541,6 +590,7 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center">
               <h3 className="text-xl font-bold text-slate-800">Tambah Cluster Baru</h3>
               <button
+                type="button"
                 onClick={() => setShowAddModal(false)}
                 className="text-slate-500 hover:text-slate-700 text-2xl"
               >
@@ -630,12 +680,14 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
 
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex gap-3">
               <button
+                type="button"
                 onClick={() => setShowAddModal(false)}
                 className="flex-1 px-6 py-3 border-2 border-slate-300 text-slate-700 rounded-xl font-semibold hover:bg-slate-50"
               >
                 Batal
               </button>
               <button
+                type="button"
                 onClick={handleSubmitAdd}
                 className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700"
               >
@@ -664,12 +716,14 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
 
             <div className="flex gap-3">
               <button
+                type="button"
                 onClick={() => setShowDeleteModal(false)}
                 className="flex-1 px-6 py-3 border-2 border-slate-300 text-slate-700 rounded-xl font-semibold hover:bg-slate-50"
               >
                 Batal
               </button>
               <button
+                type="button"
                 onClick={confirmDelete}
                 className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700"
               >

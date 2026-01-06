@@ -1,9 +1,55 @@
-import { WarehouseLayout } from "@/components/warehouse-layout";
+// src/app/warehouse-layout/page.tsx
 
-export default function WarehouseLayoutPage() {
+import { createClient } from "@/utils/supabase/server";
+import { redirect } from "next/navigation";
+import WarehouseLayoutClient from "./WarehouseLayoutClient";
+
+export default async function WarehouseLayoutPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) redirect("/login");
+
+  // 1. Ambil Profil User
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role, warehouse_id, full_name, username")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile) redirect("/login");
+
+  // 2. Ambil Data Konfigurasi Gudang (Real DB)
+  const [stocksRes, configsRes, overridesRes, homesRes] = await Promise.all([
+    supabase
+      .from("stock_list")
+      .select("*, products(id, product_code, product_name, default_cluster)")
+      .eq("warehouse_id", profile.warehouse_id)
+      .order("fefo_status", { ascending: false }) // Release first
+      .order("bb_produk", { ascending: true }), // Then by BB Produk
+    supabase
+      .from("cluster_configs")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("is_active", true),
+    supabase
+      .from("cluster_cell_overrides")
+      .select("*"),
+    supabase
+      .from("product_homes")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id)
+  ]);
+
   return (
     <div className="min-h-screen bg-slate-50">
-      <WarehouseLayout />
+      <WarehouseLayoutClient 
+        userProfile={profile}
+        initialStocks={stocksRes.data || []}
+        clusterConfigs={configsRes.data || []}
+        clusterCellOverrides={overridesRes.data || []}
+        productHomes={homesRes.data || []}
+      />
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { useToast, ToastContainer } from "./toast";
 interface ProductHomeEditorProps {
   productHomes: ProductHome[];
   clusters: ClusterConfig[];
-  products: Array<{ productCode: string; productName: string }>;
+  products: Array<{ id: string; productCode: string; productName: string }>;
   onUpdate: (productHomes: ProductHome[]) => void;
 }
 
@@ -45,8 +45,11 @@ export default function ProductHomeEditor({
     if (filterCluster !== "all" && ph.clusterChar !== filterCluster) return false;
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
-      // Search by productId for now (will need product lookup for productName)
-      return ph.productId.toLowerCase().includes(search);
+      // Search by productCode or productName
+      return (
+        (ph.productCode && ph.productCode.toLowerCase().includes(search)) ||
+        (ph.productName && ph.productName.toLowerCase().includes(search))
+      );
     }
     return true;
   });
@@ -89,11 +92,58 @@ export default function ProductHomeEditor({
     setSelectedProductHome(null);
   };
 
+  // Validation function to check if location (lorong/baris ranges) already exists in the same cluster
+  const validateLocationConflict = (currentId: string | null = null): boolean => {
+    const conflicts = productHomes.filter((ph) => {
+      // Skip checking against itself when editing
+      if (currentId && ph.id === currentId) return false;
+      
+      // Check if same cluster
+      if (ph.clusterChar !== formData.clusterChar) return false;
+      
+      // Check if lorong ranges overlap
+      const lorongOverlap = 
+        (formData.lorongStart >= ph.lorongStart && formData.lorongStart <= ph.lorongEnd) ||
+        (formData.lorongEnd >= ph.lorongStart && formData.lorongEnd <= ph.lorongEnd) ||
+        (formData.lorongStart <= ph.lorongStart && formData.lorongEnd >= ph.lorongEnd);
+      
+      if (!lorongOverlap) return false;
+      
+      // Check if baris ranges overlap
+      const barisOverlap = 
+        (formData.barisStart >= ph.barisStart && formData.barisStart <= ph.barisEnd) ||
+        (formData.barisEnd >= ph.barisStart && formData.barisEnd <= ph.barisEnd) ||
+        (formData.barisStart <= ph.barisStart && formData.barisEnd >= ph.barisEnd);
+      
+      return barisOverlap;
+    });
+
+    if (conflicts.length > 0) {
+      const conflict = conflicts[0];
+      const product = products.find(p => p.id === conflict.productId);
+      const productName = product ? `${product.productCode} - ${product.productName}` : conflict.productId;
+      error(
+        `Lokasi sudah digunakan oleh produk lain!\n` +
+        `Produk: ${productName}\n` +
+        `Cluster ${conflict.clusterChar}, Lorong ${conflict.lorongStart}-${conflict.lorongEnd}, Baris ${conflict.barisStart}-${conflict.barisEnd}`
+      );
+      return false;
+    }
+    
+    return true;
+  };
+
   const handleSubmitAdd = () => {
     if (!formData.productId || !formData.clusterChar) {
       error("Product ID dan cluster harus diisi!");
       return;
     }
+    
+    // Validate location conflict
+    if (!validateLocationConflict()) {
+      return;
+    }
+    
     const newData = { ...formData, updatedAt: new Date().toISOString() };
     onUpdate([...productHomes, newData]);
     setShowAddModal(false);
@@ -104,6 +154,12 @@ export default function ProductHomeEditor({
       error("Product ID dan cluster harus diisi!");
       return;
     }
+    
+    // Validate location conflict (excluding current product home)
+    if (!validateLocationConflict(selectedProductHome?.id || null)) {
+      return;
+    }
+    
     const updatedData = { ...formData, updatedAt: new Date().toISOString() };
     onUpdate(productHomes.map((ph) => (ph.id === selectedProductHome?.id ? updatedData : ph)));
     setShowEditModal(false);
@@ -180,15 +236,13 @@ export default function ProductHomeEditor({
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredProductHomes.map((ph) => {
-                // For display, we show productId (in real app, this would JOIN with products table)
-                const productDisplay = products.find(p => `prod-${p.productCode}` === ph.productId);
                 return (
-                  <tr key={ph.id} className="hover:bg-blue-50 transition-colors">
+                  <tr key={ph.id} className="hover:bg-50 transition-colors">
                     <td className="px-6 py-4 text-sm font-mono text-gray-700">
-                      {productDisplay?.productCode || ph.productId}
+                      {ph.productCode || ph.productId}
                     </td>
                     <td className="px-6 py-4 text-sm font-semibold text-gray-800">
-                      {productDisplay?.productName || "N/A"}
+                      {ph.productName || "N/A"}
                     </td>
                     <td className="px-6 py-4 text-center">
                       <span className="inline-block px-4 py-2 bg-blue-100 text-blue-700 rounded-lg font-bold">
@@ -263,8 +317,17 @@ export default function ProductHomeEditor({
 
       {/* Add/Edit Modal */}
       {(showAddModal || showEditModal) && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => {
+            setShowAddModal(false);
+            setShowEditModal(false);
+          }}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
               <h3 className="text-xl font-bold text-gray-800">
                 {showAddModal ? "Assign Product Home" : "Edit Product Home"}
@@ -295,22 +358,26 @@ export default function ProductHomeEditor({
                         setFormData({ ...formData, productId: e.target.value });
                       }}
                       className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
-                      disabled={showEditModal}
                     >
                       <option value="">-- Pilih Produk --</option>
                       {products.map((product) => (
-                        <option key={product.productCode} value={`prod-${product.productCode}`}>
+                        <option key={product.id} value={product.id}>
                           {product.productCode} - {product.productName}
                         </option>
                       ))}
                     </select>
                   </div>
-                  {formData.productId && (
-                    <div className="bg-white p-3 rounded-lg border border-blue-300">
-                      <p className="text-sm text-gray-600">Selected Product ID:</p>
-                      <p className="font-semibold text-gray-800 font-mono text-sm">{formData.productId}</p>
-                    </div>
-                  )}
+                  {formData.productId && (() => {
+                    const selectedProduct = products.find(p => p.id === formData.productId);
+                    return selectedProduct ? (
+                      <div className="bg-white p-3 rounded-lg border border-blue-300">
+                        <p className="text-sm text-gray-600">Selected Product:</p>
+                        <p className="font-semibold text-gray-800 text-sm">
+                          {selectedProduct.productCode} - {selectedProduct.productName}
+                        </p>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               </div>
 
@@ -471,8 +538,14 @@ export default function ProductHomeEditor({
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && selectedProductHome && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowDeleteModal(false)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-3xl">⚠️</span>

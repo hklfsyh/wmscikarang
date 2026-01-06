@@ -45,3 +45,7 @@ next-env.d.ts
 !README.md
 # *.txt
 # *.dbml
+filesql
+*.sql
+src/components/inbound-history-old.tsx
+src/components/inbound-form-old.tsx

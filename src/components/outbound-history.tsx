@@ -1,56 +1,69 @@
 "use client";
 
-// Outbound History Component for Superadmin
+// Outbound History Component for Admin Cabang
 import { useState, useMemo } from "react";
-import { outboundHistoryData, OutboundHistory } from "@/lib/mock/transaction-history";
-import { productMasterData } from "@/lib/mock/product-master";
-import { Search, Calendar, TruckIcon, FileDown } from "lucide-react";
+import { Search, Calendar, TruckIcon, FileDown, X, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import * as XLSX from "xlsx";
 
-export function OutboundHistoryPage() {
+// Interface untuk Props
+interface OutboundHistoryPageProps {
+  history: any[];
+  products: any[];
+}
+
+export function OutboundHistoryPage({
+  history,
+  products,
+}: OutboundHistoryPageProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<
     "all" | "completed" | "partial"
   >("all");
-  const [selectedItem, setSelectedItem] = useState<OutboundHistory | null>(null);
+  const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Filter data
   const filteredData = useMemo(() => {
-    return outboundHistoryData.filter((item) => {
+    return history.filter((item) => {
       // Get product data for search
-      const product = productMasterData.find(p => p.id === item.productId);
-      
+      const product = products.find((p) => p.id === item.product_id);
+
       // Search filter
       const searchLower = searchQuery.toLowerCase();
       const matchesSearch =
         searchQuery === "" ||
         item.id.toLowerCase().includes(searchLower) ||
-        item.transactionCode.toLowerCase().includes(searchLower) ||
-        (product?.productName.toLowerCase().includes(searchLower) || false) ||
-        (product?.productCode.toLowerCase().includes(searchLower) || false) ||
-        item.driverName.toLowerCase().includes(searchLower) ||
-        item.vehicleNumber.toLowerCase().includes(searchLower) ||
-        item.locations.some(loc => 
-          `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`.toLowerCase().includes(searchLower)
-        );
+        item.transaction_code.toLowerCase().includes(searchLower) ||
+        product?.product_name.toLowerCase().includes(searchLower) ||
+        false ||
+        product?.product_code.toLowerCase().includes(searchLower) ||
+        false ||
+        item.driver_name.toLowerCase().includes(searchLower) ||
+        item.vehicle_number.toLowerCase().includes(searchLower) ||
+        (item.locations &&
+          item.locations.some((loc: any) =>
+            `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`
+              .toLowerCase()
+              .includes(searchLower)
+          ));
 
       // Date filter
-      const itemDate = new Date(item.departureTime);
+      const itemDate = new Date(item.created_at);
       const matchesStartDate = !startDate || itemDate >= new Date(startDate);
       const matchesEndDate = !endDate || itemDate <= new Date(endDate);
 
       // Status filter - all items are completed in new schema
-      const matchesStatus = selectedStatus === "all" || selectedStatus === "completed";
+      const matchesStatus =
+        selectedStatus === "all" || selectedStatus === "completed";
 
       return (
         matchesSearch && matchesStartDate && matchesEndDate && matchesStatus
       );
     });
-  }, [searchQuery, startDate, endDate, selectedStatus]);
+  }, [searchQuery, startDate, endDate, selectedStatus, history, products]);
 
   // Format date for display
   const formatDate = (dateStr: string) => {
@@ -83,7 +96,7 @@ export function OutboundHistoryPage() {
   };
 
   // Open detail modal
-  const handleViewDetail = (item: OutboundHistory) => {
+  const handleViewDetail = (item: any) => {
     setSelectedItem(item);
     setShowDetailModal(true);
   };
@@ -102,34 +115,48 @@ export function OutboundHistoryPage() {
 
     filteredData.forEach((item) => {
       // Get product data
-      const product = productMasterData.find(p => p.id === item.productId);
-      const totalPcs = product ? item.qtyCarton * product.qtyPerCarton : 0;
-      
+      const product = products.find((p) => p.id === item.product_id);
+      const totalPcs = product ? item.qty_carton * product.qty_per_carton : 0;
+
       // Untuk setiap lokasi dalam transaksi, buat baris terpisah
-      item.locations.forEach((locationItem, locIdx) => {
+      const locations = item.locations || [];
+      locations.forEach((locationItem: any, locIdx: number) => {
         const locationStr = `${locationItem.cluster}-L${locationItem.lorong}-B${locationItem.baris}-P${locationItem.level}`;
-        const expiredDate = new Date(locationItem.expiredDate).toLocaleDateString("id-ID", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        });
+        
+        // Extract expired date from BB Produk (first 6 digits YYMMDD)
+        let expiredDate = "-";
+        const bbProduk = locationItem.bbProduk || "";
+        if (bbProduk.length >= 6) {
+          const yy = bbProduk.substring(0, 2);
+          const mm = bbProduk.substring(2, 4);
+          const dd = bbProduk.substring(4, 6);
+          const year = parseInt(yy) + 2000; // Assume 20xx
+          const expDate = new Date(year, parseInt(mm) - 1, parseInt(dd));
+          expiredDate = expDate.toLocaleDateString("id-ID", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          });
+        }
 
         exportData.push({
           No: rowNum++,
-          "Kode Transaksi": item.transactionCode,
-          "Tanggal": formatDate(item.departureTime),
-          "Pengemudi": item.driverName,
-          "No. Polisi": item.vehicleNumber,
-          "Kode Produk": product?.productCode || '-',
-          "Nama Produk": product?.productName || '-',
+          "Kode Transaksi": item.transaction_code,
+          Tanggal: formatDate(item.created_at),
+          Pengemudi: item.driver_name,
+          "No. Polisi": item.vehicle_number,
+          "Kode Produk": product?.product_code || "-",
+          "Nama Produk": product?.product_name || "-",
           "Total PCS": totalPcs,
           "Lokasi #": locIdx + 1,
-          "Lokasi": locationStr,
-          "Qty Carton": locationItem.qtyCarton,
+          Lokasi: locationStr,
+          "Qty Carton": locationItem.qtyCarton || 0,
           "BB Produk": locationItem.bbProduk,
           "Expired Date": expiredDate,
-          "Status": "Selesai",
-          "Waktu Keluar": formatDateTime(item.departureTime),
+          Status: "Selesai",
+          "Waktu Keluar": formatDateTime(
+            item.departure_time || item.created_at
+          ),
         });
       });
     });
@@ -294,7 +321,7 @@ export function OutboundHistoryPage() {
           {/* Summary */}
           <div className="mt-2 pt-2 border-t border-gray-200">
             <p className="text-[10px] sm:text-xs text-gray-600">
-              {filteredData.length} dari {outboundHistoryData.length} transaksi
+              {filteredData.length} dari {history.length} transaksi
             </p>
           </div>
         </div>
@@ -343,34 +370,41 @@ export function OutboundHistoryPage() {
                   </tr>
                 ) : (
                   filteredData.map((item) => {
-                    const product = productMasterData.find(p => p.id === item.productId);
+                    const product = products.find(
+                      (p) => p.id === item.product_id
+                    );
                     return (
                       <tr
                         key={item.id}
                         className="hover:bg-orange-50 transition-colors"
                       >
                         <td className="px-2 py-1.5 text-[10px] sm:text-xs text-gray-700 whitespace-nowrap">
-                          {formatDate(item.departureTime)}
+                          {formatDate(item.departure_time)}
                         </td>
                         <td className="px-2 py-1.5 text-[10px] sm:text-xs font-semibold text-gray-800 whitespace-nowrap max-w-[100px] truncate">
-                          {item.driverName}
+                          {item.driver_name}
                         </td>
                         <td className="px-2 py-1.5">
                           <div className="text-[10px] sm:text-xs max-w-[150px]">
                             <div className="font-mono text-orange-600">
-                              {product?.productCode || '-'}
+                              {product?.product_code || "-"}
                             </div>
                             <div
                               className="font-semibold text-gray-800 truncate"
-                              title={product?.productName || '-'}
+                              title={product?.product_name || "-"}
                             >
-                              {product?.productName || '-'}
+                              {product?.product_name || "-"}
                             </div>
                           </div>
                         </td>
                         <td className="px-2 py-1.5">
                           {(() => {
-                            const bbList = item.locations.map(loc => loc.bbProduk).filter((bb, idx, arr) => arr.indexOf(bb) === idx);
+                            const bbList = item.locations
+                              .map((loc: any) => loc.bbProduk)
+                              .filter(
+                                (bb: any, idx: number, arr: any[]) =>
+                                  arr.indexOf(bb) === idx
+                              );
                             if (bbList.length === 0)
                               return (
                                 <span className="text-gray-400 text-[10px]">
@@ -378,45 +412,45 @@ export function OutboundHistoryPage() {
                                 </span>
                               );
                             return (
-                            <div className="text-[10px] sm:text-xs max-w-[120px]">
-                              {bbList.length === 1 ? (
-                                <span className="font-mono text-purple-600">
-                                  {bbList[0]}
-                                </span>
-                              ) : (
-                                <div className="flex flex-col gap-0.5">
+                              <div className="text-[10px] sm:text-xs max-w-[120px]">
+                                {bbList.length === 1 ? (
                                   <span className="font-mono text-purple-600">
                                     {bbList[0]}
                                   </span>
-                                  <span className="text-gray-500 text-[9px]">
-                                    +{bbList.length - 1} lainnya
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td className="px-2 py-2 text-center text-xs font-bold text-green-600">
-                        {item.locations.length}
-                      </td>
-                      <td className="px-2 py-2 text-center text-xs font-bold text-blue-600">
-                        {item.qtyCarton}
-                      </td>
-                      <td className="px-2 py-2 text-center">
-                        <span className="inline-block px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-bold whitespace-nowrap">
-                          ✓ Done
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          onClick={() => handleViewDetail(item)}
-                          className="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs font-semibold hover:bg-orange-700 transition-colors"
-                        >
-                          Detail
-                        </button>
-                      </td>
-                    </tr>
+                                ) : (
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="font-mono text-purple-600">
+                                      {bbList[0]}
+                                    </span>
+                                    <span className="text-gray-500 text-[9px]">
+                                      +{bbList.length - 1} lainnya
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs font-bold text-green-600">
+                          {item.locations.length}
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs font-bold text-blue-600">
+                          {item.qty_carton}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <span className="inline-block px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-bold whitespace-nowrap">
+                            ✓ Done
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            onClick={() => handleViewDetail(item)}
+                            className="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs font-semibold hover:bg-orange-700 transition-colors"
+                          >
+                            Detail
+                          </button>
+                        </td>
+                      </tr>
                     );
                   })
                 )}
@@ -443,8 +477,8 @@ export function OutboundHistoryPage() {
                       Detail Transaksi Outbound
                     </h2>
                     <p className="text-sm opacity-90 mt-1">
-                      {formatDate(selectedItem.departureTime)} -{" "}
-                      {selectedItem.driverName}
+                      {formatDate(selectedItem.departure_time)} -{" "}
+                      {selectedItem.driver_name}
                     </p>
                   </div>
                   <button
@@ -479,27 +513,26 @@ export function OutboundHistoryPage() {
                     <div>
                       <span className="text-gray-600">Tanggal:</span>
                       <p className="font-semibold text-gray-900">
-                        {new Date(selectedItem.departureTime).toLocaleDateString(
-                          "id-ID",
-                          {
-                            weekday: "long",
-                            year: "numeric",
-                            month: "long",
-                            day: "numeric",
-                          }
-                        )}
+                        {new Date(
+                          selectedItem.departure_time
+                        ).toLocaleDateString("id-ID", {
+                          weekday: "long",
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        })}
                       </p>
                     </div>
                     <div>
                       <span className="text-gray-600">Nama Pengemudi:</span>
                       <p className="font-semibold text-gray-900">
-                        {selectedItem.driverName}
+                        {selectedItem.driver_name}
                       </p>
                     </div>
                     <div className="col-span-2">
                       <span className="text-gray-600">No. Polisi:</span>
                       <p className="font-semibold text-gray-900">
-                        {selectedItem.vehicleNumber}
+                        {selectedItem.vehicle_number}
                       </p>
                     </div>
                   </div>
@@ -515,8 +548,10 @@ export function OutboundHistoryPage() {
                       <span className="text-gray-600">Nama Produk:</span>
                       <p className="font-semibold text-gray-900">
                         {(() => {
-                          const product = productMasterData.find(p => p.id === selectedItem.productId);
-                          return product?.productName || '-';
+                          const product = products.find(
+                            (p) => p.id === selectedItem.product_id
+                          );
+                          return product?.product_name || "-";
                         })()}
                       </p>
                     </div>
@@ -524,8 +559,10 @@ export function OutboundHistoryPage() {
                       <span className="text-gray-600">Kode Produk:</span>
                       <p className="font-semibold text-gray-900">
                         {(() => {
-                          const product = productMasterData.find(p => p.id === selectedItem.productId);
-                          return product?.productCode || '-';
+                          const product = products.find(
+                            (p) => p.id === selectedItem.product_id
+                          );
+                          return product?.product_code || "-";
                         })()}
                       </p>
                     </div>
@@ -533,10 +570,15 @@ export function OutboundHistoryPage() {
                       <span className="text-gray-600">Total PCS:</span>
                       <p className="font-semibold text-gray-900">
                         {(() => {
-                          const product = productMasterData.find(p => p.id === selectedItem.productId);
-                          const totalPcs = product ? selectedItem.qtyCarton * product.qtyPerCarton : 0;
+                          const product = products.find(
+                            (p) => p.id === selectedItem.product_id
+                          );
+                          const totalPcs = product
+                            ? selectedItem.qty_carton * product.qty_per_carton
+                            : 0;
                           return totalPcs.toLocaleString();
-                        })()} pcs
+                        })()}{" "}
+                        pcs
                       </p>
                     </div>
                     <div>
@@ -548,7 +590,7 @@ export function OutboundHistoryPage() {
                     <div>
                       <span className="text-gray-600">Qty Carton:</span>
                       <p className="font-semibold text-gray-900">
-                        {selectedItem.qtyCarton} carton
+                        {selectedItem.qty_carton} carton
                       </p>
                     </div>
                   </div>
@@ -560,79 +602,101 @@ export function OutboundHistoryPage() {
                     <span className="text-lg">📍</span> Lokasi Pengambilan FEFO
                   </h3>
                   <div className="space-y-3">
-                    {selectedItem.locations.map((locationItem, idx) => {
-                      const locationStr = `${locationItem.cluster}-L${locationItem.lorong}-B${locationItem.baris}-P${locationItem.level}`;
-                      
-                      return (
-                        <div
-                          key={idx}
-                          className="bg-white rounded-lg p-3 border border-purple-200 shadow-sm"
-                        >
-                          <div className="flex items-start gap-4">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className="inline-block px-2 py-1 bg-purple-600 text-white rounded text-xs font-bold">
-                                  #{idx + 1}
-                                </span>
-                                <span className="font-semibold text-gray-900 text-lg">
-                                  {locationStr}
-                                </span>
-                              </div>
+                    {selectedItem.locations.map(
+                      (locationItem: any, idx: number) => {
+                        const locationStr = `${locationItem.cluster}-L${locationItem.lorong}-B${locationItem.baris}-P${locationItem.level}`;
 
-                              <div className="text-sm space-y-1.5">
-                                <div className="flex justify-between border-b border-gray-50 pb-1">
-                                  <span className="text-gray-600">
-                                    BB Produk:
+                        return (
+                          <div
+                            key={idx}
+                            className="bg-white rounded-lg p-3 border border-purple-200 shadow-sm"
+                          >
+                            <div className="flex items-start gap-4">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="inline-block px-2 py-1 bg-purple-600 text-white rounded text-xs font-bold">
+                                    #{idx + 1}
                                   </span>
-                                  <span className="font-mono font-bold text-purple-600">
-                                    {locationItem.bbProduk}
+                                  <span className="font-semibold text-gray-900 text-lg">
+                                    {locationStr}
                                   </span>
                                 </div>
 
-                                <div className="flex justify-between border-b border-gray-50 pb-1">
-                                  <span className="text-gray-600">
-                                    Expired:
-                                  </span>
-                                  <span className="font-semibold text-gray-900">
-                                    {new Date(locationItem.expiredDate).toLocaleDateString("id-ID", {
-                                          day: "2-digit",
-                                          month: "short",
-                                          year: "numeric",
-                                        })}
-                                  </span>
-                                </div>
-
-                                {/* Menampilkan Qty per Lokasi */}
-                                <div className="flex justify-between pt-1">
-                                  <span className="text-gray-600 font-medium">
-                                    Qty Diambil:
-                                  </span>
-                                  <span className="font-bold text-orange-600 text-base">
-                                    {locationItem.qtyCarton}{" "}
-                                    <span className="text-xs font-normal text-gray-500">
-                                      Carton
+                                <div className="text-sm space-y-1.5">
+                                  <div className="flex justify-between border-b border-gray-50 pb-1">
+                                    <span className="text-gray-600">
+                                      BB Produk:
                                     </span>
-                                  </span>
+                                    <span className="font-mono font-bold text-purple-600">
+                                      {locationItem.bbProduk}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex justify-between border-b border-gray-50 pb-1">
+                                    <span className="text-gray-600">
+                                      Expired:
+                                    </span>
+                                    <span className="font-semibold text-gray-900">
+                                      {(() => {
+                                        // Extract YYMMDD from first 6 digits of BB Produk
+                                        const bbProduk =
+                                          locationItem.bbProduk || "";
+                                        if (bbProduk.length >= 6) {
+                                          const yy = bbProduk.substring(0, 2);
+                                          const mm = bbProduk.substring(2, 4);
+                                          const dd = bbProduk.substring(4, 6);
+                                          const year = parseInt(yy) + 2000; // Assume 20xx
+                                          const expDate = new Date(
+                                            year,
+                                            parseInt(mm) - 1,
+                                            parseInt(dd)
+                                          );
+                                          return expDate.toLocaleDateString(
+                                            "id-ID",
+                                            {
+                                              day: "2-digit",
+                                              month: "short",
+                                              year: "numeric",
+                                            }
+                                          );
+                                        }
+                                        return "-";
+                                      })()}
+                                    </span>
+                                  </div>
+
+                                  {/* Menampilkan Qty per Lokasi */}
+                                  <div className="flex justify-between pt-1">
+                                    <span className="text-gray-600 font-medium">
+                                      Qty Diambil:
+                                    </span>
+                                    <span className="font-bold text-orange-600 text-base">
+                                      {locationItem.qtyCarton || 0}{" "}
+                                      <span className="text-xs font-normal text-gray-500">
+                                        Carton
+                                      </span>
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
 
-                            {/* Barcode / QR Section */}
-                            <div className="flex flex-col items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
-                              <QRCodeSVG
-                                value={locationItem.bbProduk}
-                                size={100}
-                                level="H"
-                                includeMargin={false}
-                              />
-                              <p className="text-[10px] text-gray-500 mt-2 font-bold uppercase tracking-wider">
-                                QR BB Produk
-                              </p>
+                              {/* Barcode / QR Section */}
+                              <div className="flex flex-col items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                <QRCodeSVG
+                                  value={locationItem.bbProduk}
+                                  size={100}
+                                  level="H"
+                                  includeMargin={false}
+                                />
+                                <p className="text-[10px] text-gray-500 mt-2 font-bold uppercase tracking-wider">
+                                  QR BB Produk
+                                </p>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      }
+                    )}
                   </div>
                 </div>
 

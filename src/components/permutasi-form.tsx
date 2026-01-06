@@ -3,22 +3,25 @@
 
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { stockListData, StockItem } from "@/lib/mock/stocklistmock";
-import { getProductByCode, productMasterData } from "@/lib/mock/product-master";
-import {
-  getClusterConfig,
-  getBarisCountForLorong,
-  getPalletCapacityForCell,
-  validateProductLocation,
-  getValidLocationsForProduct,
-  isInTransitLocation,
-  clusterConfigs,
-} from "@/lib/mock/warehouse-config";
-import { permutasiHistoryData, PermutasiHistory } from "@/lib/mock/permutasi-history";
+import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { moveStockAction } from "@/app/permutasi/actions";
 import { CheckCircle, XCircle, ArrowRightLeft, MapPin } from "lucide-react";
 
-interface WrongLocationStock extends StockItem {
+interface WrongLocationStock {
+  id: string;
+  cluster: string;
+  lorong: number;
+  baris: number;
+  level: number;
+  qty_carton: number;
+  bb_produk: string;
+  products: {
+    id: string;
+    product_code: string;
+    product_name: string;
+    default_cluster: string;
+  };
   homeCluster: string;
   reason: "salah-cluster" | "in-transit";
 }
@@ -30,16 +33,75 @@ interface RecommendedLocation {
   level: string;
 }
 
-export function PermutasiForm() {
-  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"salah-cluster" | "in-transit" | "history">("salah-cluster");
+interface BatchMoveItem {
+  stockId: string;
+  productCode: string;
+  productName: string;
+  fromLocation: string;
+  recommendedLocation: RecommendedLocation | null;
+  useAutoRecommend: boolean;
+  manualLocation: { clusterChar: string; lorong: string; baris: string; pallet: string };
+  reason: string;
+  isValid: boolean;
+  warningMessage?: string;
+}
+
+interface PermutasiFormProps {
+  warehouseId: string;
+  initialStocks: any[];
+  clusterConfigs: any[];
+  productHomes: any[];
+  clusterCellOverrides: any[];
+  initialHistory: any[];
+}
+
+export function PermutasiForm({ 
+  warehouseId, 
+  initialStocks, 
+  clusterConfigs, 
+  productHomes,
+  clusterCellOverrides,
+  initialHistory 
+}: PermutasiFormProps) {
+  const router = useRouter();
+  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(warehouseId);
+  const [activeTab, setActiveTab] = useState<"salah-cluster" | "in-transit" | "free-move" | "history">("salah-cluster");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [itemToMove, setItemToMove] = useState<WrongLocationStock | null>(null);
   const [recommendedLocation, setRecommendedLocation] = useState<RecommendedLocation | null>(null);
   const [autoRecommend, setAutoRecommend] = useState(true);
+  const [forceManualMode, setForceManualMode] = useState(false); // TRUE jika dipanggil dari Free Move
   const [manualLocation, setManualLocation] = useState({ clusterChar: "", lorong: "", baris: "", pallet: "" });
   const [moveReason, setMoveReason] = useState("");
+
+  // Batch move states
+  const [showBatchPlanModal, setShowBatchPlanModal] = useState(false);
+  const [batchMoveItems, setBatchMoveItems] = useState<BatchMoveItem[]>([]);
+
+  // Free move states (Tab 3)
+  const [freeMoveSearch, setFreeMoveSearch] = useState("");
+  const [freeMoveFilterCluster, setFreeMoveFilterCluster] = useState("");
+  const [freeMoveFilterLorong, setFreeMoveFilterLorong] = useState("");
+  const [freeMoveMode, setFreeMoveMode] = useState<"single" | "range">("single");
+  
+  // Single mode
+  const [freeMoveTargetSingle, setFreeMoveTargetSingle] = useState({
+    cluster: "",
+    lorong: "",
+    baris: "",
+    pallet: ""
+  });
+  
+  // Range mode (like NPL)
+  const [freeMoveTargetRange, setFreeMoveTargetRange] = useState({
+    clusterChar: "",
+    lorong: "",
+    barisStart: "",
+    barisEnd: "",
+    palletStart: "",
+    palletEnd: ""
+  });
 
   // Modal states
   const [showNotificationModal, setShowNotificationModal] = useState(false);
@@ -47,7 +109,31 @@ export function PermutasiForm() {
   const [notificationMessage, setNotificationMessage] = useState("");
   const [notificationType, setNotificationType] = useState<"success" | "error" | "warning">("success");
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [showBatchConfirmModal, setShowBatchConfirmModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Fungsi validasi lokasi tujuan berdasarkan product_homes dan cluster_cell_overrides
+  const isTargetLocationValid = (productId: string, cluster: string, lorong: number, baris: number) => {
+    // Cek 1: Validasi berdasarkan product_homes (range lorong & baris)
+    const rule = productHomes.find((h: any) => h.product_id === productId);
+    if (rule) {
+      const withinRange = (
+        rule.cluster_char === cluster &&
+        lorong >= rule.lorong_start &&
+        lorong <= rule.lorong_end &&
+        baris >= rule.baris_start &&
+        baris <= rule.baris_end
+      );
+      if (!withinRange) return false; // Gagal validasi product_homes
+    }
+
+    // Cek 2: Validasi berdasarkan cluster_cell_overrides (batas baris per lorong)
+    const maxBaris = getBarisCountForLorong(cluster, lorong);
+    if (baris > maxBaris) {
+      return false; // Baris melebihi kapasitas lorong
+    }
+
+    return true; // Lolos semua validasi
+  };
 
   const showNotification = (title: string, message: string, type: "success" | "error" | "warning") => {
     setNotificationTitle(title);
@@ -59,43 +145,86 @@ export function PermutasiForm() {
   const success = (message: string) => showNotification("✅ Berhasil", message, "success");
   const error = (message: string) => showNotification("❌ Error", message, "error");
 
-  // Load warehouse context
-  useEffect(() => {
-    const userStr = localStorage.getItem("user");
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      setCurrentWarehouseId(user.warehouseId || null);
-    }
-  }, []);
+  // Helper functions untuk dynamic dropdown berdasarkan cluster_cell_overrides
+  // LOGIC 100% IDENTIK DENGAN INBOUND-FORM.TSX
+  
+  // Helper: Dapatkan jumlah baris maksimal untuk lorong tertentu
+  const getBarisCountForLorong = (clusterChar: string, lorongNum: number): number => {
+    const config = clusterConfigs.find((c: any) => c.cluster_char === clusterChar);
+    if (!config) return 9;
 
-  // Get wrong location stocks
+    // Cari override yang mencakup lorong ini (Logic Range)
+    const override = clusterCellOverrides.find(
+      (o: any) =>
+        o.cluster_config_id === config.id &&
+        lorongNum >= o.lorong_start &&
+        lorongNum <= o.lorong_end &&
+        o.custom_baris_count !== null &&
+        !o.is_disabled
+    );
+
+    return override ? override.custom_baris_count : (config.default_baris_count ?? 9);
+  };
+
+  // Helper: Dapatkan kapasitas pallet level untuk sel spesifik
+  const getPalletCapacityForCell = (clusterChar: string, lorongNum: number, barisNum: number): number => {
+    const config = clusterConfigs.find((c: any) => c.cluster_char === clusterChar);
+    if (!config) return 3;
+
+    // Cari override: lorong di dalam range DAN (baris di dalam range ATAU baris range null/berlaku semua)
+    const override = clusterCellOverrides.find(
+      (o: any) =>
+        o.cluster_config_id === config.id &&
+        lorongNum >= o.lorong_start &&
+        lorongNum <= o.lorong_end &&
+        (o.baris_start === null || (barisNum >= o.baris_start && barisNum <= (o.baris_end || o.baris_start))) &&
+        o.custom_pallet_level !== null &&
+        !o.is_disabled
+    );
+
+    return override ? override.custom_pallet_level : (config.default_pallet_level ?? 3);
+  };
+
+  // Get wrong location stocks from database
   const wrongLocationStocks = useMemo((): WrongLocationStock[] => {
     const result: WrongLocationStock[] = [];
 
-    stockListData.forEach((stock) => {
+    initialStocks.forEach((stock) => {
       const lorongNum = stock.lorong;
-      const barisNum = stock.baris;
+      const cluster = stock.cluster;
 
-      // Check if In Transit
-      const inTransit = isInTransitLocation(stock.cluster, lorongNum);
+      // Check if In Transit (Cluster C, Lorong 8-11)
+      const inTransit = cluster === "C" && lorongNum >= 8 && lorongNum <= 11;
 
       // Get product info
-      const product = productMasterData.find(p => p.id === stock.productId);
-      const productCode = product?.productCode || "UNKNOWN";
-      const homeCluster = product?.defaultCluster || "?";
+      const homeCluster = stock.products?.default_cluster || "?";
 
       if (inTransit) {
         result.push({
-          ...stock,
+          id: stock.id,
+          cluster: stock.cluster,
+          lorong: stock.lorong,
+          baris: stock.baris,
+          level: stock.level,
+          qty_carton: stock.qty_carton,
+          bb_produk: stock.bb_produk,
+          products: stock.products,
           homeCluster,
           reason: "in-transit",
         });
       } else {
         // Check if wrong cluster
-        const validation = validateProductLocation(productCode, stock.cluster, lorongNum, barisNum);
-        if (!validation.isValid) {
+        const isWrongCluster = stock.cluster !== stock.products?.default_cluster;
+        if (isWrongCluster) {
           result.push({
-            ...stock,
+            id: stock.id,
+            cluster: stock.cluster,
+            lorong: stock.lorong,
+            baris: stock.baris,
+            level: stock.level,
+            qty_carton: stock.qty_carton,
+            bb_produk: stock.bb_produk,
+            products: stock.products,
             homeCluster,
             reason: "salah-cluster",
           });
@@ -104,7 +233,7 @@ export function PermutasiForm() {
     });
 
     return result;
-  }, []);
+  }, [initialStocks]);
 
   // Filter by tab
   const filteredStocks = useMemo(() => {
@@ -116,22 +245,65 @@ export function PermutasiForm() {
     return [];
   }, [wrongLocationStocks, activeTab]);
 
+  // Free move: All stocks with search and filter
+  const freeMove_AllStocks = useMemo(() => {
+    return initialStocks.map((s: any) => ({
+      id: s.id,
+      cluster: s.cluster,
+      lorong: s.lorong,
+      baris: s.baris,
+      level: s.level,
+      qty_carton: s.qty_carton,
+      bb_produk: s.bb_produk,
+      expired_date: s.expired_date,
+      fefo_status: s.fefo_status,
+      products: s.products,
+      product_id: s.product_id
+    }));
+  }, [initialStocks]);
+
+  const freeMove_FilteredStocks = useMemo(() => {
+    let filtered = freeMove_AllStocks;
+
+    // Filter by search (product code or name)
+    if (freeMoveSearch) {
+      const searchLower = freeMoveSearch.toLowerCase();
+      filtered = filtered.filter((s: any) => 
+        s.products?.product_code?.toLowerCase().includes(searchLower) ||
+        s.products?.product_name?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Filter by cluster
+    if (freeMoveFilterCluster) {
+      filtered = filtered.filter((s: any) => s.cluster === freeMoveFilterCluster);
+    }
+
+    // Filter by lorong
+    if (freeMoveFilterLorong) {
+      const lorongNum = parseInt(freeMoveFilterLorong.replace("L", ""));
+      filtered = filtered.filter((s: any) => s.lorong === lorongNum);
+    }
+
+    return filtered;
+  }, [freeMove_AllStocks, freeMoveSearch, freeMoveFilterCluster, freeMoveFilterLorong]);
+
   // Cluster & Location Options
-  const clusterOptions = useMemo(() => clusterConfigs.filter((c) => c.isActive).map((c) => c.clusterChar), []);
+  const clusterOptions = useMemo(() => clusterConfigs.filter((c: any) => c.is_active).map((c: any) => c.cluster_char), [clusterConfigs]);
 
   const lorongOptions = useMemo(() => {
     if (!manualLocation.clusterChar) return [];
-    const config = getClusterConfig(manualLocation.clusterChar);
+    const config = clusterConfigs.find((c: any) => c.cluster_char === manualLocation.clusterChar);
     if (!config) return [];
-    return Array.from({ length: config.defaultLorongCount }, (_, i) => `L${i + 1}`);
-  }, [manualLocation.clusterChar]);
+    return Array.from({ length: config.default_lorong_count }, (_, i) => `L${i + 1}`);
+  }, [manualLocation.clusterChar, clusterConfigs]);
 
   const barisOptions = useMemo(() => {
     if (!manualLocation.clusterChar || !manualLocation.lorong) return [];
     const lorongNum = parseInt(manualLocation.lorong.replace("L", ""));
     const barisCount = getBarisCountForLorong(manualLocation.clusterChar, lorongNum);
     return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
-  }, [manualLocation.clusterChar, manualLocation.lorong]);
+  }, [manualLocation.clusterChar, manualLocation.lorong, clusterCellOverrides]);
 
   const palletOptions = useMemo(() => {
     if (!manualLocation.clusterChar || !manualLocation.lorong || !manualLocation.baris) return [];
@@ -139,45 +311,102 @@ export function PermutasiForm() {
     const barisNum = parseInt(manualLocation.baris.replace("B", ""));
     const palletCapacity = getPalletCapacityForCell(manualLocation.clusterChar, lorongNum, barisNum);
     return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
-  }, [manualLocation.clusterChar, manualLocation.lorong, manualLocation.baris]);
+  }, [manualLocation.clusterChar, manualLocation.lorong, manualLocation.baris, clusterCellOverrides]);
 
-  // Find recommended location for a product
-  const findRecommendedLocation = (productCode: string): RecommendedLocation | null => {
-    const productHome = getValidLocationsForProduct(productCode);
-    const product = getProductByCode(productCode);
-    const cluster = productHome?.clusterChar || product?.defaultCluster || "";
+  // Free Move Single Mode - Dropdown Options
+  const freeMoveLorongOptions = useMemo(() => {
+    if (!freeMoveTargetSingle.cluster) return [];
+    const config = clusterConfigs.find((c: any) => c.cluster_char === freeMoveTargetSingle.cluster);
+    if (!config) return [];
+    return Array.from({ length: config.default_lorong_count }, (_, i) => `L${i + 1}`);
+  }, [freeMoveTargetSingle.cluster, clusterConfigs]);
+
+  const freeMoveBarisOptions = useMemo(() => {
+    if (!freeMoveTargetSingle.cluster || !freeMoveTargetSingle.lorong) return [];
+    const lorongNum = parseInt(freeMoveTargetSingle.lorong.replace("L", ""));
+    const barisCount = getBarisCountForLorong(freeMoveTargetSingle.cluster, lorongNum);
+    return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+  }, [freeMoveTargetSingle.cluster, freeMoveTargetSingle.lorong, clusterCellOverrides]);
+
+  const freeMovePalletOptions = useMemo(() => {
+    if (!freeMoveTargetSingle.cluster || !freeMoveTargetSingle.lorong || !freeMoveTargetSingle.baris) return [];
+    const lorongNum = parseInt(freeMoveTargetSingle.lorong.replace("L", ""));
+    const barisNum = parseInt(freeMoveTargetSingle.baris.replace("B", ""));
+    const palletCapacity = getPalletCapacityForCell(freeMoveTargetSingle.cluster, lorongNum, barisNum);
+    return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+  }, [freeMoveTargetSingle.cluster, freeMoveTargetSingle.lorong, freeMoveTargetSingle.baris, clusterCellOverrides]);
+
+  // Free Move Range Mode - Dropdown Options
+  const freeMoveRangeLorongOptions = useMemo(() => {
+    if (!freeMoveTargetRange.clusterChar) return [];
+    const config = clusterConfigs.find((c: any) => c.cluster_char === freeMoveTargetRange.clusterChar);
+    if (!config) return [];
+    return Array.from({ length: config.default_lorong_count }, (_, i) => `L${i + 1}`);
+  }, [freeMoveTargetRange.clusterChar, clusterConfigs]);
+
+  const freeMoveRangeBarisOptions = useMemo(() => {
+    if (!freeMoveTargetRange.clusterChar || !freeMoveTargetRange.lorong) return [];
+    const lorongNum = parseInt(freeMoveTargetRange.lorong.replace("L", ""));
+    const barisCount = getBarisCountForLorong(freeMoveTargetRange.clusterChar, lorongNum);
+    return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
+  }, [freeMoveTargetRange.clusterChar, freeMoveTargetRange.lorong, clusterCellOverrides]);
+
+  const freeMoveRangePalletOptions = useMemo(() => {
+    if (!freeMoveTargetRange.clusterChar || !freeMoveTargetRange.lorong || !freeMoveTargetRange.barisStart) return [];
+    const lorongNum = parseInt(freeMoveTargetRange.lorong.replace("L", ""));
+    const barisNum = parseInt(freeMoveTargetRange.barisStart.replace("B", ""));
+    const palletCapacity = getPalletCapacityForCell(freeMoveTargetRange.clusterChar, lorongNum, barisNum);
+    return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
+  }, [freeMoveTargetRange.clusterChar, freeMoveTargetRange.lorong, freeMoveTargetRange.barisStart, clusterCellOverrides]);
+
+  // Find recommended location for a product using database
+  // excludeLocations: array of location strings "A-L1-B8-P1" yang sudah reserved dalam batch
+  const findRecommendedLocation = (productId: string, productCode: string, excludeLocations: Set<string> = new Set()): RecommendedLocation | null => {
+    // Cari aturan product home
+    const productHome = productHomes.find((h: any) => h.product_id === productId);
+    
+    // Cari produk untuk mendapatkan default cluster
+    const product = initialStocks.find((s: any) => s.product_id === productId)?.products;
+    const cluster = productHome?.cluster_char || product?.default_cluster || "";
 
     if (!cluster) return null;
 
-    const clusterConfig = getClusterConfig(cluster);
+    const clusterConfig = clusterConfigs.find((c: any) => c.cluster_char === cluster);
     if (!clusterConfig) return null;
 
-    const lorongStart = productHome ? productHome.lorongRange[0] : 1;
-    const lorongEnd = productHome ? productHome.lorongRange[1] : clusterConfig.defaultLorongCount;
+    const lorongStart = productHome ? productHome.lorong_start : 1;
+    const lorongEnd = productHome ? productHome.lorong_end : clusterConfig.default_lorong_count;
 
     for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
-      if (isInTransitLocation(cluster, lorongNum)) continue;
+      // Skip In Transit area (Cluster C, Lorong 8-11)
+      if (cluster === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
 
-      const maxBaris = getBarisCountForLorong(cluster, lorongNum);
-      const barisStart = productHome ? productHome.barisRange[0] : 1;
-      const barisEnd = productHome ? Math.min(productHome.barisRange[1], maxBaris) : maxBaris;
+      // DINAMIS: Ambil batas baris lorong ini
+      const currentMaxBaris = getBarisCountForLorong(cluster, lorongNum);
+      const barisStart = productHome ? productHome.baris_start : 1;
+      const barisEnd = productHome ? Math.min(productHome.baris_end, currentMaxBaris) : currentMaxBaris;
 
       for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
-        const maxPallet = getPalletCapacityForCell(cluster, lorongNum, barisNum);
-        const productMaxPallet = productHome ? productHome.maxPalletPerLocation : 999;
-        const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
+        // DINAMIS: Ambil kapasitas level rak ini
+        const currentMaxPallet = getPalletCapacityForCell(cluster, lorongNum, barisNum);
+        const productMaxRule = productHome?.max_pallet_per_location || 999;
+        const effectiveMaxPallet = Math.min(currentMaxPallet, productMaxRule);
 
         for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
           const lorong = `L${lorongNum}`;
           const baris = `B${barisNum}`;
           const level = `P${palletNum}`;
+          const locationKey = `${cluster}-${lorong}-${baris}-${level}`;
 
-          const locationExists = stockListData.some(
-            (item) =>
+          // Cek apakah lokasi ini sudah direserve dalam batch saat ini
+          if (excludeLocations.has(locationKey)) continue;
+
+          const locationExists = initialStocks.some(
+            (item: any) =>
               item.cluster === cluster &&
-              item.lorong === parseInt(lorong.replace('L', '')) &&
-              item.baris === parseInt(baris.replace('B', '')) &&
-              item.level === parseInt(level.replace('P', ''))
+              item.lorong === lorongNum &&
+              item.baris === barisNum &&
+              item.level === palletNum
           );
 
           if (!locationExists) {
@@ -188,6 +417,47 @@ export function PermutasiForm() {
     }
 
     return null;
+  };
+
+  // Check if target location is already occupied
+  const isLocationOccupied = (cluster: string, lorong: number, baris: number, level: number): boolean => {
+    return initialStocks.some(
+      (s: any) =>
+        s.cluster === cluster &&
+        s.lorong === lorong &&
+        s.baris === baris &&
+        s.level === level
+    );
+  };
+
+  // Check if target location is outside product home
+  const isOutsideProductHome = (productId: string, cluster: string, lorong: number, baris: number): { isOutside: boolean; message: string } => {
+    const rule = productHomes.find((h: any) => h.product_id === productId);
+    
+    if (!rule) {
+      // Tidak ada aturan, berarti bebas (tapi warning)
+      return {
+        isOutside: false,
+        message: "⚠️ Produk ini tidak memiliki aturan Product Home"
+      };
+    }
+
+    const isInHome = (
+      rule.cluster_char === cluster &&
+      lorong >= rule.lorong_start &&
+      lorong <= rule.lorong_end &&
+      baris >= rule.baris_start &&
+      baris <= rule.baris_end
+    );
+
+    if (!isInHome) {
+      return {
+        isOutside: true,
+        message: `⚠️ PERINGATAN: Lokasi ini di luar Product Home (seharusnya: ${rule.cluster_char}-L${rule.lorong_start}-${rule.lorong_end}, B${rule.baris_start}-${rule.baris_end})`
+      };
+    }
+
+    return { isOutside: false, message: "" };
   };
 
   // Handle select item
@@ -210,10 +480,60 @@ export function PermutasiForm() {
     }
   };
 
+  // Toggle batch item auto/manual
+  const toggleBatchItemMode = (stockId: string) => {
+    setBatchMoveItems(prev => 
+      prev.map(item => 
+        item.stockId === stockId 
+          ? { ...item, useAutoRecommend: !item.useAutoRecommend }
+          : item
+      )
+    );
+  };
+
+  // Update batch item manual location
+  const updateBatchItemLocation = (stockId: string, field: string, value: string) => {
+    setBatchMoveItems(prev => 
+      prev.map(item => {
+        if (item.stockId === stockId) {
+          const newManual = { ...item.manualLocation, [field]: value };
+          
+          // Reset dependent fields
+          if (field === "clusterChar") {
+            newManual.lorong = "";
+            newManual.baris = "";
+            newManual.pallet = "";
+          } else if (field === "lorong") {
+            newManual.baris = "";
+            newManual.pallet = "";
+          } else if (field === "baris") {
+            newManual.pallet = "";
+          }
+          
+          return { ...item, manualLocation: newManual };
+        }
+        return item;
+      })
+    );
+  };
+
+  // Update batch item reason
+  const updateBatchItemReason = (stockId: string, reason: string) => {
+    setBatchMoveItems(prev => 
+      prev.map(item => 
+        item.stockId === stockId 
+          ? { ...item, reason }
+          : item
+      )
+    );
+  };
+
   // Open move modal for single item
-  const openMoveModal = (stock: WrongLocationStock) => {
+  // forceManual = true untuk Free Move Tab (user hanya boleh manual)
+  const openMoveModal = (stock: WrongLocationStock, forceManual: boolean = false) => {
     setItemToMove(stock);
-    setAutoRecommend(true);
+    setForceManualMode(forceManual);
+    setAutoRecommend(!forceManual); // Jika force manual, set ke manual
     setManualLocation({ clusterChar: stock.homeCluster, lorong: "", baris: "", pallet: "" });
     setMoveReason(stock.reason === "in-transit" ? "Relokasi dari In Transit" : "Koreksi cluster");
     setRecommendedLocation(null);
@@ -223,13 +543,13 @@ export function PermutasiForm() {
   // Handle recommend button
   const handleRecommend = () => {
     if (!itemToMove) return;
-    const product = productMasterData.find(p => p.id === itemToMove.productId);
-    const productCode = product?.productCode || "UNKNOWN";
-    const recommended = findRecommendedLocation(productCode);
+    const productId = itemToMove.products.id;
+    const productCode = itemToMove.products.product_code;
+    const recommended = findRecommendedLocation(productId, productCode);
     if (recommended) {
       // Verify it's not occupied
-      const isOccupied = stockListData.some(
-        (s) =>
+      const isOccupied = initialStocks.some(
+        (s: any) =>
           s.cluster === recommended.clusterChar &&
           s.lorong === parseInt(recommended.lorong.replace('L', '')) &&
           s.baris === parseInt(recommended.baris.replace('B', '')) &&
@@ -268,8 +588,8 @@ export function PermutasiForm() {
         return;
       }
       // Check if manual location is occupied
-      const isOccupied = stockListData.some(
-        (s) =>
+      const isOccupied = initialStocks.some(
+        (s: any) =>
           s.cluster === manualLocation.clusterChar &&
           s.lorong === parseInt(manualLocation.lorong.replace('L', '')) &&
           s.baris === parseInt(manualLocation.baris.replace('B', '')) &&
@@ -284,157 +604,176 @@ export function PermutasiForm() {
     setShowConfirmModal(true);
   };
 
-  // Confirm move
-  const confirmMove = () => {
+  // Confirm move dengan server action
+  const confirmMove = async () => {
     if (!itemToMove) return;
 
-    let targetLocation: { clusterChar: string; lorong: string; baris: string; level: string };
+    const target = autoRecommend ? recommendedLocation! : {
+      clusterChar: manualLocation.clusterChar,
+      lorong: manualLocation.lorong,
+      baris: manualLocation.baris,
+      level: manualLocation.pallet,
+    };
 
-    if (autoRecommend) {
-      targetLocation = recommendedLocation!;
-    } else {
-      targetLocation = {
-        clusterChar: manualLocation.clusterChar,
-        lorong: manualLocation.lorong,
-        baris: manualLocation.baris,
-        level: manualLocation.pallet,
-      };
+    const lorongNum = parseInt(target.lorong.replace('L', ''));
+    const barisNum = parseInt(target.baris.replace('B', ''));
+    const levelNum = parseInt(target.level.replace('P', ''));
+
+    // Validasi Tambahan sebelum kirim ke Server
+    if (!isTargetLocationValid(itemToMove.products.id, target.clusterChar, lorongNum, barisNum)) {
+      error(`Lokasi tujuan tidak sesuai dengan aturan Cluster produk ini!`);
+      return;
     }
 
-    // Find and update stock
-    const stockIndex = stockListData.findIndex((s) => s.id === itemToMove.id);
-    if (stockIndex !== -1) {
-      const stock = stockListData[stockIndex];
-      const oldLocation = `${stock.cluster}-L${stock.lorong}-B${stock.baris}-P${stock.level}`;
-      const newLocation = `${targetLocation.clusterChar}-${targetLocation.lorong}-${targetLocation.baris}-${targetLocation.level}`;
+    setIsSubmitting(true);
+    try {
+      const res = await moveStockAction(
+        warehouseId,
+        itemToMove.id,
+        { 
+          cluster: target.clusterChar, 
+          lorong: lorongNum, 
+          baris: barisNum, 
+          level: levelNum
+        },
+        moveReason
+      );
 
-      // Update stock location
-      stockListData[stockIndex].cluster = targetLocation.clusterChar;
-      stockListData[stockIndex].lorong = parseInt(targetLocation.lorong.replace('L', ''));
-      stockListData[stockIndex].baris = parseInt(targetLocation.baris.replace('B', ''));
-      stockListData[stockIndex].level = parseInt(targetLocation.level.replace('P', ''));
-
-      // Add to permutasi history
-      const newPermutasi: PermutasiHistory = {
-        id: `pmt-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + 1).padStart(3, "0")}`,
-        warehouse_id: "wh-001-cikarang",
-        transaction_code: `PMT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + 1).padStart(4, "0")}`,
-        stock_id: `stk-${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`,
-        product_id: itemToMove.productId,
-        qty_carton: itemToMove.qtyCarton,
-        from_cluster: itemToMove.cluster,
-        from_lorong: itemToMove.lorong,
-        from_baris: itemToMove.baris,
-        from_level: itemToMove.level,
-        to_cluster: targetLocation.clusterChar,
-        to_lorong: parseInt(targetLocation.lorong.replace('L', '')),
-        to_baris: parseInt(targetLocation.baris.replace('B', '')),
-        to_level: parseInt(targetLocation.level.replace('P', '')),
-        reason: moveReason,
-        moved_by: "usr-003", // Dewi Lestari (admin_warehouse)
-        moved_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-      };
-      permutasiHistoryData.unshift(newPermutasi);
-
-      success(`Stock berhasil dipindahkan dari ${oldLocation} ke ${newLocation}`);
+      if (res.success) {
+        success("Stock berhasil direlokasi.");
+        router.refresh(); // Sinkronisasi Data
+        setShowConfirmModal(false);
+        setShowMoveModal(false);
+        setItemToMove(null);
+        setRecommendedLocation(null);
+        setMoveReason("");
+        setSelectedItems(new Set());
+      } else {
+        error(res.message || "Gagal memindahkan stok.");
+      }
+    } catch (err) {
+      error("Kesalahan sistem.");
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setShowConfirmModal(false);
-    setShowMoveModal(false);
-    setItemToMove(null);
-    setRecommendedLocation(null);
-    setMoveReason("");
-    setSelectedItems(new Set());
   };
 
-  // Open batch confirm modal
+  // Open batch plan modal (Prepare locations first, don't execute blindly!)
   const handleBatchMoveClick = () => {
     if (selectedItems.size === 0) {
       error("Pilih minimal 1 item untuk dipindahkan.");
       return;
     }
-    setShowBatchConfirmModal(true);
-  };
 
-  // Move selected items (batch)
-  const confirmBatchMove = () => {
-    let movedCount = 0;
-    let failedCount = 0;
-
-    selectedItems.forEach((id) => {
+    // PENTING: Track locations yang sudah direserve dalam batch ini
+    const reservedLocations = new Set<string>();
+    
+    // Prepare batch move plan dengan rekomendasi untuk setiap item
+    const items: BatchMoveItem[] = [];
+    for (const id of Array.from(selectedItems)) {
       const stock = filteredStocks.find((s) => s.id === id);
-      if (!stock) return;
+      if (!stock) continue;
 
-      const product = productMasterData.find(p => p.id === stock.productId);
-      const productCode = product?.productCode || "UNKNOWN";
-      const recommended = findRecommendedLocation(productCode);
-      if (recommended) {
-        // Verify not occupied
-        const isOccupied = stockListData.some(
-          (s) =>
-            s.cluster === recommended.clusterChar &&
-            s.lorong === parseInt(recommended.lorong.replace('L', '')) &&
-            s.baris === parseInt(recommended.baris.replace('B', '')) &&
-            s.level === parseInt(recommended.level.replace('P', ''))
-        );
-
-        if (!isOccupied) {
-          const stockIndex = stockListData.findIndex((s) => s.id === id);
-          if (stockIndex !== -1) {
-            stockListData[stockIndex].cluster = recommended.clusterChar;
-            stockListData[stockIndex].lorong = parseInt(recommended.lorong.replace('L', ''));
-            stockListData[stockIndex].baris = parseInt(recommended.baris.replace('B', ''));
-            stockListData[stockIndex].level = parseInt(recommended.level.replace('P', ''));
-
-            const newPermutasi: PermutasiHistory = {
-              id: `pmt-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + movedCount + 1).padStart(3, "0")}`,
-              warehouse_id: "wh-001-cikarang",
-              transaction_code: `PMT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(permutasiHistoryData.length + movedCount + 1).padStart(4, "0")}`,
-              stock_id: `stk-${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`,
-              product_id: stock.productId,
-              qty_carton: stock.qtyCarton,
-              from_cluster: stock.cluster,
-              from_lorong: stock.lorong,
-              from_baris: stock.baris,
-              from_level: stock.level,
-              to_cluster: recommended.clusterChar,
-              to_lorong: parseInt(recommended.lorong.replace('L', '')),
-              to_baris: parseInt(recommended.baris.replace('B', '')),
-              to_level: parseInt(recommended.level.replace('P', '')),
-              reason: stock.reason === "in-transit" ? "Relokasi dari In Transit (batch)" : "Koreksi cluster (batch)",
-              moved_by: "usr-003",
-              moved_at: new Date().toISOString(),
-              created_at: new Date().toISOString(),
-            };
-            permutasiHistoryData.unshift(newPermutasi);
-
-            movedCount++;
-          }
-        } else {
-          failedCount++;
-        }
-      } else {
-        failedCount++;
+      const productId = stock.products.id;
+      const productCode = stock.products.product_code;
+      
+      // Pass reservedLocations agar tidak ada duplikasi
+      const rec = findRecommendedLocation(productId, productCode, reservedLocations);
+      
+      // Jika dapat rekomendasi, reserve lokasi tersebut untuk item berikutnya
+      if (rec) {
+        const locationKey = `${rec.clusterChar}-${rec.lorong}-${rec.baris}-${rec.level}`;
+        reservedLocations.add(locationKey);
       }
-    });
-
-    setShowBatchConfirmModal(false);
-
-    if (movedCount > 0) {
-      success(`${movedCount} item berhasil dipindahkan.${failedCount > 0 ? ` ${failedCount} item gagal (lokasi tidak tersedia).` : ""}`);
-    } else {
-      error("Tidak ada item yang berhasil dipindahkan. Tidak ada lokasi kosong yang sesuai.");
+      
+      const fromLoc = `${stock.cluster}-L${stock.lorong}-B${stock.baris}-P${stock.level}`;
+      
+      items.push({
+        stockId: id,
+        productCode: stock.products.product_code,
+        productName: stock.products.product_name,
+        fromLocation: fromLoc,
+        recommendedLocation: rec,
+        useAutoRecommend: true,
+        manualLocation: { clusterChar: "", lorong: "", baris: "", pallet: "" },
+        reason: "Relokasi Masal (Batch Move)",
+        isValid: rec !== null,
+        warningMessage: rec === null ? "⚠️ Tidak ada lokasi tersedia" : undefined
+      });
     }
 
-    setSelectedItems(new Set());
+    setBatchMoveItems(items);
+    setShowBatchPlanModal(true);
   };
 
-  // Today's history
+  // Execute batch move after user review and confirm
+  const confirmBatchMove = async () => {
+    setIsSubmitting(true);
+    let successCount = 0;
+    let failedCount = 0;
+    const failedItems: string[] = [];
+
+    for (const item of batchMoveItems) {
+      const stock = filteredStocks.find((s) => s.id === item.stockId);
+      if (!stock) continue;
+
+      let targetLoc;
+      if (item.useAutoRecommend && item.recommendedLocation) {
+        targetLoc = {
+          cluster: item.recommendedLocation.clusterChar,
+          lorong: parseInt(item.recommendedLocation.lorong.replace('L', '')),
+          baris: parseInt(item.recommendedLocation.baris.replace('B', '')),
+          level: parseInt(item.recommendedLocation.level.replace('P', ''))
+        };
+      } else {
+        targetLoc = {
+          cluster: item.manualLocation.clusterChar,
+          lorong: parseInt(item.manualLocation.lorong.replace('L', '')),
+          baris: parseInt(item.manualLocation.baris.replace('B', '')),
+          level: parseInt(item.manualLocation.pallet.replace('P', ''))
+        };
+      }
+
+      // Validasi lokasi tujuan
+      if (!isTargetLocationValid(stock.products.id, targetLoc.cluster, targetLoc.lorong, targetLoc.baris)) {
+        failedItems.push(stock.products.product_name);
+        failedCount++;
+        continue;
+      }
+
+      const res = await moveStockAction(
+        warehouseId,
+        item.stockId,
+        targetLoc,
+        item.reason
+      );
+      
+      if (res.success) {
+        successCount++;
+      } else {
+        failedItems.push(stock.products.product_name);
+        failedCount++;
+      }
+    }
+
+    if (successCount > 0) {
+      success(`${successCount} item berhasil dipindahkan.${failedCount > 0 ? ` ${failedCount} item gagal.` : ""}`);
+    } else {
+      error(`Tidak ada item yang berhasil dipindahkan. ${failedItems.length > 0 ? `Gagal: ${failedItems.join(", ")}` : ""}`);
+    }
+
+    router.refresh();
+    setSelectedItems(new Set());
+    setShowBatchPlanModal(false);
+    setBatchMoveItems([]);
+    setIsSubmitting(false);
+  };
+
+  // Today's history from database
   const todayHistory = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return permutasiHistoryData.filter((h) => h.moved_at.startsWith(todayStr));
-  }, []);
+    return initialHistory.filter((h: any) => h.moved_at.startsWith(todayStr));
+  }, [initialHistory]);
 
   // Modal backdrop click handler
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>, closeModal: () => void) => {
@@ -489,6 +828,19 @@ export function PermutasiForm() {
               </span>
             </button>
             <button
+              onClick={() => setActiveTab("free-move")}
+              className={`px-4 md:px-6 py-2 md:py-3 rounded-xl font-semibold transition-all text-sm md:text-base ${
+                activeTab === "free-move"
+                  ? "bg-blue-500 text-white shadow-lg"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              🔵 Permutasi Bebas
+              <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
+                {freeMove_AllStocks.length}
+              </span>
+            </button>
+            <button
               onClick={() => setActiveTab("history")}
               className={`px-4 md:px-6 py-2 md:py-3 rounded-xl font-semibold transition-all text-sm md:text-base ${
                 activeTab === "history"
@@ -502,7 +854,155 @@ export function PermutasiForm() {
           </div>
 
           {/* Content */}
-          {activeTab !== "history" ? (
+          {activeTab === "free-move" ? (
+            <>
+              {/* Free Move Tab - Search & Filter Bar */}
+              <div className="mb-6 space-y-4">
+                {/* Search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="🔍 Cari produk (kode atau nama)..."
+                    value={freeMoveSearch}
+                    onChange={(e) => setFreeMoveSearch(e.target.value)}
+                    className="w-full px-4 py-3 pl-12 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Filters */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <select
+                    value={freeMoveFilterCluster}
+                    onChange={(e) => setFreeMoveFilterCluster(e.target.value)}
+                    className="px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="">Semua Cluster</option>
+                    {clusterOptions.map((c) => (
+                      <option key={c} value={c}>Cluster {c}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={freeMoveFilterLorong}
+                    onChange={(e) => setFreeMoveFilterLorong(e.target.value)}
+                    className="px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="">Semua Lorong</option>
+                    {freeMoveFilterCluster && Array.from({ length: 20 }, (_, i) => `L${i + 1}`).map((l) => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="text-sm text-gray-600">
+                  Menampilkan <span className="font-bold text-blue-600">{freeMove_FilteredStocks.length}</span> dari{" "}
+                  <span className="font-bold">{freeMove_AllStocks.length}</span> stock
+                </div>
+              </div>
+
+              {/* Stock Table */}
+              {freeMove_FilteredStocks.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">📦</div>
+                  <p className="text-gray-500 font-medium">
+                    {freeMoveSearch || freeMoveFilterCluster 
+                      ? "Tidak ada stock yang sesuai dengan filter"
+                      : "Tidak ada stock"}
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-blue-500 text-white">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold uppercase">Produk</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold uppercase">Qty</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold uppercase">BB Produk</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold uppercase">Status FEFO</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold uppercase">Lokasi</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold uppercase">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {freeMove_FilteredStocks.slice(0, 50).map((stock: any) => {
+                        const homeCheck = isOutsideProductHome(stock.product_id, stock.cluster, stock.lorong, stock.baris);
+                        const isWrongCluster = stock.cluster !== stock.products?.default_cluster;
+                        
+                        return (
+                          <tr key={stock.id} className="hover:bg-blue-50 transition-colors">
+                            <td className="px-3 py-3">
+                              <div className="font-medium text-gray-900 text-sm">{stock.products?.product_code}</div>
+                              <div className="text-gray-500 text-xs truncate max-w-[200px]">{stock.products?.product_name}</div>
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span className="font-bold text-gray-900">{stock.qty_carton}</span>
+                              <span className="text-gray-500 text-xs ml-1">ctn</span>
+                            </td>
+                            <td className="px-3 py-3 text-center text-xs font-mono text-gray-600">
+                              {stock.bb_produk}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span
+                                className={`inline-block px-2 py-1 rounded text-xs font-bold ${
+                                  stock.fefo_status === "release"
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-yellow-100 text-yellow-800"
+                                }`}
+                              >
+                                {stock.fefo_status === "release" ? "🟢 Release" : "🟡 Hold"}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <div className="flex flex-col items-center gap-1">
+                                <span className={`inline-block px-2 py-1 rounded-lg text-xs font-bold ${
+                                  isWrongCluster ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"
+                                }`}>
+                                  {stock.cluster}-L{stock.lorong}-B{stock.baris}-P{stock.level}
+                                </span>
+                                {isWrongCluster && (
+                                  <span className="text-xs text-red-600">⚠️ Salah Cluster</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <button
+                                onClick={() => {
+                                  // Convert to WrongLocationStock format for reuse modal
+                                  const item: WrongLocationStock = {
+                                    id: stock.id,
+                                    cluster: stock.cluster,
+                                    lorong: stock.lorong,
+                                    baris: stock.baris,
+                                    level: stock.level,
+                                    qty_carton: stock.qty_carton,
+                                    bb_produk: stock.bb_produk,
+                                    products: stock.products,
+                                    homeCluster: stock.products?.default_cluster || "?",
+                                    reason: "salah-cluster"
+                                  };
+                                  // PENTING: Force manual mode untuk Free Move Tab
+                                  openMoveModal(item, true);
+                                }}
+                                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors"
+                              >
+                                <MapPin className="w-3 h-3 inline mr-1" />
+                                Pindah
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {freeMove_FilteredStocks.length > 50 && (
+                    <div className="text-center py-4 text-sm text-gray-600">
+                      Menampilkan 50 dari {freeMove_FilteredStocks.length} hasil. Gunakan filter untuk mempersempit pencarian.
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          ) : activeTab !== "history" ? (
             <>
               {/* Action Bar */}
               {filteredStocks.length > 0 && (
@@ -525,7 +1025,7 @@ export function PermutasiForm() {
                       onClick={handleBatchMoveClick}
                       className="w-full sm:w-auto px-6 py-2 bg-violet-600 text-white rounded-xl font-semibold hover:bg-violet-700 transition-colors shadow-lg"
                     >
-                      🚚 Pindahkan {selectedItems.size} Item (Auto)
+                      🚚 Review & Pindahkan {selectedItems.size} Item
                     </button>
                   )}
                 </div>
@@ -575,14 +1075,14 @@ export function PermutasiForm() {
                             />
                           </td>
                           <td className="px-3 py-3">
-                            <div className="font-medium text-gray-900 text-sm">{productMasterData.find(p => p.id === stock.productId)?.productCode || 'UNKNOWN'}</div>
-                            <div className="text-gray-500 text-xs truncate max-w-[150px] md:max-w-[200px]">{productMasterData.find(p => p.id === stock.productId)?.productName || 'Unknown Product'}</div>
+                            <div className="font-medium text-gray-900 text-sm">{stock.products.product_code}</div>
+                            <div className="text-gray-500 text-xs truncate max-w-[150px] md:max-w-[200px]">{stock.products.product_name}</div>
                           </td>
                           <td className="px-3 py-3 text-xs font-mono text-gray-600 hidden md:table-cell">
-                            {stock.bbProduk}
+                            {stock.bb_produk}
                           </td>
                           <td className="px-3 py-3 text-center">
-                            <span className="font-bold text-gray-900">{stock.qtyCarton}</span>
+                            <span className="font-bold text-gray-900">{stock.qty_carton}</span>
                             <span className="text-gray-500 text-xs ml-1">ctn</span>
                           </td>
                           <td className="px-3 py-3 text-center">
@@ -631,26 +1131,41 @@ export function PermutasiForm() {
                         <th className="px-3 py-3 text-left text-xs font-bold uppercase">Waktu</th>
                         <th className="px-3 py-3 text-left text-xs font-bold uppercase">Produk</th>
                         <th className="px-3 py-3 text-center text-xs font-bold uppercase">Qty</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold uppercase">Status FEFO</th>
                         <th className="px-3 py-3 text-center text-xs font-bold uppercase">Dari</th>
                         <th className="px-3 py-3 text-center text-xs font-bold uppercase">Ke</th>
                         <th className="px-3 py-3 text-left text-xs font-bold uppercase">Alasan</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {todayHistory.map((h) => {
-                        const product = productMasterData.find(p => p.id === h.product_id);
+                      {todayHistory.map((h: any) => {
+                        const product = h.products;
                         const fromLocation = `${h.from_cluster}-L${h.from_lorong}-B${h.from_baris}-P${h.from_level}`;
                         const toLocation = `${h.to_cluster}-L${h.to_lorong}-B${h.to_baris}-P${h.to_level}`;
+                        const fefoStatus = h.stock_list?.fefo_status || "unknown";
                         return (
                         <tr key={h.id} className="hover:bg-violet-50 transition-colors">
                           <td className="px-3 py-3 text-sm text-gray-900">
                             {new Date(h.moved_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
                           </td>
                           <td className="px-3 py-3">
-                            <div className="font-medium text-gray-900 text-sm">{product?.productCode || "UNKNOWN"}</div>
-                            <div className="text-gray-500 text-xs truncate max-w-[150px]">{product?.productName || "Unknown Product"}</div>
+                            <div className="font-medium text-gray-900 text-sm">{product?.product_code || "UNKNOWN"}</div>
+                            <div className="text-gray-500 text-xs truncate max-w-[150px]">{product?.product_name || "Unknown Product"}</div>
                           </td>
                           <td className="px-3 py-3 text-center font-bold text-gray-900">{h.qty_carton} ctn</td>
+                          <td className="px-3 py-3 text-center">
+                            <span
+                              className={`inline-block px-2 py-1 rounded text-xs font-bold ${
+                                fefoStatus === "release"
+                                  ? "bg-green-100 text-green-800"
+                                  : fefoStatus === "hold"
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : "bg-gray-100 text-gray-800"
+                              }`}
+                            >
+                              {fefoStatus === "release" ? "🟢 Release" : fefoStatus === "hold" ? "🟡 Hold" : "⚪ Unknown"}
+                            </span>
+                          </td>
                           <td className="px-3 py-3 text-center">
                             <span className="inline-block px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-mono">
                               {fromLocation}
@@ -736,15 +1251,15 @@ export function PermutasiForm() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Produk:</span>
-                    <span className="font-semibold text-gray-900">{productMasterData.find(p => p.id === itemToMove.productId)?.productCode || 'UNKNOWN'}</span>
+                    <span className="font-semibold text-gray-900">{itemToMove.products.product_code}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Nama:</span>
-                    <span className="font-semibold text-gray-900 text-right max-w-[200px] truncate">{productMasterData.find(p => p.id === itemToMove.productId)?.productName || 'Unknown Product'}</span>
+                    <span className="font-semibold text-gray-900 text-right max-w-[200px] truncate">{itemToMove.products.product_name}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Qty:</span>
-                    <span className="font-semibold text-gray-900">{itemToMove.qtyCarton} karton</span>
+                    <span className="font-semibold text-gray-900">{itemToMove.qty_carton} karton</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Lokasi Saat Ini:</span>
@@ -776,26 +1291,30 @@ export function PermutasiForm() {
               {/* Location Mode */}
               <div className="bg-violet-50 border-2 border-violet-200 rounded-xl p-4">
                 <h3 className="font-semibold text-violet-900 mb-3">📍 Lokasi Tujuan</h3>
-                <div className="flex gap-4 mb-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={autoRecommend}
-                      onChange={() => setAutoRecommend(true)}
-                      className="w-4 h-4 text-violet-600"
-                    />
-                    <span className="text-sm font-medium text-violet-800">Auto Recommend</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={!autoRecommend}
-                      onChange={() => setAutoRecommend(false)}
-                      className="w-4 h-4 text-violet-600"
-                    />
-                    <span className="text-sm font-medium text-violet-800">Manual</span>
-                  </label>
-                </div>
+                
+                {/* Hide toggle jika forceManualMode (Free Move Tab) */}
+                {!forceManualMode && (
+                  <div className="flex gap-4 mb-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={autoRecommend}
+                        onChange={() => setAutoRecommend(true)}
+                        className="w-4 h-4 text-violet-600"
+                      />
+                      <span className="text-sm font-medium text-violet-800">Auto Recommend</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={!autoRecommend}
+                        onChange={() => setAutoRecommend(false)}
+                        className="w-4 h-4 text-violet-600"
+                      />
+                      <span className="text-sm font-medium text-violet-800">Manual</span>
+                    </label>
+                  </div>
+                )}
 
                 {autoRecommend ? (
                   <div className="space-y-3">
@@ -906,6 +1425,156 @@ export function PermutasiForm() {
         </div>
       )}
 
+      {/* Batch Plan Modal - Review locations before execute */}
+      {showBatchPlanModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={(e) => handleBackdropClick(e, () => setShowBatchPlanModal(false))}
+        >
+          <div className="w-full max-w-6xl bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="bg-gradient-to-r from-violet-500 to-purple-600 p-6">
+              <h3 className="text-xl font-bold text-white">📋 Review Batch Permutasi ({batchMoveItems.length} items)</h3>
+              <p className="text-white/80 text-sm mt-1">Periksa dan konfirmasi lokasi tujuan sebelum pemindahan</p>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6">
+              {batchMoveItems.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Tidak ada item yang dipilih</div>
+              ) : (
+                <div className="space-y-4">
+                  {batchMoveItems.map((item, idx) => {
+                    const stock = filteredStocks.find(s => s.id === item.stockId);
+                    if (!stock) return null;
+
+                    return (
+                      <div key={item.stockId} className="border-2 border-gray-200 rounded-xl p-4 hover:border-violet-300 transition-colors">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex-1">
+                            <div className="font-bold text-gray-900">{idx + 1}. {item.productCode}</div>
+                            <div className="text-sm text-gray-600">{item.productName}</div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              Dari: <span className="font-mono text-red-600">{item.fromLocation}</span>
+                            </div>
+                          </div>
+                          
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => toggleBatchItemMode(item.stockId)}
+                              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                                item.useAutoRecommend
+                                  ? "bg-green-100 text-green-800 hover:bg-green-200"
+                                  : "bg-blue-100 text-blue-800 hover:bg-blue-200"
+                              }`}
+                            >
+                              {item.useAutoRecommend ? "🤖 Auto" : "✋ Manual"}
+                            </button>
+                          </div>
+                        </div>
+
+                        {item.useAutoRecommend ? (
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                            {item.recommendedLocation ? (
+                              <div className="text-sm">
+                                <span className="text-green-700 font-semibold">✅ Rekomendasi:</span>
+                                <span className="ml-2 font-mono text-green-800 font-bold">
+                                  {item.recommendedLocation.clusterChar}-{item.recommendedLocation.lorong}-
+                                  {item.recommendedLocation.baris}-{item.recommendedLocation.level}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="text-sm text-red-600">
+                                ⚠️ Tidak ada lokasi kosong yang tersedia. Ubah ke Manual.
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <div className="text-sm text-blue-700 font-semibold mb-2">✋ Manual Location:</div>
+                            <div className="grid grid-cols-4 gap-2">
+                              <select
+                                value={item.manualLocation.clusterChar}
+                                onChange={(e) => updateBatchItemLocation(item.stockId, "clusterChar", e.target.value)}
+                                className="px-2 py-1 rounded border text-sm"
+                              >
+                                <option value="">Cluster</option>
+                                {clusterOptions.map((c) => (
+                                  <option key={c} value={c}>Cluster {c}</option>
+                                ))}
+                              </select>
+                              
+                              <select
+                                value={item.manualLocation.lorong}
+                                onChange={(e) => updateBatchItemLocation(item.stockId, "lorong", e.target.value)}
+                                className="px-2 py-1 rounded border text-sm"
+                                disabled={!item.manualLocation.clusterChar}
+                              >
+                                <option value="">Lorong</option>
+                                {item.manualLocation.clusterChar && lorongOptions.map((l) => (
+                                  <option key={l} value={l}>{l}</option>
+                                ))}
+                              </select>
+                              
+                              <select
+                                value={item.manualLocation.baris}
+                                onChange={(e) => updateBatchItemLocation(item.stockId, "baris", e.target.value)}
+                                className="px-2 py-1 rounded border text-sm"
+                                disabled={!item.manualLocation.lorong}
+                              >
+                                <option value="">Baris</option>
+                                {item.manualLocation.lorong && barisOptions.map((b) => (
+                                  <option key={b} value={b}>{b}</option>
+                                ))}
+                              </select>
+                              
+                              <select
+                                value={item.manualLocation.pallet}
+                                onChange={(e) => updateBatchItemLocation(item.stockId, "pallet", e.target.value)}
+                                className="px-2 py-1 rounded border text-sm"
+                                disabled={!item.manualLocation.baris}
+                              >
+                                <option value="">Pallet</option>
+                                {item.manualLocation.baris && palletOptions.map((p) => (
+                                  <option key={p} value={p}>{p}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        )}
+
+                        {item.warningMessage && (
+                          <div className="mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                            {item.warningMessage}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-gray-200 p-6 bg-gray-50 flex gap-3">
+              <button
+                onClick={() => setShowBatchPlanModal(false)}
+                className="flex-1 px-6 py-3 bg-gray-300 text-gray-700 rounded-xl font-semibold hover:bg-gray-400 transition-colors"
+              >
+                ❌ Batal
+              </button>
+              <button
+                onClick={() => {
+                  setShowBatchPlanModal(false);
+                  confirmBatchMove();
+                }}
+                disabled={batchMoveItems.every(item => !item.isValid && !item.useAutoRecommend)}
+                className="flex-1 px-6 py-3 bg-violet-600 text-white rounded-xl font-semibold hover:bg-violet-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                ✅ Konfirmasi & Pindahkan ({batchMoveItems.length} items)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirm Move Modal */}
       {showConfirmModal && itemToMove && (
         <div
@@ -920,7 +1589,7 @@ export function PermutasiForm() {
               <p className="text-gray-700 text-center mb-4">Yakin ingin memindahkan stock ini?</p>
               <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm space-y-1">
                 <p>
-                  <strong>Produk:</strong> {productMasterData.find(p => p.id === itemToMove.productId)?.productCode || 'UNKNOWN'}
+                  <strong>Produk:</strong> {itemToMove.products.product_code}
                 </p>
                 <p>
                   <strong>Dari:</strong>{" "}
@@ -945,36 +1614,6 @@ export function PermutasiForm() {
                   Batal
                 </button>
                 <button onClick={confirmMove} className="flex-1 bg-violet-600 text-white py-3 rounded-xl font-semibold hover:bg-violet-700">
-                  Ya, Pindahkan
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Batch Confirm Modal */}
-      {showBatchConfirmModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          onClick={(e) => handleBackdropClick(e, () => setShowBatchConfirmModal(false))}
-        >
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
-            <div className="bg-gradient-to-r from-violet-500 to-purple-600 p-6">
-              <h3 className="text-xl font-bold text-white text-center">Konfirmasi Batch Move</h3>
-            </div>
-            <div className="p-6">
-              <p className="text-gray-700 text-center mb-4">
-                Yakin ingin memindahkan <strong>{selectedItems.size} item</strong> secara otomatis ke lokasi yang sesuai?
-              </p>
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-sm text-amber-800">
-                <p>⚠️ Item yang tidak memiliki lokasi kosong di home cluster tidak akan dipindahkan.</p>
-              </div>
-              <div className="flex gap-3">
-                <button onClick={() => setShowBatchConfirmModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300">
-                  Batal
-                </button>
-                <button onClick={confirmBatchMove} className="flex-1 bg-violet-600 text-white py-3 rounded-xl font-semibold hover:bg-violet-700">
                   Ya, Pindahkan
                 </button>
               </div>

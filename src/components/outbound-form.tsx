@@ -1,21 +1,59 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { productMasterData, getProductByCode } from "@/lib/mock/product-master";
-import { stockListData } from "@/lib/mock/stocklistmock";
 import { TruckIcon, MapPin, XCircle } from "lucide-react";
 import { useToast, ToastContainer } from "./toast";
 import { QRCodeSVG } from "qrcode.react";
-import { outboundHistoryData, OutboundHistory } from "@/lib/mock/transaction-history";
+import {
+  getFEFOAllocationAction,
+  submitOutboundAction,
+  cancelOutboundAction,
+} from "@/app/outbound/actions";
+import { useRouter } from "next/navigation";
+
+// Type untuk produk dari database
+interface Product {
+  id: string;
+  product_code: string;
+  product_name: string;
+  qty_per_carton: number;
+  qty_carton_per_pallet: number;
+  warehouse_id: string;
+}
 
 interface FEFOLocation {
   stockId: string;
   location: string;
+  cluster: string;
+  lorong: number;
+  baris: number;
+  level: number;
+  bbProduk: string;
   bbPallet: string | string[];
   expiredDate: string;
   availableQtyPallet: number;
   allocatedQtyPallet: number;
   daysToExpire: number;
+  qtyBefore: number;
+  qtyTaken: number;
+  qtyAfter: number;
+  fefo_status: string; // 'release' or 'hold'
+  status: string; // 'normal', 'receh', 'salah-cluster', etc
+  is_receh: boolean;
+  is_fefo_violation: boolean; // true if picking hold while release available
+}
+
+// Type untuk outbound history (untuk fitur Edit/Batal yang belum aktif)
+interface OutboundHistory {
+  id: string;
+  transaction_code: string;
+  product_id: string;
+  qty_carton: number;
+  driver_name: string;
+  vehicle_number: string;
+  departure_time: string;
+  locations: any[];
+  created_at: string;
 }
 
 type OutboundFormState = {
@@ -38,8 +76,20 @@ const initialState: OutboundFormState = {
   qtyCartonInput: "",
 };
 
-export function OutboundForm() {
-  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
+// Props interface untuk komponen
+interface OutboundFormProps {
+  products: Product[];
+  warehouseId: string;
+  history?: OutboundHistory[];
+}
+
+export function OutboundForm({
+  products,
+  warehouseId,
+  history = [],
+}: OutboundFormProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const router = useRouter();
   const [form, setForm] = useState<OutboundFormState>(initialState);
   const [fefoLocations, setFefoLocations] = useState<FEFOLocation[]>([]);
   const { toasts, removeToast, success, error } = useToast();
@@ -61,27 +111,17 @@ export function OutboundForm() {
 
   // --- HISTORY DETAIL MODAL STATE ---
   const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(false);
-  const [selectedHistoryItem, setSelectedHistoryItem] = useState<OutboundHistory | null>(null);
+  const [selectedHistoryItem, setSelectedHistoryItem] =
+    useState<OutboundHistory | null>(null);
 
   // --- EDIT & BATAL MODAL STATE ---
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showBatalConfirmModal, setShowBatalConfirmModal] = useState(false);
-  const [selectedItemForAction, setSelectedItemForAction] = useState<OutboundHistory | null>(null);
+  const [selectedItemForAction, setSelectedItemForAction] =
+    useState<OutboundHistory | null>(null);
 
-  // Load warehouse context
-  useEffect(() => {
-    const userStr = localStorage.getItem("user");
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      setCurrentWarehouseId(user.warehouseId || null);
-    }
-  }, []);
-
-  // Filter products by warehouse
-  const filteredProducts = useMemo(() => {
-    if (!currentWarehouseId) return productMasterData;
-    return productMasterData.filter(p => p.warehouseId === currentWarehouseId);
-  }, [currentWarehouseId]);
+  // Gunakan products dari props (sudah difilter oleh warehouse di server)
+  const filteredProducts = products;
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -115,13 +155,13 @@ export function OutboundForm() {
   };
   // --- AKHIR INPUT HISTORY ---
 
-  // Get selected product data
+  // Get selected product data dari products (database)
   const selectedProduct = form.productCode
-    ? getProductByCode(form.productCode)
+    ? products.find((p) => p.product_code === form.productCode)
     : null;
 
   // --- LOGIKA QTY DINAMIS (CALCULATED VALUES) ---
-  const qtyPerPalletStd = selectedProduct?.qtyCartonPerPallet || 0;
+  const qtyPerPalletStd = selectedProduct?.qty_carton_per_pallet || 0;
 
   const { totalPallets, remainingCartons, totalCartons } = useMemo(() => {
     const palletInput = Number(form.qtyPalletInput) || 0;
@@ -154,7 +194,7 @@ export function OutboundForm() {
   // Total Pcs
   const totalPcs =
     selectedProduct && totalCartons
-      ? totalCartons * selectedProduct.qtyPerCarton
+      ? totalCartons * selectedProduct.qty_per_carton
       : 0;
   // --- AKHIR LOGIKA QTY DINAMIS ---
 
@@ -203,157 +243,114 @@ export function OutboundForm() {
       return;
     }
 
+    // Langsung buka modal konfirmasi (user mengikuti rekomendasi sistem)
     setShowConfirmModal(true);
   };
 
   // Confirm outbound
-  const confirmOutbound = () => {
-    const qtyPerPalletStd = selectedProduct?.qtyCartonPerPallet || 0;
-    let remainingTotalCartons = totalCartons;
+  const confirmOutbound = async () => {
+    if (!selectedProduct || fefoLocations.length === 0) return;
 
-    // 1. Buat detail lokasi FEFO dengan BB Produk per lokasi
-    const locationsArray = fefoLocations.map((loc) => {
-      const takenCartons = Math.min(remainingTotalCartons, qtyPerPalletStd);
-      remainingTotalCartons -= takenCartons;
+    setIsSubmitting(true);
 
-      // Parse location string ke komponen (misal: "A-L1-B1-P1")
-      const parts = loc.location.split('-');
-      const cluster = parts[0];
-      const lorong = parseInt(parts[1].replace('L', ''));
-      const baris = parseInt(parts[2].replace('B', ''));
-      const level = parseInt(parts[3].replace('P', ''));
-
-      return {
-        cluster,
-        lorong,
-        baris,
-        level,
-        qtyCarton: takenCartons,
-        stockId: loc.stockId,
-        bbProduk: Array.isArray(loc.bbPallet) ? loc.bbPallet.join(", ") : loc.bbPallet,
-        expiredDate: loc.expiredDate,
-      };
-    });
-
-    // 2. Buat entry history baru sesuai OutboundHistory interface
-    const transactionCode = `OUT-${form.tanggal.replace(/-/g, '')}-${Date.now().toString().slice(-4)}`;
-    
-    const newHistoryEntry: OutboundHistory = {
-      id: `out-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      warehouseId: "WH001",
-      transactionCode,
-      productId: selectedProduct?.id || "UNKNOWN",
-      bbProduk: locationsArray[0]?.bbProduk || "", // Legacy field, isi dengan BB pertama
-      qtyCarton: totalCartons,
-      locations: locationsArray,
-      expeditionId: null,
-      driverName: form.namaPengemudi,
-      vehicleNumber: form.nomorPolisi,
-      processedBy: "USER001",
-      departureTime: `${form.tanggal}T${new Date().toTimeString().slice(0, 8)}`,
-      notes: `Outbound ${totalPalletsNeeded} pallet, ${totalCartons} carton`,
-      createdAt: new Date().toISOString(),
+    const formData = {
+      warehouse_id: warehouseId, // Ambil dari props
+      product_id: selectedProduct.id, // UUID dari database
+      total_qty_carton: totalCartons,
+      namaPengemudi: form.namaPengemudi,
+      nomorPolisi: form.nomorPolisi,
     };
 
-    // Simpan ke array history
-    outboundHistoryData.push(newHistoryEntry);
+    try {
+      const result = await submitOutboundAction(formData, fefoLocations);
 
-    // 3. Simpan history input autocomplete
-    saveToHistory(
-      "wms_driver_history",
-      form.namaPengemudi,
-      driverHistory,
-      setDriverHistory
-    );
-    saveToHistory(
-      "wms_police_no_history",
-      form.nomorPolisi,
-      policeNoHistory,
-      setPoliceNoHistory
-    );
+      if (result.success) {
+        setShowConfirmModal(false);
+        setShowSuccessModal(true);
 
-    setShowConfirmModal(false);
-    setShowSuccessModal(true);
+        // Save to autocomplete history
+        saveToHistory(
+          "wms_driver_history",
+          form.namaPengemudi,
+          driverHistory,
+          setDriverHistory
+        );
+        saveToHistory(
+          "wms_police_no_history",
+          form.nomorPolisi,
+          policeNoHistory,
+          setPoliceNoHistory
+        );
 
-    // 4. Reset state instruksi
-    setTimeout(() => {
-      setShowSuccessModal(false);
-      setFefoLocations([]);
-    }, 2000);
+        // JANGAN reset form (data retention) - hanya reset FEFO locations dan modal
+        setTimeout(() => {
+          setShowSuccessModal(false);
+          setFefoLocations([]);
+          setIsSubmitting(false);
+          router.refresh(); // Refresh data dari server
+        }, 2000);
+      } else {
+        error(result.message || "Gagal memproses outbound.");
+        setIsSubmitting(false);
+      }
+    } catch (err: any) {
+      error("Terjadi kesalahan sistem saat submit.");
+      setIsSubmitting(false);
+    }
   };
 
   // Calculate FEFO locations
-  const calculateFEFO = () => {
-    if (!form.productCode || totalPalletsNeeded <= 0) {
-      error("Mohon isi produk dan quantity!");
+  const calculateFEFO = async () => {
+    if (!form.productCode || totalCartons <= 0 || !selectedProduct) {
+      error("Mohon pilih produk dan isi kuantitas terlebih dahulu!");
       return;
     }
 
-    const qtyPalletNeeded = totalPalletsNeeded;
-
-    // Get available stocks for this product, sorted by expired date (FEFO)
-    // Available means: release, hold, or receh (excluding salah-cluster)
-    const availableStocks = stockListData
-      .filter(
-        (stock) =>
-          stock.productId === getProductByCode(form.productCode)?.id &&
-          (stock.status === "release" ||
-            stock.status === "hold" ||
-            stock.status === "receh")
-      )
-      .sort(
-        (a, b) =>
-          new Date(a.expiredDate).getTime() - new Date(b.expiredDate).getTime()
+    try {
+      // Ambil data dari server (Real Database)
+      const result = await getFEFOAllocationAction(
+        warehouseId, // Warehouse ID dari props
+        selectedProduct.id, // UUID product dari database
+        totalCartons
       );
 
-    const locations: FEFOLocation[] = [];
-    let remainingQtyPallet = qtyPalletNeeded;
+      if (result.success && result.allocation) {
+        // Mapping hasil server dengan semua field yang diperlukan backend + UI
+        const mappedAllocation = result.allocation.map((loc) => ({
+          stockId: loc.stockId,
+          location: loc.location,
+          cluster: loc.cluster,
+          lorong: loc.lorong,
+          baris: loc.baris,
+          level: loc.level,
+          bbProduk: loc.bbProduk,
+          expiredDate: loc.expiredDate,
+          qtyBefore: loc.qtyBefore,
+          qtyTaken: loc.qtyTaken,
+          qtyAfter: loc.qtyAfter,
+          daysToExpire: loc.daysToExpire,
+          fefo_status: loc.fefo_status,
+          status: loc.status,
+          is_receh: loc.is_receh,
+          is_fefo_violation: loc.is_fefo_violation,
+          // Field tambahan untuk UI compatibility
+          bbPallet: loc.bbProduk,
+          availableQtyPallet: 1,
+          allocatedQtyPallet: 1,
+        }));
 
-    // Allocate from stocks (FEFO) - gunakan qtyPallet langsung dari stock
-    for (const stock of availableStocks) {
-      if (remainingQtyPallet <= 0) break;
-
-      // Gunakan qtyPallet (jumlah tumpukan pallet di slot) dari stock data
-      const availablePallet = stock.qtyPallet;
-
-      if (availablePallet > 0) {
-        const allocatePallet = Math.min(remainingQtyPallet, availablePallet);
-
-        const now = new Date();
-        const expDate = new Date(stock.expiredDate);
-        const daysToExpire = Math.ceil(
-          (expDate.getTime() - now.getTime()) / (1000 * 3600 * 24)
+        setFefoLocations(mappedAllocation);
+        
+        success(
+          `✓ Berhasil! Ditemukan ${mappedAllocation.length} lokasi berdasarkan FEFO.`
         );
-
-        locations.push({
-          stockId: stock.id,
-          location: `${stock.cluster}-L${stock.lorong}-B${stock.baris}-P${stock.level}`,
-          bbPallet: stock.bbProduk,
-          expiredDate: stock.expiredDate,
-          availableQtyPallet: availablePallet,
-          allocatedQtyPallet: allocatePallet,
-          daysToExpire,
-        });
-
-        remainingQtyPallet -= allocatePallet;
+      } else {
+        setFefoLocations([]);
+        error(result.error || "Gagal menghitung FEFO.");
       }
+    } catch (err: any) {
+      error("Sistem error saat menghitung FEFO.");
     }
-
-    // Check if we have enough stock
-    if (remainingQtyPallet > 0) {
-      error(
-        `Stok tidak cukup! Kurang ${remainingQtyPallet} pallet. Tersedia: ${
-          qtyPalletNeeded - remainingQtyPallet
-        } dari ${qtyPalletNeeded} pallet yang diminta.`
-      );
-      setFefoLocations([]);
-      return;
-    }
-
-    setFefoLocations(locations);
-    success(
-      `✓ Berhasil! Ditemukan ${locations.length} lokasi pengambilan berdasarkan FEFO.`
-    );
   };
 
   // Handle reset
@@ -363,252 +360,102 @@ export function OutboundForm() {
   };
 
   // --- FILTER TRANSAKSI HARI INI ---
-  const todayTransactions = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    return outboundHistoryData.filter((item) => item.departureTime.startsWith(todayStr));
-  }, []);
+  // Menggunakan data history dari props (sudah difilter hari ini di server)
+  const todayTransactions = history;
 
   // --- HANDLE EDIT TRANSAKSI ---
-  const handleEditClick = (item: OutboundHistory) => {
+  const handleEditClick = (item: any) => {
     setSelectedItemForAction(item);
     setShowEditConfirmModal(true);
   };
 
-  const confirmEdit = () => {
+  const confirmEdit = async () => {
     if (!selectedItemForAction) return;
 
-    // 1. Kembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)
-    selectedItemForAction.locations.forEach((locationItem) => {
-      // Cek apakah lokasi sudah terisi oleh produk lain
-      const existingStock = stockListData.find(
-        (s) =>
-          s.cluster === locationItem.cluster &&
-          s.lorong === locationItem.lorong &&
-          s.baris === locationItem.baris &&
-          s.level === locationItem.level
+    setIsSubmitting(true);
+
+    try {
+      // 1. Cancel outbound (soft delete + stock reversal)
+      const result = await cancelOutboundAction(selectedItemForAction.id);
+
+      if (!result.success) {
+        error(result.message || "Gagal membatalkan transaksi untuk edit.");
+        setIsSubmitting(false);
+        setShowEditConfirmModal(false);
+        return;
+      }
+
+      // 2. Populate form dengan data transaksi yang dibatalkan
+      const selectedProd = products.find(p => p.id === selectedItemForAction.product_id);
+      const qtyPerPallet = selectedProd?.qty_carton_per_pallet || 1;
+      const totalCarton = selectedItemForAction.qty_carton;
+      const fullPallets = Math.floor(totalCarton / qtyPerPallet);
+      const remainingCartons = totalCarton % qtyPerPallet;
+
+      setForm({
+        tanggal: selectedItemForAction.departure_time.slice(0, 10),
+        namaPengemudi: selectedItemForAction.driver_name,
+        nomorPolisi: selectedItemForAction.vehicle_number,
+        productCode: selectedProd?.product_code || '',
+        qtyPalletInput: String(fullPallets),
+        qtyCartonInput: String(remainingCartons),
+      });
+
+      // 3. Reset state
+      setShowEditConfirmModal(false);
+      setSelectedItemForAction(null);
+      setFefoLocations([]);
+      setIsSubmitting(false);
+
+      success(
+        `✓ Transaksi ${selectedItemForAction.transaction_code} dibatalkan. Data dimuat ke form. Silakan edit dan submit ulang.`
       );
 
-      // Ambil data produk
-      const productData = productMasterData.find(p => p.id === selectedItemForAction.productId);
-
-      if (existingStock) {
-        // Lokasi sudah terisi, pindahkan ke In Transit (Cluster C)
-        const inTransitLoc = findAvailableInTransitLocation();
-        if (inTransitLoc) {
-          const todayStr = new Date().toISOString().slice(0, 10);
-          stockListData.push({
-            id: `STK-RETURN-${Date.now()}-${Math.random()
-              .toString(36)
-              .substr(2, 9)}`,
-            warehouseId: "WH001",
-            productId: productData?.id || "UNKNOWN",
-            bbProduk: "RETURNED",
-            cluster: inTransitLoc.clusterChar,
-            lorong: parseInt(inTransitLoc.lorong.replace('L', '')),
-            baris: parseInt(inTransitLoc.baris.replace('B', '')),
-            level: parseInt(inTransitLoc.level.replace('P', '')),
-            qtyPallet: 1,
-            qtyCarton: locationItem.qtyCarton,
-            expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
-              .toISOString()
-              .slice(0, 10),
-            inboundDate: todayStr,
-            status: "release",
-            isReceh: false,
-            parentStockId: null,
-            createdBy: "USER001",
-            createdAt: todayStr,
-            updatedAt: todayStr,
-          });
-        }
-      } else {
-        // Lokasi kosong, kembalikan ke lokasi asal
-        const todayStr = new Date().toISOString().slice(0, 10);
-        stockListData.push({
-          id: `STK-RETURN-${Date.now()}-${Math.random()
-            .toString(36)
-            .substr(2, 9)}`,
-          warehouseId: "WH001",
-          productId: productData?.id || "UNKNOWN",
-          bbProduk: "RETURNED",
-          cluster: locationItem.cluster,
-          lorong: locationItem.lorong,
-          baris: locationItem.baris,
-          level: locationItem.level,
-          qtyPallet: 1,
-          qtyCarton: locationItem.qtyCarton,
-          expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .slice(0, 10),
-          inboundDate: todayStr,
-          status: "release",
-          isReceh: false,
-          parentStockId: null,
-          createdBy: "USER001",
-          createdAt: todayStr,
-          updatedAt: todayStr,
-        });
-      }
-    });
-
-    // 2. Hapus dari history
-    const historyIndex = outboundHistoryData.findIndex(
-      (h) => h.id === selectedItemForAction.id
-    );
-    if (historyIndex !== -1) {
-      outboundHistoryData.splice(historyIndex, 1);
+      // 4. Refresh data
+      router.refresh();
+    } catch (err: any) {
+      error("Terjadi kesalahan sistem saat edit transaksi.");
+      setIsSubmitting(false);
     }
-
-    // 3. Load data ke form untuk di-edit
-    const selectedProd = productMasterData.find(p => p.id === selectedItemForAction.productId);
-    const qtyPerPallet = selectedProd?.qtyCartonPerPallet || 1;
-    const totalCarton = selectedItemForAction.qtyCarton;
-    const fullPallets = Math.floor(totalCarton / qtyPerPallet);
-    const remainingCartons = totalCarton % qtyPerPallet;
-
-    setForm({
-      tanggal: selectedItemForAction.departureTime.slice(0, 10),
-      namaPengemudi: selectedItemForAction.driverName,
-      nomorPolisi: selectedItemForAction.vehicleNumber,
-      productCode: selectedProd?.productCode || '',
-      qtyPalletInput: String(fullPallets),
-      qtyCartonInput: String(remainingCartons),
-    });
-
-    // 4. Reset state
-    setShowEditConfirmModal(false);
-    setSelectedItemForAction(null);
-    setFefoLocations([]);
-
-    success(
-      `Data transaksi ${selectedItemForAction.transactionCode} telah dimuat ke form. Stock dikembalikan. Silakan edit dan submit ulang.`
-    );
-  };
-
-  // Helper: Cari lokasi In Transit yang kosong
-  const findAvailableInTransitLocation = () => {
-    // In Transit area di Cluster C, Lorong L11-L12
-    for (let lorong = 11; lorong <= 12; lorong++) {
-      for (let baris = 1; baris <= 9; baris++) {
-        for (let pallet = 1; pallet <= 3; pallet++) {
-          const loc = {
-            clusterChar: "C",
-            lorong: `L${lorong}`,
-            baris: `B${baris}`,
-            level: `P${pallet}`,
-          };
-          const exists = stockListData.some(
-            (s) =>
-              s.cluster === loc.clusterChar &&
-              s.lorong === parseInt(loc.lorong.replace('L', '')) &&
-              s.baris === parseInt(loc.baris.replace('B', '')) &&
-              s.level === parseInt(loc.level.replace('P', ''))
-          );
-          if (!exists) return loc;
-        }
-      }
-    }
-    return null;
   };
 
   // --- HANDLE BATAL TRANSAKSI ---
-  const handleBatalClick = (item: OutboundHistory) => {
+  const handleBatalClick = (item: any) => {
     setSelectedItemForAction(item);
     setShowBatalConfirmModal(true);
   };
 
-  const confirmBatal = () => {
+  const confirmBatal = async () => {
     if (!selectedItemForAction) return;
 
-    // 1. Kembalikan stock ke lokasi asal (atau In Transit jika lokasi sudah terisi)
-    selectedItemForAction.locations.forEach((locationItem) => {
-      // Cek apakah lokasi sudah terisi oleh produk lain
-      const existingStock = stockListData.find(
-        (s) =>
-          s.cluster === locationItem.cluster &&
-          s.lorong === locationItem.lorong &&
-          s.baris === locationItem.baris &&
-          s.level === locationItem.level
+    setIsSubmitting(true);
+
+    try {
+      // Cancel outbound (hard delete + stock reversal)
+      const result = await cancelOutboundAction(selectedItemForAction.id);
+
+      if (!result.success) {
+        error(result.message || "Gagal membatalkan transaksi.");
+        setIsSubmitting(false);
+        setShowBatalConfirmModal(false);
+        return;
+      }
+
+      // Reset state
+      setShowBatalConfirmModal(false);
+      setSelectedItemForAction(null);
+      setIsSubmitting(false);
+
+      success(
+        `✓ Transaksi ${selectedItemForAction.transaction_code} telah dibatalkan. Stock dikembalikan.`
       );
 
-      // Ambil data produk
-      const productData = productMasterData.find(p => p.id === selectedItemForAction.productId);
-
-      if (existingStock) {
-        // Lokasi sudah terisi, pindahkan ke In Transit
-        const inTransitLoc = findAvailableInTransitLocation();
-        if (inTransitLoc) {
-          const todayStr = new Date().toISOString().slice(0, 10);
-          stockListData.push({
-            id: `STK-RETURN-${Date.now()}-${Math.random()
-              .toString(36)
-              .substr(2, 9)}`,
-            warehouseId: "WH001",
-            productId: productData?.id || "UNKNOWN",
-            bbProduk: "RETURNED",
-            cluster: inTransitLoc.clusterChar,
-            lorong: parseInt(inTransitLoc.lorong.replace('L', '')),
-            baris: parseInt(inTransitLoc.baris.replace('B', '')),
-            level: parseInt(inTransitLoc.level.replace('P', '')),
-            qtyPallet: 1,
-            qtyCarton: locationItem.qtyCarton,
-            expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
-              .toISOString()
-              .slice(0, 10),
-            inboundDate: todayStr,
-            status: "release",
-            isReceh: false,
-            parentStockId: null,
-            createdBy: "USER001",
-            createdAt: todayStr,
-            updatedAt: todayStr,
-          });
-        }
-      } else {
-        // Lokasi kosong, kembalikan ke lokasi asal
-        const todayStr = new Date().toISOString().slice(0, 10);
-        stockListData.push({
-          id: `STK-RETURN-${Date.now()}-${Math.random()
-            .toString(36)
-            .substr(2, 9)}`,
-          warehouseId: "WH001",
-          productId: productData?.id || "UNKNOWN",
-          bbProduk: "RETURNED",
-          cluster: locationItem.cluster,
-          lorong: locationItem.lorong,
-          baris: locationItem.baris,
-          level: locationItem.level,
-          qtyPallet: 1,
-          qtyCarton: locationItem.qtyCarton,
-          expiredDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .slice(0, 10),
-          inboundDate: todayStr,
-          status: "release",
-          isReceh: false,
-          parentStockId: null,
-          createdBy: "USER001",
-          createdAt: todayStr,
-          updatedAt: todayStr,
-        });
-      }
-    });
-
-    // 2. Hapus dari history
-    const historyIndex = outboundHistoryData.findIndex(
-      (h) => h.id === selectedItemForAction.id
-    );
-    if (historyIndex !== -1) {
-      outboundHistoryData.splice(historyIndex, 1);
+      // Refresh data
+      router.refresh();
+    } catch (err: any) {
+      error("Terjadi kesalahan sistem saat membatalkan transaksi.");
+      setIsSubmitting(false);
     }
-
-    // 3. Reset state
-    setShowBatalConfirmModal(false);
-    setSelectedItemForAction(null);
-
-    success(
-      `Transaksi ${selectedItemForAction.transactionCode} telah dibatalkan. Stock telah dikembalikan.`
-    );
   };
 
   return (
@@ -747,8 +594,8 @@ export function OutboundForm() {
                 >
                   <option value="">Pilih produk</option>
                   {filteredProducts.map((product) => (
-                    <option key={product.id} value={product.productCode}>
-                      {product.productName}
+                    <option key={product.id} value={product.product_code}>
+                      {product.product_name}
                     </option>
                   ))}
                 </select>
@@ -833,7 +680,7 @@ export function OutboundForm() {
                 <div className="flex justify-between">
                   <span className="text-slate-600">Produk:</span>
                   <span className="font-semibold text-slate-900">
-                    {selectedProduct?.productName || "-"}
+                    {selectedProduct?.product_name || "-"}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -938,7 +785,10 @@ export function OutboundForm() {
                         BB Produk
                       </th>
                       <th className="px-4 py-3 text-left text-sm font-bold">
-                        Qty Ambil (Pallet)
+                        Qty Ambil
+                      </th>
+                      <th className="px-4 py-3 text-left text-sm font-bold">
+                        Sisa di Rak
                       </th>
                       <th className="px-4 py-3 text-left text-sm font-bold">
                         Expired Date
@@ -953,7 +803,7 @@ export function OutboundForm() {
                       // Variabel pembantu untuk menghitung sisa karton di UI
                       let tempRemainingCartons = totalCartons;
                       const qtyPerPalletStd =
-                        selectedProduct?.qtyCartonPerPallet || 0;
+                        selectedProduct?.qty_carton_per_pallet || 0;
 
                       return fefoLocations.map((loc, index) => {
                         // Hitung karton spesifik untuk baris ini
@@ -979,9 +829,34 @@ export function OutboundForm() {
                               {index + 1}
                             </td>
                             <td className="px-4 py-3">
-                              <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-semibold">
-                                {loc.location}
-                              </span>
+                              <div className="flex flex-col gap-1.5">
+                                <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-semibold">
+                                  {loc.location}
+                                </span>
+                                <div className="flex gap-1.5 flex-wrap">
+                                  {/* Badge Status Fisik */}
+                                  {loc.status === 'receh' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700 border border-blue-300">
+                                      🔵 Receh
+                                    </span>
+                                  )}
+                                  {loc.status === 'salah-cluster' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 border border-red-300">
+                                      🔴 Salah Cluster
+                                    </span>
+                                  )}
+                                  {/* Badge FEFO Status */}
+                                  {loc.fefo_status === 'release' ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700 border border-green-300">
+                                      🟢 RELEASE
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-700 border border-yellow-300">
+                                      🟡 HOLD
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-sm font-medium text-gray-700">
                               {Array.isArray(loc.bbPallet)
@@ -989,12 +864,38 @@ export function OutboundForm() {
                                 : loc.bbPallet}
                             </td>
                             <td className="px-4 py-3">
-                              <div className="text-sm font-bold text-orange-700">
-                                {loc.allocatedQtyPallet} Pallet
+                              <div className="flex flex-col gap-1">
+                                <div className="text-sm font-bold text-orange-700">
+                                  {loc.allocatedQtyPallet} Pallet
+                                </div>
+                                {/* Detail karton yang harus diambil */}
+                                <div className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 inline-block">
+                                  Ambil {displayCartons} Carton
+                                </div>
                               </div>
-                              {/* INSTRUKSI BARU: Menunjukkan detail karton yang harus diambil */}
-                              <div className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 inline-block mt-1">
-                                Ambil {displayCartons} Carton
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col gap-1">
+                                {/* Sisa Stok di Rak setelah diambil */}
+                                <div className={`text-sm font-bold ${
+                                  loc.qtyAfter === 0 
+                                    ? "text-red-600" 
+                                    : loc.qtyAfter < 10 
+                                    ? "text-yellow-600" 
+                                    : "text-green-600"
+                                }`}>
+                                  {loc.qtyAfter} Carton
+                                </div>
+                                {loc.qtyAfter === 0 && (
+                                  <div className="text-xs font-semibold text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-200 inline-block">
+                                    ⚠️ Rak Kosong
+                                  </div>
+                                )}
+                                {loc.qtyAfter > 0 && loc.qtyAfter < 10 && (
+                                  <div className="text-xs font-semibold text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded border border-yellow-200 inline-block">
+                                    ⚡ Stok Tipis
+                                  </div>
+                                )}
                               </div>
                             </td>
                             <td className="px-4 py-3">
@@ -1136,98 +1037,129 @@ export function OutboundForm() {
           onClick={() => setShowConfirmModal(false)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[70vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6">
-              <h2 className="text-2xl font-bold text-gray-800 mb-4">
-                Konfirmasi Pengambilan Barang
+            {/* Sticky Header */}
+            <div className="sticky top-0 bg-linear-to-r from-orange-500 to-red-600 px-4 py-3 flex-shrink-0">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                ✓ Konfirmasi Pengambilan
               </h2>
+            </div>
 
-              <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mb-6">
-                <p className="text-amber-800 font-medium">
-                  ⚠️ Pastikan Anda akan mengambil barang dari lokasi-lokasi
-                  berikut sesuai urutan FEFO:
+            {/* Scrollable Content */}
+            <div className="overflow-y-auto flex-1 p-4 space-y-3">
+              {/* Warning Box */}
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-3">
+                <p className="text-amber-900 text-xs flex items-start gap-2">
+                  <span className="flex-shrink-0">⚠️</span>
+                  <span>Barang akan diambil sesuai urutan FEFO</span>
                 </p>
               </div>
 
-              <div className="space-y-4 mb-6">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-600">Pengemudi:</p>
-                    <p className="font-semibold text-gray-900">
-                      {form.namaPengemudi}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Nomor Polisi:</p>
-                    <p className="font-semibold text-gray-900">
-                      {form.nomorPolisi}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Produk:</p>
-                    <p className="font-semibold text-gray-900">
-                      {selectedProduct?.productName}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Total Qty:</p>
-                    <p className="font-semibold text-gray-900">
-                      {totalCartons} karton / {totalPcs.toLocaleString()} pcs
-                    </p>
-                  </div>
+              {/* Info Grid */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <p className="text-xs text-gray-600">Pengemudi</p>
+                  <p className="font-semibold text-gray-900 text-xs truncate">
+                    {form.namaPengemudi}
+                  </p>
                 </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <p className="text-xs text-gray-600">Nomor Polisi</p>
+                  <p className="font-semibold text-gray-900 text-xs truncate">
+                    {form.nomorPolisi}
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <p className="text-xs text-gray-600">Produk</p>
+                  <p className="font-semibold text-gray-900 text-xs truncate">
+                    {selectedProduct?.product_name}
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <p className="text-xs text-gray-600">Total Qty</p>
+                  <p className="font-semibold text-orange-600 text-xs">
+                    {totalCartons} ktn / {totalPcs.toLocaleString()} pcs
+                  </p>
+                </div>
+              </div>
 
-                <div className="border-t-2 border-gray-200 pt-4">
-                  <h3 className="font-semibold text-gray-800 mb-3">
-                    Daftar Lokasi Pengambilan:
-                  </h3>
-                  <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {fefoLocations.map((loc, index) => (
-                      <div
-                        key={index}
-                        className="bg-gray-50 rounded-lg p-3 flex justify-between items-center"
-                      >
-                        <div>
-                          <p className="font-semibold text-gray-900">
-                            {index + 1}. {loc.location}
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            BB:{" "}
-                            {Array.isArray(loc.bbPallet)
-                              ? loc.bbPallet.join(", ")
-                              : loc.bbPallet}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            Exp: {loc.expiredDate} ({loc.daysToExpire} hari)
-                          </p>
+              {/* Locations List */}
+              <div>
+                <h3 className="font-bold text-gray-800 text-xs mb-2">
+                  📍 Lokasi Pengambilan ({fefoLocations.length})
+                </h3>
+                <div className="space-y-2">
+                  {fefoLocations.map((loc, index) => (
+                    <div
+                      key={index}
+                      className="bg-gray-50 rounded-lg p-2 border border-gray-200"
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="flex-shrink-0 w-5 h-5 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                              {index + 1}
+                            </span>
+                            <p className="font-bold text-gray-900 text-xs truncate">
+                              {loc.location}
+                            </p>
+                          </div>
+                          <div className="ml-6 space-y-0.5">
+                            <p className="text-xs text-gray-700 truncate">
+                              BB: {Array.isArray(loc.bbPallet) ? loc.bbPallet.join(", ") : loc.bbPallet}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              Exp: {loc.expiredDate} ({loc.daysToExpire}h)
+                            </p>
+                            {/* FEFO Badges */}
+                            <div className="flex gap-1 mt-1 flex-wrap">
+                              {loc.fefo_status === 'release' ? (
+                                <span className="px-1.5 py-0.5 bg-green-100 text-green-700 border border-green-300 rounded text-xs">
+                                  🟢 RELEASE
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 border border-yellow-300 rounded text-xs">
+                                  🟡 HOLD
+                                </span>
+                              )}
+                              {loc.status === 'receh' && (
+                                <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 border border-blue-300 rounded text-xs">
+                                  🔵 Receh
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-bold text-orange-600">
-                            {loc.allocatedQtyPallet} pallet
+                        <div className="flex-shrink-0 text-right">
+                          <p className="font-bold text-orange-600 text-xs">
+                            {loc.qtyTaken} Ctn
                           </p>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               </div>
+            </div>
 
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowConfirmModal(false)}
-                  className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
-                >
-                  Batal
-                </button>
-                <button
-                  onClick={confirmOutbound}
-                  className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors"
-                >
-                  Ya, Konfirmasi Pengambilan
-                </button>
-              </div>
+            {/* Sticky Footer */}
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-2 flex-shrink-0">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                disabled={isSubmitting}
+                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-semibold hover:bg-gray-300 transition-colors disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                onClick={confirmOutbound}
+                disabled={isSubmitting}
+                className="flex-1 bg-green-500 text-white py-2 rounded-lg text-sm font-semibold hover:bg-green-600 transition-colors disabled:opacity-50"
+              >
+                {isSubmitting ? 'Proses...' : 'Konfirmasi'}
+              </button>
             </div>
           </div>
         </div>
@@ -1285,7 +1217,7 @@ export function OutboundForm() {
                 <div className="flex justify-between border-b pb-2">
                   <span className="text-gray-600">Produk:</span>
                   <span className="font-semibold text-gray-800">
-                    {selectedProduct?.productName}
+                    {selectedProduct?.product_name}
                   </span>
                 </div>
               </div>
@@ -1432,7 +1364,7 @@ export function OutboundForm() {
 
       {/* Tabel Transaksi Hari Ini */}
       <div className="mt-8 bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="bg-gradient-to-r from-orange-500 to-red-600 px-6 py-4">
+        <div className="bg-linear-to-r from-orange-500 to-red-600 px-6 py-4">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <span className="text-2xl">📋</span>
             Transaksi Hari Ini
@@ -1484,67 +1416,81 @@ export function OutboundForm() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {todayTransactions.map((item) => {
-                    const product = productMasterData.find(p => p.id === item.productId);
+                    const product = products.find(
+                      (p) => p.id === item.product_id
+                    );
                     return (
                       <tr
                         key={item.id}
                         className="hover:bg-orange-50 transition-colors"
                       >
                         <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
-                          {new Date(item.departureTime).toLocaleTimeString("id-ID", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {new Date(item.departure_time).toLocaleTimeString(
+                            "id-ID",
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            }
+                          )}
                         </td>
                         <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">
-                          {item.driverName}
+                          {item.driver_name}
                         </td>
                         <td className="px-3 py-3 text-sm">
-                          <div className="font-medium text-gray-900">
-                            {product?.productCode || '-'}
-                          </div>
-                          <div className="text-gray-500 text-xs truncate max-w-[150px]">
-                            {product?.productName || '-'}
-                          </div>
+                          {(() => {
+                            const product = products.find(
+                              (p) => p.id === item.product_id
+                            );
+                            return (
+                              <>
+                                <div className="font-medium text-gray-900">
+                                  {product?.product_code || "-"}
+                                </div>
+                                <div className="text-gray-500 text-xs truncate max-w-[150px]">
+                                  {product?.product_name || "-"}
+                                </div>
+                              </>
+                            );
+                          })()}
                         </td>
                         <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
                           {item.locations.length}
                         </td>
                         <td className="px-2 py-3 text-sm text-center font-bold text-blue-600">
-                          {item.qtyCarton}
+                          {item.qty_carton}
                         </td>
                         <td className="px-2 py-3 text-center">
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
                             ✓
                           </span>
                         </td>
-                      <td className="px-3 py-3">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => {
-                              setSelectedHistoryItem(item);
-                              setShowHistoryDetailModal(true);
-                            }}
-                            className="px-2 py-1 bg-orange-500 text-white text-xs font-semibold rounded hover:bg-orange-600 transition-colors"
-                          >
-                            Detail
-                          </button>
-                          <button
-                            onClick={() => handleEditClick(item)}
-                            className="px-2 py-1 bg-amber-500 text-white text-xs font-semibold rounded hover:bg-amber-600 transition-colors"
-                          >
-                            Ubah
-                          </button>
-                          <button
-                            onClick={() => handleBatalClick(item)}
-                            className="px-2 py-1 bg-red-500 text-white text-xs font-semibold rounded hover:bg-red-600 transition-colors"
-                          >
-                            Batal
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
+                        <td className="px-3 py-3">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => {
+                                setSelectedHistoryItem(item);
+                                setShowHistoryDetailModal(true);
+                              }}
+                              className="px-2 py-1 bg-orange-500 text-white text-xs font-semibold rounded hover:bg-orange-600 transition-colors"
+                            >
+                              Detail
+                            </button>
+                            <button
+                              onClick={() => handleEditClick(item)}
+                              className="px-2 py-1 bg-amber-500 text-white text-xs font-semibold rounded hover:bg-amber-600 transition-colors"
+                            >
+                              Ubah
+                            </button>
+                            <button
+                              onClick={() => handleBatalClick(item)}
+                              className="px-2 py-1 bg-red-500 text-white text-xs font-semibold rounded hover:bg-red-600 transition-colors"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
                   })}
                 </tbody>
               </table>
@@ -1578,7 +1524,7 @@ export function OutboundForm() {
             {/* Content */}
             <div className="overflow-y-auto max-h-[calc(90vh-140px)] p-6 space-y-6">
               {/* Informasi Pengiriman */}
-              <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-xl p-4 border border-orange-200">
+              <div className="bg-linear-to-br from-orange-50 to-red-50 rounded-xl p-4 border border-orange-200">
                 <h3 className="font-bold text-orange-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">🚚</span> Informasi Pengiriman
                 </h3>
@@ -1586,34 +1532,33 @@ export function OutboundForm() {
                   <div>
                     <span className="text-gray-600">Tanggal:</span>
                     <p className="font-semibold text-gray-900">
-                      {new Date(selectedHistoryItem.departureTime).toLocaleDateString(
-                        "id-ID",
-                        {
-                          weekday: "long",
-                          year: "numeric",
-                          month: "long",
-                          day: "numeric",
-                        }
-                      )}
+                      {new Date(
+                        selectedHistoryItem.departure_time
+                      ).toLocaleDateString("id-ID", {
+                        weekday: "long",
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      })}
                     </p>
                   </div>
                   <div>
                     <span className="text-gray-600">Nama Pengemudi:</span>
                     <p className="font-semibold text-gray-900">
-                      {selectedHistoryItem.driverName}
+                      {selectedHistoryItem.driver_name}
                     </p>
                   </div>
                   <div className="col-span-2">
                     <span className="text-gray-600">No. Polisi:</span>
                     <p className="font-semibold text-gray-900">
-                      {selectedHistoryItem.vehicleNumber}
+                      {selectedHistoryItem.vehicle_number}
                     </p>
                   </div>
                 </div>
               </div>
 
               {/* Informasi Produk */}
-              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
+              <div className="bg-linear-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
                 <h3 className="font-bold text-green-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">📦</span> Informasi Produk
                 </h3>
@@ -1622,8 +1567,10 @@ export function OutboundForm() {
                     <span className="text-gray-600">Nama Produk:</span>
                     <p className="font-semibold text-gray-900">
                       {(() => {
-                        const product = productMasterData.find(p => p.id === selectedHistoryItem.productId);
-                        return product?.productName || '-';
+                        const product = products.find(
+                          (p) => p.id === selectedHistoryItem.product_id
+                        );
+                        return product?.product_name || "-";
                       })()}
                     </p>
                   </div>
@@ -1631,8 +1578,10 @@ export function OutboundForm() {
                     <span className="text-gray-600">Kode Produk:</span>
                     <p className="font-semibold text-gray-900">
                       {(() => {
-                        const product = productMasterData.find(p => p.id === selectedHistoryItem.productId);
-                        return product?.productCode || '-';
+                        const product = products.find(
+                          (p) => p.id === selectedHistoryItem.product_id
+                        );
+                        return product?.product_code || "-";
                       })()}
                     </p>
                   </div>
@@ -1640,10 +1589,16 @@ export function OutboundForm() {
                     <span className="text-gray-600">Total PCS:</span>
                     <p className="font-semibold text-gray-900">
                       {(() => {
-                        const product = productMasterData.find(p => p.id === selectedHistoryItem.productId);
-                        const totalPcs = product ? selectedHistoryItem.qtyCarton * product.qtyPerCarton : 0;
+                        const product = products.find(
+                          (p) => p.id === selectedHistoryItem.product_id
+                        );
+                        const totalPcs = product
+                          ? selectedHistoryItem.qty_carton *
+                            product.qty_per_carton
+                          : 0;
                         return totalPcs.toLocaleString();
-                      })()} pcs
+                      })()}{" "}
+                      pcs
                     </p>
                   </div>
                   <div>
@@ -1655,14 +1610,14 @@ export function OutboundForm() {
                   <div>
                     <span className="text-gray-600">Qty Carton:</span>
                     <p className="font-semibold text-gray-900">
-                      {selectedHistoryItem.qtyCarton} carton
+                      {selectedHistoryItem.qty_carton} carton
                     </p>
                   </div>
                 </div>
               </div>
 
               {/* Lokasi Pengambilan FEFO dengan QR Code */}
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-200">
+              <div className="bg-linear-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-200">
                 <h3 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">📍</span> Lokasi Pengambilan FEFO
                 </h3>
@@ -1680,10 +1635,36 @@ export function OutboundForm() {
                                 #{idx + 1}
                               </span>
                               <span className="font-semibold text-gray-900 text-lg">
-                                {locationItem.cluster}-L{locationItem.lorong}-B{locationItem.baris}-P{locationItem.level}
+                                {locationItem.cluster}-L{locationItem.lorong}-B
+                                {locationItem.baris}-P{locationItem.level}
                               </span>
                             </div>
-                            <div className="text-sm space-y-1">
+                            <div className="text-sm space-y-2">
+                              {/* FEFO & Status Badges (jika ada) */}
+                              {(locationItem.fefo_status || locationItem.status) && (
+                                <div className="flex gap-1.5 flex-wrap mb-2">
+                                  {locationItem.status === 'receh' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700 border border-blue-300">
+                                      🔵 Receh
+                                    </span>
+                                  )}
+                                  {locationItem.status === 'salah-cluster' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 border border-red-300">
+                                      🔴 Salah Cluster
+                                    </span>
+                                  )}
+                                  {locationItem.fefo_status === 'release' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700 border border-green-300">
+                                      🟢 RELEASE
+                                    </span>
+                                  )}
+                                  {locationItem.fefo_status === 'hold' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-700 border border-yellow-300">
+                                      🟡 HOLD
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               <div>
                                 <span className="text-gray-600">
                                   BB Produk:
@@ -1721,26 +1702,33 @@ export function OutboundForm() {
               </div>
 
               {/* Waktu Input */}
-              <div className="bg-gradient-to-br from-gray-50 to-slate-50 rounded-xl p-4 border border-gray-200">
+              <div className="bg-linear-to-br from-gray-50 to-slate-50 rounded-xl p-4 border border-gray-200">
                 <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">⏰</span> Waktu Input
                 </h3>
                 <div className="text-sm">
                   <span className="text-gray-600">Dibuat pada:</span>
                   <p className="font-semibold text-gray-900">
-                    {new Date(selectedHistoryItem.createdAt).toLocaleString(
-                      "id-ID",
-                      {
-                        dateStyle: "full",
-                        timeStyle: "medium",
-                      }
-                    )}
+                    {selectedHistoryItem.created_at
+                      ? new Date(selectedHistoryItem.created_at).toLocaleString(
+                          "id-ID",
+                          {
+                            dateStyle: "full",
+                            timeStyle: "medium",
+                          }
+                        )
+                      : new Date(
+                          selectedHistoryItem.departure_time
+                        ).toLocaleString("id-ID", {
+                          dateStyle: "full",
+                          timeStyle: "medium",
+                        })}
                   </p>
                 </div>
               </div>
 
               {/* Status */}
-              <div className="bg-gradient-to-br from-slate-50 to-gray-50 rounded-xl p-4 border border-slate-200">
+              <div className="bg-linear-to-br from-slate-50 to-gray-50 rounded-xl p-4 border border-slate-200">
                 <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
                   <span className="text-lg">✓</span> Status Transaksi
                 </h3>
@@ -1775,7 +1763,7 @@ export function OutboundForm() {
             className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-4">
+            <div className="bg-linear-to-r from-amber-500 to-orange-600 px-6 py-4">
               <h2 className="text-xl font-bold text-white">
                 ✏️ Edit Transaksi
               </h2>
@@ -1788,7 +1776,7 @@ export function OutboundForm() {
                 <ul className="text-amber-700 text-sm mt-2 space-y-1 list-disc list-inside">
                   <li>
                     Membatalkan transaksi{" "}
-                    <strong>{selectedItemForAction.transactionCode}</strong>
+                    <strong>{selectedItemForAction.transaction_code}</strong>
                   </li>
                   <li>
                     Mengembalikan stock ke lokasi asal (atau In Transit jika
@@ -1804,8 +1792,10 @@ export function OutboundForm() {
                     <span className="text-gray-500">Produk:</span>
                     <span className="font-semibold text-gray-900">
                       {(() => {
-                        const product = productMasterData.find(p => p.id === selectedItemForAction.productId);
-                        return product?.productCode || '-';
+                        const product = products.find(
+                          (p) => p.id === selectedItemForAction.product_id
+                        );
+                        return product?.product_code || "-";
                       })()}
                     </span>
                   </div>
@@ -1813,13 +1803,18 @@ export function OutboundForm() {
                     <span className="text-gray-500">Qty:</span>
                     <span className="font-semibold text-gray-900">
                       {selectedItemForAction.locations.length} pallet,{" "}
-                      {selectedItemForAction.qtyCarton} karton
+                      {selectedItemForAction.qty_carton} karton
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Lokasi:</span>
                     <span className="font-semibold text-gray-900 text-xs">
-                      {selectedItemForAction.locations.map(loc => `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`).join(", ")}
+                      {selectedItemForAction.locations
+                        .map(
+                          (loc) =>
+                            `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`
+                        )
+                        .join(", ")}
                     </span>
                   </div>
                 </div>
@@ -1853,7 +1848,7 @@ export function OutboundForm() {
             className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="bg-gradient-to-r from-red-500 to-pink-600 px-6 py-4">
+            <div className="bg-linear-to-r from-red-500 to-pink-600 px-6 py-4">
               <h2 className="text-xl font-bold text-white">
                 ❌ Batalkan Transaksi
               </h2>
@@ -1866,7 +1861,7 @@ export function OutboundForm() {
                 <ul className="text-red-700 text-sm mt-2 space-y-1 list-disc list-inside">
                   <li>
                     Membatalkan transaksi{" "}
-                    <strong>{selectedItemForAction.transactionCode}</strong>
+                    <strong>{selectedItemForAction.transaction_code}</strong>
                   </li>
                   <li>
                     Mengembalikan stock ke lokasi asal (atau In Transit jika
@@ -1882,8 +1877,10 @@ export function OutboundForm() {
                     <span className="text-gray-500">Produk:</span>
                     <span className="font-semibold text-gray-900">
                       {(() => {
-                        const product = productMasterData.find(p => p.id === selectedItemForAction.productId);
-                        return product?.productCode || '-';
+                        const product = products.find(
+                          (p) => p.id === selectedItemForAction.product_id
+                        );
+                        return product?.product_code || "-";
                       })()}
                     </span>
                   </div>
@@ -1891,13 +1888,18 @@ export function OutboundForm() {
                     <span className="text-gray-500">Qty:</span>
                     <span className="font-semibold text-gray-900">
                       {selectedItemForAction.locations.length} pallet,{" "}
-                      {selectedItemForAction.qtyCarton} karton
+                      {selectedItemForAction.qty_carton} karton
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Lokasi:</span>
                     <span className="font-semibold text-gray-900 text-xs">
-                      {selectedItemForAction.locations.map(loc => `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`).join(", ")}
+                      {selectedItemForAction.locations
+                        .map(
+                          (loc) =>
+                            `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`
+                        )
+                        .join(", ")}
                     </span>
                   </div>
                 </div>

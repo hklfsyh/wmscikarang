@@ -1,47 +1,75 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { productMasterData, ekspedisiMaster, type ProductMaster } from "@/lib/mock/product-master";
-import {
-  clusterConfigs,
-  productHomes,
-  type ClusterConfig,
-  type ProductHome,
-  type CustomLorongConfig,
-  type CustomCellConfig,
-} from "@/lib/mock/warehouse-config";
+import { useState, useMemo, useEffect } from "react";
+import { productMasterData, ekspedisiMaster, expeditionsMock, getExpeditionsByWarehouse, type ProductMaster, type Expedition as Ekspedisi } from "@/lib/mock/product-master";
+import { clusterConfigs, productHomes, clusterCellOverrides, type ClusterConfig, type ProductHome, type ClusterCellOverride } from "@/lib/mock/warehouse-config";
+import ClusterConfigEditor from "@/components/cluster-config-editor";
+import ProductHomeEditor from "@/components/product-home-editor";
+import { useToast, ToastContainer } from "@/components/toast";
 
 export default function StockListMasterPage() {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [clusterFilter, setClusterFilter] = useState<"ALL" | "A" | "B" | "C" | "D" | "E">("ALL");
   const [activeTab, setActiveTab] = useState<"produk" | "ekspedisi" | "cluster" | "product-home">("produk");
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<ProductMaster | null>(null);
-  const [selectedEkspedisi, setSelectedEkspedisi] = useState<{code: string; name: string} | null>(null);
-  const [selectedCluster, setSelectedCluster] = useState<ClusterConfig | null>(null);
-  const [selectedProductHome, setSelectedProductHome] = useState<ProductHome | null>(null);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{type: 'produk' | 'ekspedisi' | 'cluster' | 'product-home', id: string, name: string} | null>(null);
+  const { showToast, toasts, removeToast } = useToast();
+
+  // Warehouse context
+  const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(null);
 
   // State for data management
   const [products, setProducts] = useState<ProductMaster[]>(productMasterData);
-  const [ekspedisis, setEkspedisis] = useState(ekspedisiMaster);
+  const [ekspedisis, setEkspedisis] = useState<Ekspedisi[]>([]);
   const [clusters, setClusters] = useState<ClusterConfig[]>(clusterConfigs);
+  const [cellOverrides, setCellOverrides] = useState<ClusterCellOverride[]>(clusterCellOverrides);
   const [productHomesList, setProductHomesList] = useState<ProductHome[]>(productHomes);
 
-  // Form states
+  // Load warehouse context and expeditions
+  useEffect(() => {
+    const userStr = localStorage.getItem("user");
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      const warehouseId = user.warehouseId || "wh-001-cikarang"; // Default to Cikarang
+      setCurrentWarehouseId(warehouseId);
+      
+      // Load expeditions for current warehouse
+      const warehouseExpeditions = getExpeditionsByWarehouse(warehouseId);
+      setEkspedisis(warehouseExpeditions);
+    }
+  }, []);
+
+  // For Product tab
+  const [searchQuery, setSearchQuery] = useState("");
+  const [clusterFilter, setClusterFilter] = useState<"ALL" | "A" | "B" | "C" | "D" | "E">("ALL");
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [showEditProductModal, setShowEditProductModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<ProductMaster | null>(null);
   const [formProduct, setFormProduct] = useState<ProductMaster>({
-    id: '',
-    productCode: '',
-    productName: '',
+    id: "",
+    warehouseId: "wh-001-cikarang",
+    productCode: "",
+    productName: "",
+    category: "",
+    unit: "carton",
     qtyPerCarton: 0,
-    qtyPerPallet: 0,
-    defaultCluster: ''
+    qtyCartonPerPallet: 0,
+    defaultCluster: null,
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   });
-  const [formEkspedisi, setFormEkspedisi] = useState<{code: string; name: string}>({
-    code: '',
-    name: ''
+
+  // For Ekspedisi tab
+  const [showAddEkspedisiModal, setShowAddEkspedisiModal] = useState(false);
+  const [showEditEkspedisiModal, setShowEditEkspedisiModal] = useState(false);
+  const [selectedEkspedisi, setSelectedEkspedisi] = useState<Ekspedisi | null>(null);
+  const [formEkspedisi, setFormEkspedisi] = useState<Ekspedisi>({
+    id: "",
+    warehouseId: currentWarehouseId || "wh-001-cikarang",
+    expeditionCode: "",
+    expeditionName: "",
+    contactPerson: "",
+    phone: "",
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   });
 
   // Filter data produk
@@ -61,923 +89,630 @@ export default function StockListMasterPage() {
     });
   }, [searchQuery, clusterFilter, products]);
 
-  // Summary cluster
-  const clusterSummary = useMemo(() => {
-    const summary: { [key: string]: number } = {};
-    products.forEach(product => {
-      if (product.defaultCluster) {
-        summary[product.defaultCluster] = (summary[product.defaultCluster] || 0) + 1;
-      }
+  const handleAddProduct = () => {
+    setFormProduct({
+      id: "",
+      warehouseId: "wh-001-cikarang",
+      productCode: "",
+      productName: "",
+      category: "",
+      unit: "carton",
+      qtyPerCarton: 0,
+      qtyCartonPerPallet: 0,
+      defaultCluster: null,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
-    return Object.entries(summary).map(([cluster, count]) => ({ cluster, count }));
-  }, [products]);
+    setShowAddProductModal(true);
+  };
 
-  const handleEdit = (product: ProductMaster) => {
+  const handleEditProduct = (product: ProductMaster) => {
     setSelectedProduct(product);
-    setFormProduct({...product});
-    setShowEditModal(true);
+    setFormProduct({ ...product });
+    setShowEditProductModal(true);
   };
 
-  const handleDelete = (id: string) => {
-    const product = products.find(p => p.id === id);
-    if (product) {
-      setDeleteTarget({
-        type: 'produk',
-        id: id,
-        name: product.productName
-      });
-      setShowDeleteModal(true);
+  const handleSubmitAddProduct = () => {
+    if (!formProduct.productCode || !formProduct.productName) {
+      showToast("Kode produk dan nama produk harus diisi!", "error");
+      return;
+    }
+    const newId = `PM${String(products.length + 1).padStart(3, "0")}`;
+    setProducts([...products, { ...formProduct, id: newId }]);
+    setShowAddProductModal(false);
+    showToast(`✓ Produk "${formProduct.productName}" berhasil ditambahkan!`, "success");
+  };
+
+  const handleSubmitEditProduct = () => {
+    if (!formProduct.productCode || !formProduct.productName) {
+      showToast("Kode produk dan nama produk harus diisi!", "error");
+      return;
+    }
+    setProducts(products.map((p) => (p.id === selectedProduct?.id ? formProduct : p)));
+    setShowEditProductModal(false);
+    setSelectedProduct(null);
+    showToast(`✓ Produk "${formProduct.productName}" berhasil diperbarui!`, "success");
+  };
+
+  const handleDeleteProduct = (id: string) => {
+    if (confirm("Apakah Anda yakin ingin menghapus produk ini?")) {
+      setProducts(products.filter((p) => p.id !== id));
     }
   };
 
-  const handleEditEkspedisi = (ekspedisi: {code: string; name: string}) => {
-    setSelectedEkspedisi(ekspedisi);
-    setFormEkspedisi({...ekspedisi});
-    setShowEditModal(true);
-  };
-
-  const handleDeleteEkspedisi = (code: string) => {
-    const ekspedisi = ekspedisis.find(e => e.code === code);
-    if (ekspedisi) {
-      setDeleteTarget({
-        type: 'ekspedisi',
-        id: code,
-        name: ekspedisi.name
-      });
-      setShowDeleteModal(true);
-    }
-  };
-
-  const handleEditCluster = (cluster: string) => {
-    setSelectedCluster(cluster);
-    setFormCluster(cluster);
-    setShowEditModal(true);
-  };
-
-  const handleDeleteCluster = (cluster: string) => {
-    setDeleteTarget({
-      type: 'cluster',
-      id: cluster,
-      name: `Cluster ${cluster}`
+  const handleAddEkspedisi = () => {
+    setFormEkspedisi({
+      id: "",
+      warehouseId: currentWarehouseId || "wh-001-cikarang",
+      expeditionCode: "",
+      expeditionName: "",
+      contactPerson: "",
+      phone: "",
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
-    setShowDeleteModal(true);
+    setShowAddEkspedisiModal(true);
   };
 
-  const confirmDelete = () => {
-    if (!deleteTarget) return;
-
-    if (deleteTarget.type === 'produk') {
-      setProducts(products.filter(p => p.id !== deleteTarget.id));
-    } else if (deleteTarget.type === 'ekspedisi') {
-      setEkspedisis(ekspedisis.filter(e => e.code !== deleteTarget.id));
-    } else if (deleteTarget.type === 'cluster') {
-      setProducts(products.map(p => p.defaultCluster === deleteTarget.id ? {...p, defaultCluster: undefined} : p));
-    }
-
-    setShowDeleteModal(false);
-    setDeleteTarget(null);
+  const handleEditEkspedisi = (ekspedisi: Ekspedisi) => {
+    setSelectedEkspedisi(ekspedisi);
+    setFormEkspedisi({ ...ekspedisi });
+    setShowEditEkspedisiModal(true);
   };
 
-  const handleAdd = () => {
-    if (activeTab === "produk") {
-      setFormProduct({
-        id: '',
-        productCode: '',
-        productName: '',
-        qtyPerCarton: 0,
-        qtyPerPallet: 0,
-        defaultCluster: ''
-      });
-    } else if (activeTab === "ekspedisi") {
-      setFormEkspedisi({
-        code: '',
-        name: ''
-      });
-    } else if (activeTab === "cluster") {
-      setFormCluster('');
+  const handleSubmitAddEkspedisi = () => {
+    if (!formEkspedisi.expeditionCode || !formEkspedisi.expeditionName) {
+      showToast("Kode dan nama ekspedisi harus diisi!", "error");
+      return;
     }
-    setShowAddModal(true);
+    
+    const newId = `exp-${currentWarehouseId?.split('-')[2] || 'ckr'}-${String(ekspedisis.length + 1).padStart(3, "0")}`;
+    const newEkspedisi = { ...formEkspedisi, id: newId };
+    
+    setEkspedisis([...ekspedisis, newEkspedisi]);
+    setShowAddEkspedisiModal(false);
+    showToast(`✓ Ekspedisi "${formEkspedisi.expeditionName}" berhasil ditambahkan!`, "success");
   };
 
-  const handleSubmitAdd = () => {
-    if (activeTab === "produk") {
-      if (!formProduct.productCode || !formProduct.productName) {
-        alert("Kode produk dan nama produk harus diisi!");
-        return;
-      }
-      const newId = `PM${String(products.length + 1).padStart(3, '0')}`;
-      setProducts([...products, {...formProduct, id: newId}]);
-    } else if (activeTab === "ekspedisi") {
-      if (!formEkspedisi.code || !formEkspedisi.name) {
-        alert("Kode dan nama ekspedisi harus diisi!");
-        return;
-      }
-      setEkspedisis([...ekspedisis, formEkspedisi]);
-    } else if (activeTab === "cluster") {
-      if (!formCluster) {
-        alert("Nama cluster harus diisi!");
-        return;
-      }
-      // For cluster, we don't add to a separate list, but perhaps add a product with this cluster
-      // For simplicity, just alert
-      alert(`Cluster ${formCluster} ditambahkan (demo)`);
+  const handleSubmitEditEkspedisi = () => {
+    if (!formEkspedisi.expeditionCode || !formEkspedisi.expeditionName) {
+      showToast("Kode dan nama ekspedisi harus diisi!", "error");
+      return;
     }
-    setShowAddModal(false);
+    
+    const updatedEkspedisi = { ...formEkspedisi, updatedAt: new Date().toISOString() };
+    setEkspedisis(ekspedisis.map((e) => (e.id === selectedEkspedisi?.id ? updatedEkspedisi : e)));
+    setShowEditEkspedisiModal(false);
+    setSelectedEkspedisi(null);
+    showToast(`✓ Ekspedisi "${formEkspedisi.expeditionName}" berhasil diperbarui!`, "success");
   };
 
-  const handleSubmitEdit = () => {
-    if (activeTab === "produk" && selectedProduct) {
-      if (!formProduct.productCode || !formProduct.productName) {
-        alert("Kode produk dan nama produk harus diisi!");
-        return;
-      }
-      setProducts(products.map(p => p.id === selectedProduct.id ? formProduct : p));
-    } else if (activeTab === "ekspedisi" && selectedEkspedisi) {
-      if (!formEkspedisi.code || !formEkspedisi.name) {
-        alert("Kode dan nama ekspedisi harus diisi!");
-        return;
-      }
-      setEkspedisis(ekspedisis.map(e => e.code === selectedEkspedisi.code ? formEkspedisi : e));
-    } else if (activeTab === "cluster" && selectedCluster) {
-      if (!formCluster) {
-        alert("Nama cluster harus diisi!");
-        return;
-      }
-      // Update cluster in products
-      setProducts(products.map(p => p.defaultCluster === selectedCluster ? {...p, defaultCluster: formCluster} : p));
+  const handleDeleteEkspedisi = (id: string) => {
+    if (confirm("Apakah Anda yakin ingin menghapus ekspedisi ini?")) {
+      setEkspedisis(ekspedisis.filter((e) => e.id !== id));
     }
-    setShowEditModal(false);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen bg-linear-to-br from-gray-50 to-blue-50 p-4 sm:p-6 lg:p-8">
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="bg-white rounded-2xl shadow-xl p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 bg-linear-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+              <span className="text-2xl">⚙️</span>
+            </div>
             <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
-                Master Data
-              </h1>
-              <p className="text-sm text-slate-600">
-                Kelola data master produk, ekspedisi, dan cluster
+              <h1 className="text-3xl font-bold text-gray-800">Master Data</h1>
+              <p className="text-sm text-gray-600">
+                Kelola data master produk, ekspedisi, cluster, dan product home assignment
               </p>
             </div>
-            <button
-              onClick={handleAdd}
-              className="px-4 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2 justify-center sm:justify-start"
-            >
-              <span className="text-lg">+</span>
-              <span>Tambah Data</span>
-            </button>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2">
-          <div className="flex flex-wrap gap-2">
+        <div className="bg-white rounded-2xl shadow-xl p-2">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <button
               onClick={() => setActiveTab("produk")}
-              className={`flex-1 sm:flex-none px-6 py-3 rounded-lg font-semibold transition-all ${
+              className={`px-6 py-4 rounded-xl font-semibold transition-all flex flex-col items-center gap-2 ${
                 activeTab === "produk"
-                  ? "bg-blue-600 text-white shadow-lg"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  ? "bg-linear-to-br from-blue-500 to-blue-600 text-white shadow-lg"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
-              <span className="flex items-center justify-center gap-2">
-                <span>📦</span>
-                <span>Produk</span>
-                <span className="inline-flex items-center justify-center bg-white/20 px-2 py-0.5 rounded-full text-xs">
-                  {products.length}
-                </span>
-              </span>
+              <span className="text-2xl">📦</span>
+              <span>Produk</span>
+              <span className="text-xs opacity-75">{products.length} items</span>
             </button>
             <button
               onClick={() => setActiveTab("ekspedisi")}
-              className={`flex-1 sm:flex-none px-6 py-3 rounded-lg font-semibold transition-all ${
+              className={`px-6 py-4 rounded-xl font-semibold transition-all flex flex-col items-center gap-2 ${
                 activeTab === "ekspedisi"
-                  ? "bg-blue-600 text-white shadow-lg"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  ? "bg-linear-to-br from-green-500 to-green-600 text-white shadow-lg"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
-              <span className="flex items-center justify-center gap-2">
-                <span>🚚</span>
-                <span>Ekspedisi</span>
-                <span className="inline-flex items-center justify-center bg-white/20 px-2 py-0.5 rounded-full text-xs">
-                  {ekspedisis.length}
-                </span>
-              </span>
+              <span className="text-2xl">🚚</span>
+              <span>Ekspedisi</span>
+              <span className="text-xs opacity-75">{ekspedisis.length} items</span>
             </button>
             <button
               onClick={() => setActiveTab("cluster")}
-              className={`flex-1 sm:flex-none px-6 py-3 rounded-lg font-semibold transition-all ${
+              className={`px-6 py-4 rounded-xl font-semibold transition-all flex flex-col items-center gap-2 ${
                 activeTab === "cluster"
-                  ? "bg-blue-600 text-white shadow-lg"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  ? "bg-linear-to-br from-purple-500 to-purple-600 text-white shadow-lg"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
-              <span className="flex items-center justify-center gap-2">
-                <span>📊</span>
-                <span>Cluster</span>
-                <span className="inline-flex items-center justify-center bg-white/20 px-2 py-0.5 rounded-full text-xs">
-                  {clusterSummary.length}
-                </span>
-              </span>
+              <span className="text-2xl">🏗️</span>
+              <span>Cluster Config</span>
+              <span className="text-xs opacity-75">{clusters.length} clusters</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("product-home")}
+              className={`px-6 py-4 rounded-xl font-semibold transition-all flex flex-col items-center gap-2 ${
+                activeTab === "product-home"
+                  ? "bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              <span className="text-2xl">🏠</span>
+              <span>Product Home</span>
+              <span className="text-xs opacity-75">{productHomesList.length} assignments</span>
             </button>
           </div>
         </div>
 
-        {/* Content based on tab */}
+        {/* Tab Content */}
         {activeTab === "produk" && (
-          <>
-            {/* Filters for Produk */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-lg">🔍</span>
-                <h3 className="text-sm font-bold text-slate-900">Filter & Pencarian</h3>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
-                    Pencarian
-                  </label>
+          <div className="space-y-6">
+            {/* Filters & Add Button */}
+            <div className="bg-white rounded-2xl shadow-xl p-6">
+              <div className="flex flex-col md:flex-row gap-4 items-end">
+                <div className="flex-1">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Search</label>
                   <input
                     type="text"
-                    placeholder="Cari produk atau kode..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                    placeholder="Cari produk atau kode..."
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
                   />
                 </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
-                    Cluster Default
-                  </label>
+                <div className="flex-1">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Cluster</label>
                   <select
                     value={clusterFilter}
                     onChange={(e) => setClusterFilter(e.target.value as typeof clusterFilter)}
-                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
                   >
                     <option value="ALL">Semua Cluster</option>
                     <option value="A">Cluster A</option>
                     <option value="B">Cluster B</option>
                     <option value="C">Cluster C</option>
                     <option value="D">Cluster D</option>
-                    <option value="E">Cluster E</option>
+                  </select>
+                </div>
+                <button
+                  onClick={handleAddProduct}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+                >
+                  <span className="text-lg">+</span>
+                  <span>Tambah Produk</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Product Table */}
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-linear-to-r from-blue-500 to-indigo-600 text-white">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-sm font-bold">Kode Produk</th>
+                      <th className="px-6 py-4 text-left text-sm font-bold">Nama Produk</th>
+                      <th className="px-6 py-4 text-center text-sm font-bold">Qty/Carton</th>
+                      <th className="px-6 py-4 text-center text-sm font-bold">Qty/Pallet</th>
+                      <th className="px-6 py-4 text-center text-sm font-bold">Cluster</th>
+                      <th className="px-6 py-4 text-center text-sm font-bold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {filteredProducts.map((product) => (
+                      <tr key={product.id} className="hover:bg-blue-50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-mono text-gray-700">{product.productCode}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-gray-800">{product.productName}</td>
+                        <td className="px-6 py-4 text-center text-sm font-semibold text-blue-600">
+                          {product.qtyPerCarton}
+                        </td>
+                        <td className="px-6 py-4 text-center text-sm font-semibold text-green-600">
+                          {product.qtyCartonPerPallet === -1 ? "-" : product.qtyCartonPerPallet}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {product.defaultCluster ? (
+                            <span className="inline-block px-4 py-2 bg-blue-100 text-blue-700 rounded-lg font-bold">
+                              {product.defaultCluster}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-500">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => handleEditProduct(product)}
+                              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700"
+                            >
+                              ✏️ Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteProduct(product.id)}
+                              className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700"
+                            >
+                              🗑️ Hapus
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filteredProducts.length === 0 && (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">📦</div>
+                  <p className="text-gray-600 font-semibold">Tidak ada data yang sesuai</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "ekspedisi" && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl shadow-xl p-6 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-gray-800">Daftar Ekspedisi</h2>
+              <button
+                onClick={handleAddEkspedisi}
+                className="px-6 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+              >
+                <span className="text-lg">+</span>
+                <span>Tambah Ekspedisi</span>
+              </button>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-linear-to-r from-green-500 to-emerald-600 text-white">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-sm font-bold">Kode</th>
+                      <th className="px-6 py-4 text-left text-sm font-bold">Nama Ekspedisi</th>
+                      <th className="px-6 py-4 text-left text-sm font-bold">Contact Person</th>
+                      <th className="px-6 py-4 text-left text-sm font-bold">Phone</th>
+                      <th className="px-6 py-4 text-center text-sm font-bold">Status</th>
+                      <th className="px-6 py-4 text-center text-sm font-bold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {ekspedisis.map((ekspedisi) => (
+                      <tr key={ekspedisi.id} className="hover:bg-green-50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-mono text-gray-700">{ekspedisi.expeditionCode}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-gray-800">{ekspedisi.expeditionName}</td>
+                        <td className="px-6 py-4 text-sm text-gray-700">{ekspedisi.contactPerson}</td>
+                        <td className="px-6 py-4 text-sm text-gray-700">{ekspedisi.phone}</td>
+                        <td className="px-6 py-4 text-center">
+                          <span className={`inline-block px-2 py-1 rounded-full text-xs font-semibold ${
+                            ekspedisi.isActive 
+                              ? "bg-green-100 text-green-700" 
+                              : "bg-red-100 text-red-700"
+                          }`}>
+                            {ekspedisi.isActive ? "Aktif" : "Non-Aktif"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => handleEditEkspedisi(ekspedisi)}
+                              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700"
+                            >
+                              ✏️ Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteEkspedisi(ekspedisi.id)}
+                              className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700"
+                            >
+                              🗑️ Hapus
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {ekspedisis.length === 0 && (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">🚚</div>
+                  <p className="text-gray-600 font-semibold">Belum ada data ekspedisi</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "cluster" && (
+          <div className="space-y-6">
+            <ClusterConfigEditor 
+              clusters={clusters} 
+              onUpdate={setClusters}
+              cellOverrides={cellOverrides}
+              onUpdateOverrides={setCellOverrides}
+            />
+            
+            {/* Informasi Konfigurasi */}
+            <div className="bg-linear-to-r from-blue-50 to-slate-50 border-2 border-blue-200 rounded-xl p-6">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="text-3xl">📚</div>
+                <div>
+                  <h3 className="text-xl font-bold text-slate-800 mb-1">Panduan Konfigurasi Cluster</h3>
+                  <p className="text-sm text-slate-600">Penjelasan mengenai jenis-jenis konfigurasi yang tersedia</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Default Configuration */}
+                <div className="bg-white rounded-lg p-4 border border-blue-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">⚙️</span>
+                    <h4 className="font-semibold text-blue-900">Default Configuration</h4>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Pengaturan standar untuk semua lorong dan baris di cluster. Menentukan jumlah lorong, baris, dan kapasitas pallet per sel secara default.
+                  </p>
+                </div>
+
+                {/* Cell Overrides */}
+                <div className="bg-white rounded-lg p-4 border border-purple-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🔧</span>
+                    <h4 className="font-semibold text-purple-900">Cell Overrides</h4>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Override konfigurasi untuk area tertentu yang berbeda dari default. Bisa untuk custom baris count, pallet level, transit area, atau disable lokasi.
+                    <span className="block mt-1 text-purple-700 font-medium">Contoh: Lorong 1-3 hanya 2 pallet, Lorong 5 disabled karena tiang penyangga.</span>
+                  </p>
+                </div>
+
+                {/* Transit Area */}
+                <div className="bg-white rounded-lg p-4 border border-orange-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🚚</span>
+                    <h4 className="font-semibold text-orange-900">Transit Area</h4>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Area khusus untuk overflow produk yang tidak muat di lokasi home. Dikonfigurasi sebagai Cell Override dengan flag &ldquo;Transit Area&rdquo;.
+                    <span className="block mt-1 text-orange-700 font-medium">Contoh: Lorong 11-12 dijadikan Transit Area untuk semua cluster.</span>
+                  </p>
+                </div>
+
+                {/* Disabled Areas */}
+                <div className="bg-white rounded-lg p-4 border border-red-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🚫</span>
+                    <h4 className="font-semibold text-red-900">Disabled Areas</h4>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Area yang tidak bisa digunakan untuk penyimpanan karena ada penghalang fisik atau alasan safety.
+                    <span className="block mt-1 text-red-700 font-medium">Contoh: Area dekat pintu emergency, tiang penyangga, atau area maintenance.</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "product-home" && (
+          <ProductHomeEditor
+            productHomes={productHomesList}
+            clusters={clusters}
+            products={products.map(p => ({ productCode: p.productCode, productName: p.productName }))}
+            onUpdate={setProductHomesList}
+          />
+        )}
+
+        {/* Product Add/Edit Modals (simplified) */}
+        {(showAddProductModal || showEditProductModal) && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
+              <div className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center rounded-t-2xl">
+                <h3 className="text-xl font-bold text-gray-800">
+                  {showAddProductModal ? "Tambah Produk" : "Edit Produk"}
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowAddProductModal(false);
+                    setShowEditProductModal(false);
+                  }}
+                  className="text-gray-500 hover:text-gray-700 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Kode Produk *</label>
+                  <input
+                    type="text"
+                    value={formProduct.productCode}
+                    onChange={(e) => setFormProduct({ ...formProduct, productCode: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nama Produk *</label>
+                  <input
+                    type="text"
+                    value={formProduct.productName}
+                    onChange={(e) => setFormProduct({ ...formProduct, productName: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Qty per Carton</label>
+                    <input
+                      type="number"
+                      value={formProduct.qtyPerCarton}
+                      onChange={(e) => setFormProduct({ ...formProduct, qtyPerCarton: parseInt(e.target.value) || 0 })}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Qty per Pallet</label>
+                    <input
+                      type="number"
+                      value={formProduct.qtyCartonPerPallet}
+                      onChange={(e) => setFormProduct({...formProduct, qtyCartonPerPallet: Number(e.target.value)})}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Default Cluster</label>
+                  <select
+                    value={formProduct.defaultCluster || ""}
+                    onChange={(e) => setFormProduct({ ...formProduct, defaultCluster: e.target.value || null })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
+                  >
+                    <option value="">Pilih Cluster</option>
+                    <option value="A">Cluster A</option>
+                    <option value="B">Cluster B</option>
+                    <option value="C">Cluster C</option>
+                    <option value="D">Cluster D</option>
                   </select>
                 </div>
               </div>
 
-              {(searchQuery || clusterFilter !== "ALL") && (
-                <div className="mt-4 pt-4 border-t border-slate-200 flex items-center justify-between">
-                  <p className="text-xs text-slate-600">
-                    Menampilkan <span className="font-bold text-blue-600">{filteredProducts.length}</span> dari <span className="font-semibold">{products.length}</span> data
-                  </p>
-                  <button
-                    onClick={() => {
-                      setSearchQuery("");
-                      setClusterFilter("ALL");
-                    }}
-                    className="rounded-lg border-2 border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 transition-all flex items-center gap-2"
-                  >
-                    <span>🔄</span>
-                    <span>Reset Filter</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Table Produk */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700">ID</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700">Kode Produk</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700">Nama Produk</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-700">PC</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-700">Qty/Pallet</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-700">Cluster Default</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-700">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {filteredProducts.map((product: ProductMaster) => (
-                      <tr key={product.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3 text-sm text-slate-900">{product.id}</td>
-                        <td className="px-4 py-3 text-sm text-slate-700">{product.productCode}</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-900">{product.productName}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="text-sm font-semibold text-blue-600">
-                            {product.qtyPerCarton}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="text-sm font-semibold text-emerald-600">
-                            {product.qtyPerPallet}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {product.defaultCluster ? (
-                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-100 text-blue-700 font-semibold text-sm">
-                              {product.defaultCluster}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-500">-</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => handleEdit(product)}
-                              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-all shadow-sm hover:shadow-md flex items-center gap-1.5"
-                            >
-                              <span>✏️</span>
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              onClick={() => handleDelete(product.id)}
-                              className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 transition-all shadow-sm hover:shadow-md flex items-center gap-1.5"
-                            >
-                              <span>🗑️</span>
-                              <span>Hapus</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {filteredProducts.length === 0 && (
-                <div className="text-center py-12">
-                  <div className="text-4xl mb-3">📦</div>
-                  <p className="text-slate-600 font-medium">Tidak ada data yang sesuai</p>
-                  <p className="text-sm text-slate-500 mt-1">Coba ubah filter atau tambah data baru</p>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {activeTab === "ekspedisi" && (
-          <>
-            {/* Table Ekspedisi */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700">Kode</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700">Nama Ekspedisi</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-700">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {ekspedisis.map((ekspedisi) => (
-                      <tr key={ekspedisi.code} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3 text-sm text-slate-900">{ekspedisi.code}</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-900">{ekspedisi.name}</td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => handleEditEkspedisi(ekspedisi)}
-                              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-all shadow-sm hover:shadow-md flex items-center gap-1.5"
-                            >
-                              <span>✏️</span>
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteEkspedisi(ekspedisi.code)}
-                              className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 transition-all shadow-sm hover:shadow-md flex items-center gap-1.5"
-                            >
-                              <span>🗑️</span>
-                              <span>Hapus</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {ekspedisis.length === 0 && (
-                <div className="text-center py-12">
-                  <div className="text-4xl mb-3">🚚</div>
-                  <p className="text-slate-600 font-medium">Tidak ada data ekspedisi</p>
-                  <p className="text-sm text-slate-500 mt-1">Tambah data ekspedisi baru</p>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {activeTab === "cluster" && (
-          <>
-            {/* Table Cluster */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700">Cluster</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-700">Jumlah Produk</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-700">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {clusterSummary.map((item) => (
-                      <tr key={item.cluster} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3 text-center">
-                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-100 text-blue-700 font-semibold text-sm">
-                            {item.cluster}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="text-sm font-semibold text-emerald-600">
-                            {item.count}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => handleEditCluster(item.cluster)}
-                              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-all shadow-sm hover:shadow-md flex items-center gap-1.5"
-                            >
-                              <span>✏️</span>
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCluster(item.cluster)}
-                              className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 transition-all shadow-sm hover:shadow-md flex items-center gap-1.5"
-                            >
-                              <span>🗑️</span>
-                              <span>Hapus</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {clusterSummary.length === 0 && (
-                <div className="text-center py-12">
-                  <div className="text-4xl mb-3">📊</div>
-                  <p className="text-slate-600 font-medium">Tidak ada data cluster</p>
-                  <p className="text-sm text-slate-500 mt-1">Tambah data cluster baru</p>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Add Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowAddModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-5 flex-shrink-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
-                    <span className="text-2xl">
-                      {activeTab === "produk" ? "📦" : activeTab === "ekspedisi" ? "🚚" : "📊"}
-                    </span>
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-white">
-                      Tambah {activeTab === "produk" ? "Produk" : activeTab === "ekspedisi" ? "Ekspedisi" : "Cluster"} Baru
-                    </h2>
-                    <p className="text-sm text-blue-100">
-                      Isi formulir di bawah dengan lengkap
-                    </p>
-                  </div>
-                </div>
+              <div className="bg-white border-t border-gray-200 px-6 py-4 flex gap-3 rounded-b-2xl">
                 <button
-                  onClick={() => setShowAddModal(false)}
-                  className="text-white/80 hover:text-white hover:bg-white/20 w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                  onClick={() => {
+                    setShowAddProductModal(false);
+                    setShowEditProductModal(false);
+                  }}
+                  className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-xl font-semibold hover:bg-gray-50"
                 >
-                  <span className="text-2xl leading-none">×</span>
+                  Batal
+                </button>
+                <button
+                  onClick={showAddProductModal ? handleSubmitAddProduct : handleSubmitEditProduct}
+                  className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700"
+                >
+                  {showAddProductModal ? "Simpan" : "Update"}
                 </button>
               </div>
             </div>
-            <div className="p-6 overflow-y-auto flex-1">
-              {activeTab === "produk" && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Kode Produk <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formProduct.productCode}
-                      onChange={(e) => setFormProduct({...formProduct, productCode: e.target.value})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                      placeholder="Contoh: AQ-1100ML-BC"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Nama Produk <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formProduct.productName}
-                      onChange={(e) => setFormProduct({...formProduct, productName: e.target.value})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                      placeholder="Contoh: 1100ML AQUA LOCAL"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">
-                        Qty/Karton
-                      </label>
-                      <input
-                        type="number"
-                        value={formProduct.qtyPerCarton}
-                        onChange={(e) => setFormProduct({...formProduct, qtyPerCarton: Number(e.target.value)})}
-                        className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                        placeholder="0"
-                        min="0"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">
-                        Qty/Pallet
-                      </label>
-                      <input
-                        type="number"
-                        value={formProduct.qtyPerPallet}
-                        onChange={(e) => setFormProduct({...formProduct, qtyPerPallet: Number(e.target.value)})}
-                        className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                        placeholder="0"
-                        min="0"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Cluster Default
-                    </label>
-                    <select
-                      value={formProduct.defaultCluster}
-                      onChange={(e) => setFormProduct({...formProduct, defaultCluster: e.target.value})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                    >
-                      <option value="">Tidak ada cluster</option>
-                      <option value="A">Cluster A</option>
-                      <option value="B">Cluster B</option>
-                      <option value="C">Cluster C</option>
-                      <option value="D">Cluster D</option>
-                      <option value="E">Cluster E</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-              {activeTab === "ekspedisi" && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Kode Ekspedisi <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formEkspedisi.code}
-                      onChange={(e) => setFormEkspedisi({...formEkspedisi, code: e.target.value.toUpperCase()})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                      placeholder="Contoh: HGS, SJP"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Nama Ekspedisi <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formEkspedisi.name}
-                      onChange={(e) => setFormEkspedisi({...formEkspedisi, name: e.target.value})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                      placeholder="Masukkan nama ekspedisi"
-                    />
-                  </div>
-                </div>
-              )}
-              {activeTab === "cluster" && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Nama Cluster <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formCluster}
-                      onChange={(e) => setFormCluster(e.target.value.toUpperCase())}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                      placeholder="Contoh: A, B, C"
-                      maxLength={1}
-                    />
-                  </div>
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <div className="flex gap-3">
-                      <span className="text-blue-600 text-xl flex-shrink-0">ℹ️</span>
-                      <p className="text-xs text-blue-800">
-                        Cluster akan digunakan untuk mengelompokkan produk dalam gudang. Biasanya menggunakan huruf kapital seperti A, B, C, D, atau E.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex gap-3 flex-shrink-0">
-              <button
-                onClick={handleSubmitAdd}
-                className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
-              >
-                <span>💾</span>
-                <span>Simpan Data</span>
-              </button>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="flex-1 bg-white border-2 border-slate-300 text-slate-700 py-3 rounded-lg font-semibold hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
-              >
-                <span>❌</span>
-                <span>Batal</span>
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Edit Modal */}
-      {showEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowEditModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-5 flex-shrink-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
-                    <span className="text-2xl">
-                      {activeTab === "produk" ? "📦" : activeTab === "ekspedisi" ? "🚚" : "📊"}
-                    </span>
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-white">
-                      Edit {activeTab === "produk" ? "Produk" : activeTab === "ekspedisi" ? "Ekspedisi" : "Cluster"}
-                    </h2>
-                    <p className="text-sm text-blue-100">
-                      Perbarui informasi yang diperlukan
-                    </p>
-                  </div>
-                </div>
+        {/* Ekspedisi Add/Edit Modals (simplified) */}
+        {(showAddEkspedisiModal || showEditEkspedisiModal) && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+              <div className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center rounded-t-2xl">
+                <h3 className="text-xl font-bold text-gray-800">
+                  {showAddEkspedisiModal ? "Tambah Ekspedisi" : "Edit Ekspedisi"}
+                </h3>
                 <button
-                  onClick={() => setShowEditModal(false)}
-                  className="text-white/80 hover:text-white hover:bg-white/20 w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                  onClick={() => {
+                    setShowAddEkspedisiModal(false);
+                    setShowEditEkspedisiModal(false);
+                  }}
+                  className="text-gray-500 hover:text-gray-700 text-2xl"
                 >
-                  <span className="text-2xl leading-none">×</span>
+                  ×
                 </button>
               </div>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1">
-              {activeTab === "produk" && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      ID Produk
-                    </label>
-                    <input
-                      type="text"
-                      value={formProduct.id}
-                      disabled
-                      className="w-full rounded-lg border-2 border-slate-200 px-4 py-2.5 text-sm bg-slate-50 text-slate-500 cursor-not-allowed"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Kode Produk <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formProduct.productCode}
-                      onChange={(e) => setFormProduct({...formProduct, productCode: e.target.value})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                      placeholder="Contoh: AQ-1100ML-BC"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Nama Produk <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formProduct.productName}
-                      onChange={(e) => setFormProduct({...formProduct, productName: e.target.value})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                      placeholder="Contoh: 1100ML AQUA LOCAL"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">
-                        Qty/Karton
-                      </label>
-                      <input
-                        type="number"
-                        value={formProduct.qtyPerCarton}
-                        onChange={(e) => setFormProduct({...formProduct, qtyPerCarton: Number(e.target.value)})}
-                        className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                        placeholder="0"
-                        min="0"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">
-                        Qty/Pallet
-                      </label>
-                      <input
-                        type="number"
-                        value={formProduct.qtyPerPallet}
-                        onChange={(e) => setFormProduct({...formProduct, qtyPerPallet: Number(e.target.value)})}
-                        className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                        placeholder="0"
-                        min="0"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Cluster Default
-                    </label>
-                    <select
-                      value={formProduct.defaultCluster}
-                      onChange={(e) => setFormProduct({...formProduct, defaultCluster: e.target.value})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                    >
-                      <option value="">Tidak ada cluster</option>
-                      <option value="A">Cluster A</option>
-                      <option value="B">Cluster B</option>
-                      <option value="C">Cluster C</option>
-                      <option value="D">Cluster D</option>
-                      <option value="E">Cluster E</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-              {activeTab === "ekspedisi" && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Kode Ekspedisi <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formEkspedisi.code}
-                      onChange={(e) => setFormEkspedisi({...formEkspedisi, code: e.target.value.toUpperCase()})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                      placeholder="Contoh: HGS, SJP"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Nama Ekspedisi <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formEkspedisi.name}
-                      onChange={(e) => setFormEkspedisi({...formEkspedisi, name: e.target.value})}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                      placeholder="Masukkan nama ekspedisi"
-                    />
-                  </div>
-                </div>
-              )}
-              {activeTab === "cluster" && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Nama Cluster Lama
-                    </label>
-                    <input
-                      type="text"
-                      value={selectedCluster || ''}
-                      disabled
-                      className="w-full rounded-lg border-2 border-slate-200 px-4 py-2.5 text-sm bg-slate-50 text-slate-500 cursor-not-allowed"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Nama Cluster Baru <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formCluster}
-                      onChange={(e) => setFormCluster(e.target.value.toUpperCase())}
-                      className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all uppercase"
-                      placeholder="Contoh: A, B, C"
-                      maxLength={1}
-                    />
-                  </div>
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                    <div className="flex gap-3">
-                      <span className="text-amber-600 text-xl flex-shrink-0">⚠️</span>
-                      <p className="text-xs text-amber-800">
-                        Mengubah nama cluster akan mempengaruhi semua produk yang menggunakan cluster ini. Pastikan perubahan sudah benar sebelum menyimpan.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex gap-3 flex-shrink-0">
-              <button
-                onClick={handleSubmitEdit}
-                className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
-              >
-                <span>💾</span>
-                <span>Simpan Perubahan</span>
-              </button>
-              <button
-                onClick={() => setShowEditModal(false)}
-                className="flex-1 bg-white border-2 border-slate-300 text-slate-700 py-3 rounded-lg font-semibold hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
-              >
-                <span>❌</span>
-                <span>Batal</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowDeleteModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="bg-gradient-to-r from-red-600 to-red-700 px-6 py-5">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span className="text-3xl">⚠️</span>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Kode Ekspedisi *</label>
+                  <input
+                    type="text"
+                    value={formEkspedisi.expeditionCode}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, expeditionCode: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
+                    disabled={showEditEkspedisiModal}
+                  />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-white">
-                    Konfirmasi Hapus
-                  </h2>
-                  <p className="text-sm text-red-100">
-                    Tindakan ini tidak dapat dibatalkan
-                  </p>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nama Ekspedisi *</label>
+                  <input
+                    type="text"
+                    value={formEkspedisi.expeditionName}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, expeditionName: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Person *</label>
+                  <input
+                    type="text"
+                    value={formEkspedisi.contactPerson}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, contactPerson: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Phone *</label>
+                  <input
+                    type="text"
+                    value={formEkspedisi.phone}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, phone: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500"
+                  />
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="isActiveEkspedisi"
+                    checked={formEkspedisi.isActive}
+                    onChange={(e) => setFormEkspedisi({ ...formEkspedisi, isActive: e.target.checked })}
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="isActiveEkspedisi" className="ml-2 block text-sm text-gray-700">
+                    Aktif
+                  </label>
                 </div>
               </div>
-            </div>
-            <div className="p-6">
-              <p className="text-slate-700 mb-2">
-                Apakah Anda yakin ingin menghapus:
-              </p>
-              <div className="bg-slate-50 border-2 border-slate-200 rounded-lg p-4 mb-4">
-                <p className="font-semibold text-slate-900 text-lg">
-                  {deleteTarget.name}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  {deleteTarget.type === 'produk' ? '📦 Produk' : deleteTarget.type === 'ekspedisi' ? '🚚 Ekspedisi' : '📊 Cluster'}
-                </p>
+
+              <div className="bg-white border-t border-gray-200 px-6 py-4 flex gap-3 rounded-b-2xl">
+                <button
+                  onClick={() => {
+                    setShowAddEkspedisiModal(false);
+                    setShowEditEkspedisiModal(false);
+                  }}
+                  className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-xl font-semibold hover:bg-gray-50"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={showAddEkspedisiModal ? handleSubmitAddEkspedisi : handleSubmitEditEkspedisi}
+                  className="flex-1 px-6 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700"
+                >
+                  {showAddEkspedisiModal ? "Simpan" : "Update"}
+                </button>
               </div>
-              {deleteTarget.type === 'cluster' && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-                  <div className="flex gap-3">
-                    <span className="text-amber-600 text-xl flex-shrink-0">⚠️</span>
-                    <p className="text-xs text-amber-800">
-                      Produk yang menggunakan cluster ini akan kehilangan cluster default mereka.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex gap-3">
-              <button
-                onClick={confirmDelete}
-                className="flex-1 bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
-              >
-                <span>🗑️</span>
-                <span>Ya, Hapus</span>
-              </button>
-              <button
-                onClick={() => {
-                  setShowDeleteModal(false);
-                  setDeleteTarget(null);
-                }}
-                className="flex-1 bg-white border-2 border-slate-300 text-slate-700 py-3 rounded-lg font-semibold hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
-              >
-                <span>❌</span>
-                <span>Batal</span>
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
