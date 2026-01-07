@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/login/actions";
@@ -21,8 +21,12 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
   // Menghindari Hydration Mismatch: Jam hanya muncul setelah komponen nempel di browser
   useEffect(() => {
     setMounted(true);
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+    };
   }, []);
 
   const formatTime = (date: Date) => date.toLocaleTimeString('en-GB', { hour12: false });
@@ -42,9 +46,18 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
     { label: "Master Data Stock", path: "/stock-list-master", roles: ["admin_cabang"] },
   ];
 
-  const filteredMenuItems = menuItems.filter((item) =>
-    item.roles.includes(userProfile.role)
+  const filteredMenuItems = useMemo(() => 
+    menuItems.filter((item) => item.roles.includes(userProfile.role)),
+    [userProfile.role]
   );
+
+  const handleMobileMenuClose = useCallback(() => {
+    setMobileMenuOpen(false);
+  }, []);
+
+  const handleMobileMenuToggle = useCallback(() => {
+    setMobileMenuOpen(!mobileMenuOpen);
+  }, [mobileMenuOpen]);
 
   const getIcon = (path: string) => {
     switch (path) {
@@ -72,7 +85,8 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
     }
   };
 
-  const NavContent = () => (
+  // Memoize NavContent untuk menghindari re-render berlebihan
+  const NavContent = useMemo(() => (
     <div className="flex flex-col h-full">
       {/* Logo & Jam */}
       <div className="p-4 border-b border-slate-700">
@@ -100,7 +114,9 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
           <Link
             key={item.path}
             href={item.path}
-            onClick={() => setMobileMenuOpen(false)}
+            onClick={() => {
+              handleMobileMenuClose();
+            }}
             className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg text-sm font-semibold transition-all mb-1 ${
               pathname === item.path ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20" : "text-slate-300 hover:bg-slate-800 hover:text-white"
             }`}
@@ -127,18 +143,18 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
         </button>
       </div>
     </div>
-  );
+  ), [mounted, currentTime, filteredMenuItems, pathname, userProfile.role, userProfile.full_name, userProfile.username, handleMobileMenuClose]);
 
   return (
     <>
       {/* Desktop Sidebar */}
       <nav className="hidden lg:fixed lg:left-0 lg:top-0 lg:h-screen lg:w-64 lg:flex lg:flex-col bg-slate-900 text-white z-50">
-        <NavContent />
+        {NavContent}
       </nav>
 
       {/* Mobile Toggle Button */}
       <button
-        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        onClick={handleMobileMenuToggle}
         className="fixed top-4 left-4 z-[60] lg:hidden p-2.5 bg-blue-600 text-white rounded-xl shadow-lg hover:bg-blue-700 transition-all active:scale-90"
       >
         {mobileMenuOpen ? <span className="text-xl">✕</span> : <span className="text-xl">☰</span>}
@@ -148,7 +164,9 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
       {mobileMenuOpen && (
         <div 
           className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-40 lg:hidden transition-opacity"
-          onClick={() => setMobileMenuOpen(false)}
+          onClick={() => {
+            handleMobileMenuClose();
+          }}
         />
       )}
 
@@ -156,7 +174,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
       <nav className={`fixed left-0 top-0 h-screen w-72 bg-slate-900 text-white flex flex-col z-50 lg:hidden transition-transform duration-300 ease-in-out ${
         mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
       }`}>
-        <NavContent />
+        {NavContent}
       </nav>
     </>
   );
