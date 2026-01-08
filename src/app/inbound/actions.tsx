@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { createClient, createServiceClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 import { getIndonesianDateTime, getIndonesianDateString, getIndonesianDate } from "@/lib/utils/datetime";
 
@@ -68,11 +68,36 @@ export async function checkLocationAvailabilityAction(
 }
 
 /**
+ * Get current stock real-time from database
+ * Digunakan untuk FEFO recommendation agar selalu update
+ */
+export async function getCurrentStockAction(warehouseId: string) {
+  try {
+    const supabase = await createClient();
+
+    const { data: stockData, error } = await supabase
+      .from("stock_list")
+      .select("id, warehouse_id, cluster, lorong, baris, level, qty_carton, product_id, status")
+      .eq("warehouse_id", warehouseId);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      stock: stockData || [],
+    };
+  } catch (err: any) {
+    return { success: false, error: "Gagal mengambil data stock: " + err.message };
+  }
+}
+
+/**
  * Submit Inbound secara Real ke Database
  * Melakukan validasi ketersediaan lokasi terakhir sebelum melakukan insert.
  */
 export async function submitInboundAction(formData: any, submissions: any[]) {
-  const supabase = await createClient();
+  const supabase = await createClient(); // For auth
+  const supabaseService = await createServiceClient(); // For insert operations
 
   try {
     // 1. Ambil User untuk audit log
@@ -103,38 +128,23 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
       );
     }
 
-    // SMART FLEXIBLE RANGE: Filter hanya lokasi kosong
-    const availableLocations = locationCheck.results.filter(r => r.isAvailable);
+    // CEK: Apakah ada lokasi yang sudah terisi?
     const occupiedLocations = locationCheck.results.filter(r => !r.isAvailable);
     
-    // Hitung berapa lokasi yang dibutuhkan
-    const locationsNeeded = submissions.length;
-    
-    // CEK: Apakah jumlah lokasi kosong dalam range cukup?
-    if (availableLocations.length < locationsNeeded) {
-      const occupiedStr = occupiedLocations.map(r => r.locationKey).join(", ");
+    if (occupiedLocations.length > 0) {
+      const occupiedStr = occupiedLocations.map(r => `${r.locationKey} (${r.occupiedBy?.productName || 'Unknown'})`).join(", ");
       throw new Error(
-        `Lokasi tidak cukup! Dibutuhkan ${locationsNeeded} lokasi, tapi hanya ${availableLocations.length} yang kosong dalam range.\n\n` +
+        `Lokasi sudah terisi! ${occupiedLocations.length} dari ${submissions.length} lokasi tidak tersedia.\n\n` +
         `Lokasi terisi: ${occupiedStr}\n\n` +
-        `Solusi: Perluas range atau pilih lokasi lain.`
+        `Solusi: Klik 'Rekomendasi Lokasi' lagi untuk mendapat lokasi baru.`
       );
     }
 
-    // UPDATE SUBMISSIONS: Ganti dengan lokasi kosong yang tersedia
-    // Ambil sejumlah lokasi kosong yang dibutuhkan (skip yang terisi)
-    const finalSubmissions = availableLocations
-      .slice(0, locationsNeeded)
-      .map((available, index) => ({
-        ...submissions[index],
-        location: available.locationKey // Ganti dengan lokasi kosong
-      }));
-
-    // Ganti submissions dengan yang sudah difilter
-    submissions = finalSubmissions;
+    // Semua lokasi kosong, lanjutkan dengan submissions yang sudah dikirim dari client
 
     // 3. Generate Transaction Code (Contoh: INB-20251230-0001)
     const todayStr = getIndonesianDateString();
-    const { count } = await supabase
+    const { count } = await supabaseService
       .from("inbound_history")
       .select("*", { count: "exact", head: true })
       .gte("created_at", getIndonesianDate());
@@ -142,8 +152,8 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
     const sequence = String((count || 0) + 1).padStart(4, "0");
     const transactionCode = `INB-${todayStr}-${sequence}`;
 
-    // 4. INSERT KE INBOUND_HISTORY
-    const { data: inboundEntry, error: errHistory } = await supabase
+    // 4. INSERT KE INBOUND_HISTORY - Using Service Role
+    const { data: inboundEntry, error: errHistory } = await supabaseService
       .from("inbound_history")
       .insert({
         warehouse_id: formData.warehouse_id,
@@ -176,97 +186,127 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
     if (errHistory)
       throw new Error("Gagal mencatat riwayat: " + errHistory.message);
 
+    console.log("✅ Inbound history created:", inboundEntry.id);
+
     // 5. INSERT KE STOCK_LIST & STOCK_MOVEMENTS
-    // Logika baru: Cek level pallet di lokasi yang sama sebelum berpindah ke baris berikutnya
+    // Untuk setiap submission, langsung insert ke lokasi yang sudah ditentukan
+    let successCount = 0;
+    const insertErrors: string[] = [];
+    
     for (const sub of submissions) {
-      const locParts = sub.location.split("-");
+      try {
+        const locParts = sub.location.split("-");
 
-      // VALIDASI PROTEKSI: Jangan ijinkan insert jika cluster undefined
-      if (!locParts[0] || locParts[0] === "undefined") {
-        throw new Error(
-          `Data lokasi korup: ${sub.location}. Submit dibatalkan.`
-        );
-      }
+        // VALIDASI PROTEKSI: Jangan ijinkan insert jika cluster undefined
+        if (!locParts[0] || locParts[0] === "undefined") {
+          throw new Error(
+            `Data lokasi korup: ${sub.location}. Submit dibatalkan.`
+          );
+        }
 
-      // Periksa level pallet di lokasi yang sama (pallet 1 → pallet 2 → pallet 3)
-      let stockPlaced = false;
-      for (let level = 1; level <= 3 && !stockPlaced; level++) {
-        const locationKey = `${locParts[0]}-L${locParts[1]}-B${locParts[2]}-P${level}`;
-        
-        // Cek apakah level pallet ini sudah terisi
-        const { data: existingStock } = await supabase
+        // Parse lokasi langsung dari submission (sudah divalidasi tersedia)
+        const cluster = locParts[0];
+        const lorong = parseInt(locParts[1].replace("L", ""));
+        const baris = parseInt(locParts[2].replace("B", ""));
+        const level = parseInt(locParts[3].replace("P", ""));
+        const locationKey = sub.location;
+
+        console.log(`📦 Attempting to insert stock at ${locationKey}:`, {
+          warehouse_id: formData.warehouse_id,
+          product_id: formData.product_id,
+          bb_produk: formData.bb_produk,
+          cluster,
+          lorong,
+          baris,
+          level,
+          qty_carton: sub.qtyCarton,
+        });
+
+        // Insert langsung ke stock_list di lokasi yang sudah ditentukan - Using Service Role
+        const { data: newStock, error: errStock } = await supabaseService
           .from("stock_list")
-          .select("id")
-          .eq("warehouse_id", formData.warehouse_id)
-          .eq("cluster", locParts[0])
-          .eq("lorong", parseInt(locParts[1].replace("L", "")))
-          .eq("baris", parseInt(locParts[2].replace("B", "")))
-          .eq("level", level)
-          .maybeSingle();
-
-        if (!existingStock) {
-          // Jika level pallet kosong, masukkan stok di sini
-          const { data: newStock, error: errStock } = await supabase
-            .from("stock_list")
-            .insert({
-              warehouse_id: formData.warehouse_id,
-              product_id: formData.product_id,
-              bb_produk: formData.bb_produk,
-              cluster: locParts[0],
-              lorong: parseInt(locParts[1].replace("L", "")),
-              baris: parseInt(locParts[2].replace("B", "")),
-              level: level,
-              qty_pallet: 1,
-              qty_carton: sub.qtyCarton,
-              expired_date: formData.expired_date,
-              inbound_date: getIndonesianDate(),
-              created_by: user.id,
-              status: sub.isReceh ? "receh" : null,
-            })
-            .select()
-            .single();
-
-          if (errStock) {
-            console.error("Gagal insert stock_list:", errStock);
-            throw new Error(
-              `Gagal mengisi stok di lokasi ${locationKey}: ${errStock.message}`
-            );
-          }
-
-          // Insert ke stock_movements
-          await supabase.from("stock_movements").insert({
+          .insert({
             warehouse_id: formData.warehouse_id,
-            stock_id: newStock.id,
             product_id: formData.product_id,
             bb_produk: formData.bb_produk,
-            movement_type: "inbound",
-            reference_type: "inbound_history",
-            reference_id: inboundEntry.id,
-            qty_before: 0,
-            qty_change: sub.qtyCarton,
-            qty_after: sub.qtyCarton,
-            to_location: locationKey,
-            performed_by: user.id,
-            notes: "Inbound via Form Real-DB",
+            cluster: cluster,
+            lorong: lorong,
+            baris: baris,
+            level: level,
+            qty_pallet: 1,
+            qty_carton: sub.qtyCarton,
+            expired_date: formData.expired_date,
+            inbound_date: getIndonesianDate(),
+            created_by: user.id,
+            status: sub.isReceh ? "receh" : "release",
+            fefo_status: "hold",
+          })
+          .select()
+          .single();
+
+        if (errStock) {
+          const errorDetail = `Location: ${locationKey}, Error: ${errStock.message}, Code: ${errStock.code}, Details: ${errStock.details || 'N/A'}, Hint: ${errStock.hint || 'N/A'}`;
+          console.error("❌ Gagal insert stock_list:", {
+            error: errStock,
+            message: errStock.message,
+            details: errStock.details,
+            hint: errStock.hint,
+            code: errStock.code,
           });
-
-          stockPlaced = true; // Tandai bahwa stok sudah ditempatkan
+          insertErrors.push(errorDetail);
+          continue; // Skip to next location instead of throwing
         }
-      }
 
-      // Jika tidak ada level pallet yang kosong di lokasi ini, lempar error
-      if (!stockPlaced) {
-        throw new Error(
-          `Tidak ada level pallet yang tersedia di lokasi ${sub.location}. Semua level sudah terisi.`
-        );
+        console.log(`✅ Stock inserted successfully:`, newStock.id);
+        successCount++;
+
+        // Insert ke stock_movements - Using Service Role
+        const { error: errMovement } = await supabaseService.from("stock_movements").insert({
+          warehouse_id: formData.warehouse_id,
+          stock_id: newStock.id,
+          product_id: formData.product_id,
+          bb_produk: formData.bb_produk,
+          movement_type: "inbound",
+          reference_type: "inbound_history",
+          reference_id: inboundEntry.id,
+          qty_before: 0,
+          qty_change: sub.qtyCarton,
+          qty_after: sub.qtyCarton,
+          to_location: locationKey,
+          performed_by: user.id,
+          notes: "Inbound via Form Real-DB",
+        });
+
+        if (errMovement) {
+          console.error("❌ Gagal insert stock_movements:", errMovement);
+          // Don't throw, just log - stock movement is audit only
+        }
+      } catch (locError: any) {
+        const errorMsg = `${sub.location}: ${locError.message}`;
+        insertErrors.push(errorMsg);
+        console.error("❌ Location processing error:", locError);
       }
+    }
+
+    console.log(`✅ Total stock inserted: ${successCount}/${submissions.length}`);
+
+    // If no stock was inserted at all, throw error with details
+    if (successCount === 0 && insertErrors.length > 0) {
+      throw new Error(`Gagal insert semua stock_list. Errors: ${insertErrors.join(' | ')}`);
     }
 
     revalidatePath("/stock-list");
     revalidatePath("/inbound");
 
-    return { success: true, transactionCode };
+    return { 
+      success: true, 
+      transactionCode,
+      stockInserted: successCount,
+      totalLocations: submissions.length,
+      errors: insertErrors.length > 0 ? insertErrors : undefined
+    };
   } catch (err: any) {
+    console.error("❌ submitInboundAction error:", err);
     return { success: false, message: err.message };
   }
 }

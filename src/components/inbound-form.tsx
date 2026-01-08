@@ -11,6 +11,7 @@ import {
   cancelInboundAction,
   validateBBAction,
   getSmartRecommendationAction,
+  getCurrentStockAction,
 } from "@/app/inbound/actions";
 import { useRouter } from "next/navigation";
 
@@ -53,7 +54,7 @@ interface StockItem {
 interface ProductHome {
   id: string;
   product_id: string;
-  cluster: string;
+  cluster_char: string;
   lorong_start: number;
   lorong_end: number;
   baris_start: number;
@@ -65,6 +66,8 @@ interface ClusterConfig {
   id: string;
   cluster_char: string;
   default_lorong_count: number;
+  default_baris_count: number;
+  default_pallet_level: number;
   is_active: boolean;
   warehouse_id: string;
 }
@@ -80,7 +83,7 @@ interface ClusterOverride {
   custom_pallet_level: number | null;
   is_transit_area: boolean;
   is_disabled: boolean;
-  note: string | null;
+  notes: string | null;
 }
 
 interface InboundHistory {
@@ -333,7 +336,7 @@ export function InboundForm({
     if (!home) return null;
 
     return {
-      clusterChar: home.cluster,
+      clusterChar: home.cluster_char,
       lorongRange: [home.lorong_start, home.lorong_end] as [number, number],
       barisRange: [home.baris_start, home.baris_end] as [number, number],
       maxPalletPerLocation: home.max_pallet_per_location,
@@ -380,10 +383,20 @@ export function InboundForm({
   };
 
   const getInTransitRange = (clusterChar: string): [number, number] | null => {
-    // In Transit area biasanya di lorong terakhir (bisa disesuaikan)
-    // Contoh: Cluster C lorong 8-11 adalah In Transit
-    if (clusterChar === "C") return [8, 11];
-    return null;
+    // Ambil data transit dari cluster_cell_overrides
+    const clusterConfig = getClusterConfig(clusterChar);
+    if (!clusterConfig) return null;
+
+    const transitOverride = clusterOverrides.find(
+      (override) =>
+        override.cluster_config_id === clusterConfig.id &&
+        override.is_transit_area === true &&
+        !override.is_disabled
+    );
+
+    if (!transitOverride) return null;
+
+    return [transitOverride.lorong_start, transitOverride.lorong_end];
   };
 
   const isInTransitLocation = (
@@ -440,8 +453,21 @@ export function InboundForm({
         dataForServer,
         finalSubmissionData
       );
+      
       if (result.success) {
         setShowConfirmModal(false);
+        
+        // Check if there were partial errors
+        if (result.errors && result.errors.length > 0) {
+          warning(
+            `Inbound berhasil dengan peringatan:\n` +
+            `${result.stockInserted}/${result.totalLocations} lokasi berhasil.\n` +
+            `Errors: ${result.errors.join('\n')}`
+          );
+        } else {
+          success(`✅ Inbound berhasil! Kode Transaksi: ${result.transactionCode}`);
+        }
+        
         setShowSuccess(true);
         // Save input history to localStorage
         saveToHistory(
@@ -755,7 +781,7 @@ export function InboundForm({
       
       // Dari product_homes
       productHomes
-        .filter((home) => home.cluster === targetCluster)
+        .filter((home) => home.cluster_char === targetCluster)
         .forEach((home) => {
           // Tambahkan semua lorong dalam range
           for (let l = home.lorong_start; l <= home.lorong_end; l++) {
@@ -824,7 +850,7 @@ export function InboundForm({
       productHomes
         .filter(
           (home) =>
-            home.cluster === targetCluster &&
+            home.cluster_char === targetCluster &&
             lorongNum >= home.lorong_start &&
             lorongNum <= home.lorong_end
         )
@@ -996,10 +1022,39 @@ export function InboundForm({
   
   // ========== AKHIR DROPDOWN MANUAL RANGE ==========
 
+  // Helper function untuk FEFO dengan real-time stock
+  const findMultipleRecommendedLocationsRealtime = (
+    clusterChar: string,
+    palletsNeeded: number,
+    warehouseId: string | null,
+    realtimeStock: StockItem[]
+  ): MultiLocationRecommendation => {
+    return findMultipleRecommendedLocationsWithStock(
+      clusterChar,
+      palletsNeeded,
+      warehouseId,
+      realtimeStock
+    );
+  };
+
   const findMultipleRecommendedLocations = (
     clusterChar: string,
     palletsNeeded: number,
     warehouseId: string | null
+  ): MultiLocationRecommendation => {
+    return findMultipleRecommendedLocationsWithStock(
+      clusterChar,
+      palletsNeeded,
+      warehouseId,
+      currentStock
+    );
+  };
+
+  const findMultipleRecommendedLocationsWithStock = (
+    clusterChar: string,
+    palletsNeeded: number,
+    warehouseId: string | null,
+    stockData: StockItem[]
   ): MultiLocationRecommendation => {
     const locations: RecommendedLocation[] = [];
     let remainingPallets = palletsNeeded;
@@ -1029,7 +1084,9 @@ export function InboundForm({
       if (remainingPallets === 0) break;
 
       // Skip In Transit area in primary phase
-      if (isInTransitLocation(clusterChar, lorongNum)) continue;
+      if (isInTransitLocation(clusterChar, lorongNum)) {
+        continue;
+      }
       
       // Get baris count for this lorong (dynamic)
       const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
@@ -1058,11 +1115,13 @@ export function InboundForm({
           // Validate product can be placed here
           if (form.productCode) {
             const validation = validateProductLocation(form.productCode, clusterChar, lorongNum, barisNum);
-            if (!validation.isValid) continue;
+            if (!validation.isValid) {
+              continue;
+            }
           }
           
           // Check if location is empty (filter by current warehouse)
-          const locationExists = currentStock.some(
+          const locationExists = stockData.some(
             (item: StockItem) =>
               item.warehouse_id === warehouseId && // Filter by current warehouse
               item.cluster === clusterChar &&
@@ -1122,7 +1181,7 @@ export function InboundForm({
               const level = `P${palletNum}`;
 
               // Check if location is empty
-              const locationExists = currentStock.some(
+              const locationExists = stockData.some(
                 (item: StockItem) =>
                   item.warehouse_id === warehouseId && // Filter by current warehouse
                   item.cluster === clusterChar &&
@@ -1179,7 +1238,7 @@ export function InboundForm({
                 const level = `P${palletNum}`;
 
                 // Check if location is empty in Cluster C In Transit
-                const locationExists = currentStock.some(
+                const locationExists = stockData.some(
                   (item: StockItem) =>
                     item.warehouse_id === warehouseId && // Filter by current warehouse
                     item.cluster === "C" &&
@@ -1281,7 +1340,24 @@ export function InboundForm({
     }
     
     try {
-      const multiRec = findMultipleRecommendedLocations(cluster, totalPalletsNeeded, warehouseId);
+      // Fetch stock real-time dari database sebelum FEFO recommendation
+      const stockResult = await getCurrentStockAction(warehouseId);
+      
+      if (!stockResult.success || !stockResult.stock) {
+        error("Gagal mengambil data stock terbaru: " + (stockResult.error || "Data tidak tersedia"));
+        return;
+      }
+      
+      // Use real-time stock data
+      const realtimeStock: StockItem[] = stockResult.stock;
+      
+      // Jalankan FEFO dengan data stock real-time
+      const multiRec = findMultipleRecommendedLocationsRealtime(
+        cluster, 
+        totalPalletsNeeded, 
+        warehouseId,
+        realtimeStock
+      );
       
       if (multiRec.locations.length < totalPalletsNeeded) {
         error(`Gudang penuh! Hanya ditemukan ${multiRec.locations.length} dari ${totalPalletsNeeded} lokasi yang dibutuhkan.`);
@@ -1656,15 +1732,14 @@ export function InboundForm({
     }
 
     // Validasi Cluster: Skip jika auto recommend aktif dan ada multi-location recommendation
+    // ATAU jika manual locations sudah diisi lengkap
     const skipClusterValidation =
-      autoRecommend &&
+      (autoRecommend &&
       multiLocationRec &&
-      multiLocationRec.locations.length > 0;
-    console.log(
-      "Cluster validation - skipClusterValidation:",
-      skipClusterValidation
-    );
-    console.log("Cluster validation - form.clusterChar:", form.clusterChar);
+      multiLocationRec.locations.length > 0) ||
+      (manualLocations && manualLocations.length > 0 && manualLocations.every(loc =>
+        loc.clusterChar && loc.lorong && loc.baris && loc.pallet
+      ));
 
     if (!form.clusterChar && !skipClusterValidation) {
       newErrors.clusterChar = "Cluster harus diisi";
@@ -1688,6 +1763,7 @@ export function InboundForm({
         multiLocationRec.locations.forEach((loc) => {
           const existingStock = currentStock.find(
             (s) =>
+              s.warehouse_id === warehouseId &&
               s.cluster === loc.clusterChar &&
               s.lorong === parseInt(loc.lorong.replace("L", "")) &&
               s.baris === parseInt(loc.baris.replace("B", "")) &&

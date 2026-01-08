@@ -5,7 +5,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { moveStockAction } from "@/app/permutasi/actions";
+import { moveStockAction, getCurrentStockAction } from "@/app/permutasi/actions";
 import { CheckCircle, XCircle, ArrowRightLeft, MapPin } from "lucide-react";
 
 interface WrongLocationStock {
@@ -65,6 +65,7 @@ export function PermutasiForm({
 }: PermutasiFormProps) {
   const router = useRouter();
   const [currentWarehouseId, setCurrentWarehouseId] = useState<string | null>(warehouseId);
+  const [realtimeStock, setRealtimeStock] = useState<any[]>(initialStocks); // Start with initial, will fetch real-time when needed
   const [activeTab, setActiveTab] = useState<"salah-cluster" | "in-transit" | "free-move" | "history">("salah-cluster");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [showMoveModal, setShowMoveModal] = useState(false);
@@ -361,12 +362,12 @@ export function PermutasiForm({
 
   // Find recommended location for a product using database
   // excludeLocations: array of location strings "A-L1-B8-P1" yang sudah reserved dalam batch
-  const findRecommendedLocation = (productId: string, productCode: string, excludeLocations: Set<string> = new Set()): RecommendedLocation | null => {
+  const findRecommendedLocation = (productId: string, productCode: string, stockData: any[], excludeLocations: Set<string> = new Set()): RecommendedLocation | null => {
     // Cari aturan product home
     const productHome = productHomes.find((h: any) => h.product_id === productId);
     
     // Cari produk untuk mendapatkan default cluster
-    const product = initialStocks.find((s: any) => s.product_id === productId)?.products;
+    const product = stockData.find((s: any) => s.product_id === productId)?.products;
     const cluster = productHome?.cluster_char || product?.default_cluster || "";
 
     if (!cluster) return null;
@@ -401,8 +402,9 @@ export function PermutasiForm({
           // Cek apakah lokasi ini sudah direserve dalam batch saat ini
           if (excludeLocations.has(locationKey)) continue;
 
-          const locationExists = initialStocks.some(
+          const locationExists = stockData.some(
             (item: any) =>
+              item.warehouse_id === warehouseId &&
               item.cluster === cluster &&
               item.lorong === lorongNum &&
               item.baris === barisNum &&
@@ -420,9 +422,10 @@ export function PermutasiForm({
   };
 
   // Check if target location is already occupied
-  const isLocationOccupied = (cluster: string, lorong: number, baris: number, level: number): boolean => {
-    return initialStocks.some(
+  const isLocationOccupied = (cluster: string, lorong: number, baris: number, level: number, stockData: any[]): boolean => {
+    return stockData.some(
       (s: any) =>
+        s.warehouse_id === warehouseId &&
         s.cluster === cluster &&
         s.lorong === lorong &&
         s.baris === baris &&
@@ -541,15 +544,27 @@ export function PermutasiForm({
   };
 
   // Handle recommend button
-  const handleRecommend = () => {
+  const handleRecommend = async () => {
     if (!itemToMove) return;
+
+    // Fetch real-time stock data
+    const stockResult = await getCurrentStockAction(warehouseId);
+    if (!stockResult.success || !stockResult.stock) {
+      error("Gagal mengambil data stok terkini: " + (stockResult.error || "Unknown error"));
+      return;
+    }
+
+    const freshStock: any[] = stockResult.stock;
+    setRealtimeStock(freshStock); // Update state for other functions
+
     const productId = itemToMove.products.id;
     const productCode = itemToMove.products.product_code;
-    const recommended = findRecommendedLocation(productId, productCode);
+    const recommended = findRecommendedLocation(productId, productCode, freshStock);
     if (recommended) {
       // Verify it's not occupied
-      const isOccupied = initialStocks.some(
+      const isOccupied = freshStock.some(
         (s: any) =>
+          s.warehouse_id === warehouseId &&
           s.cluster === recommended.clusterChar &&
           s.lorong === parseInt(recommended.lorong.replace('L', '')) &&
           s.baris === parseInt(recommended.baris.replace('B', '')) &&
@@ -587,9 +602,10 @@ export function PermutasiForm({
         error("Mohon lengkapi lokasi tujuan.");
         return;
       }
-      // Check if manual location is occupied
-      const isOccupied = initialStocks.some(
+      // Check if manual location is occupied using real-time stock
+      const isOccupied = realtimeStock.some(
         (s: any) =>
+          s.warehouse_id === warehouseId &&
           s.cluster === manualLocation.clusterChar &&
           s.lorong === parseInt(manualLocation.lorong.replace('L', '')) &&
           s.baris === parseInt(manualLocation.baris.replace('B', '')) &&
@@ -659,11 +675,21 @@ export function PermutasiForm({
   };
 
   // Open batch plan modal (Prepare locations first, don't execute blindly!)
-  const handleBatchMoveClick = () => {
+  const handleBatchMoveClick = async () => {
     if (selectedItems.size === 0) {
       error("Pilih minimal 1 item untuk dipindahkan.");
       return;
     }
+
+    // Fetch real-time stock data first
+    const stockResult = await getCurrentStockAction(warehouseId);
+    if (!stockResult.success || !stockResult.stock) {
+      error("Gagal mengambil data stok terkini: " + (stockResult.error || "Unknown error"));
+      return;
+    }
+
+    const freshStock: any[] = stockResult.stock;
+    setRealtimeStock(freshStock); // Update state
 
     // PENTING: Track locations yang sudah direserve dalam batch ini
     const reservedLocations = new Set<string>();
@@ -677,8 +703,8 @@ export function PermutasiForm({
       const productId = stock.products.id;
       const productCode = stock.products.product_code;
       
-      // Pass reservedLocations agar tidak ada duplikasi
-      const rec = findRecommendedLocation(productId, productCode, reservedLocations);
+      // Pass freshStock and reservedLocations agar tidak ada duplikasi
+      const rec = findRecommendedLocation(productId, productCode, freshStock, reservedLocations);
       
       // Jika dapat rekomendasi, reserve lokasi tersebut untuk item berikutnya
       if (rec) {

@@ -4,6 +4,27 @@ import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 import { getIndonesianDateTime, getIndonesianDateString } from "@/lib/utils/datetime";
 
+/**
+ * Fetch current real-time stock data from database
+ * Used by client to get fresh data before location checks
+ */
+export async function getCurrentStockAction(warehouseId: string) {
+  try {
+    const supabase = await createClient();
+    
+    const { data: stock, error } = await supabase
+      .from("stock_list")
+      .select("*")
+      .eq("warehouse_id", warehouseId);
+
+    if (error) throw error;
+
+    return { success: true, stock: stock || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message, stock: [] };
+  }
+}
+
 export async function moveStockAction(
   warehouseId: string,
   stockId: string,

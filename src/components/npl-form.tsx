@@ -5,7 +5,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { submitNplAction } from "@/app/npl/actions";
+import { submitNplAction, getCurrentStockAction } from "@/app/npl/actions";
 import { CheckCircle, XCircle, RotateCcw, Package, Truck } from "lucide-react";
 
 // --- CONSTANTS ---
@@ -330,8 +330,13 @@ export function NplForm({
     }
   }, [bbProduk]);
 
+  // Wrapper function that calls FEFO with real-time stock data
+  const findMultipleRecommendedLocationsRealtime = (clusterChar: string, palletsNeeded: number, realtimeStock: any[]): MultiLocationRecommendation => {
+    return findMultipleRecommendedLocationsWithStock(clusterChar, palletsNeeded, realtimeStock);
+  };
+
   // Find multiple recommended locations (same logic as inbound)
-  const findMultipleRecommendedLocations = (clusterChar: string, palletsNeeded: number): MultiLocationRecommendation => {
+  const findMultipleRecommendedLocationsWithStock = (clusterChar: string, palletsNeeded: number, stockData: any[]): MultiLocationRecommendation => {
     const locations: RecommendedLocation[] = [];
     let remainingPallets = palletsNeeded;
 
@@ -371,8 +376,9 @@ export function NplForm({
           const baris = `B${barisNum}`;
           const level = `P${palletNum}`;
 
-          const locationExists = initialStocks.some(
+          const locationExists = stockData.some(
             (item: any) =>
+              item.warehouse_id === warehouseId &&
               item.cluster === clusterChar &&
               item.lorong === lorongNum &&
               item.baris === barisNum &&
@@ -452,8 +458,9 @@ export function NplForm({
               const baris = `B${barisNum}`;
               const level = `P${palletNum}`;
 
-              const locationExists = initialStocks.some(
+              const locationExists = stockData.some(
                 (item: any) =>
+                  item.warehouse_id === warehouseId &&
                   item.cluster === transitCluster &&
                   item.lorong === lorongNum &&
                   item.baris === barisNum &&
@@ -580,7 +587,7 @@ export function NplForm({
   };
 
   // Handle recommend button
-  const handleRecommend = () => {
+  const handleRecommend = async () => {
     if (!productCode) {
       error("Pilih produk terlebih dahulu.");
       return;
@@ -594,9 +601,17 @@ export function NplForm({
       return;
     }
 
+    // Fetch real-time stock data from database
+    const stockResult = await getCurrentStockAction(warehouseId);
+    if (!stockResult.success || !stockResult.stock) {
+      error("Gagal mengambil data stok terkini: " + (stockResult.error || "Unknown error"));
+      return;
+    }
+
+    const realtimeStock: any[] = stockResult.stock;
     const homeCluster = selectedProduct?.default_cluster || "A";
 
-    const recommendation = findMultipleRecommendedLocations(homeCluster, totalPalletsNeeded);
+    const recommendation = findMultipleRecommendedLocationsRealtime(homeCluster, totalPalletsNeeded, realtimeStock);
 
     if (recommendation.totalPalletsPlaced === 0) {
       error("Tidak ada lokasi kosong yang tersedia.");
