@@ -492,8 +492,8 @@ export function NplForm({
     };
   };
 
-  // Expand range to individual locations
-  const expandRangeToLocations = () => {
+  // Expand range to individual locations (with real-time stock check)
+  const expandRangeToLocations = async () => {
     const { clusterChar, lorong, barisStart, barisEnd, palletStart, palletEnd } = manualRange;
 
     if (!clusterChar || !lorong || !barisStart || !barisEnd || !palletStart || !palletEnd) {
@@ -517,6 +517,15 @@ export function NplForm({
       return;
     }
 
+    // Fetch real-time stock data before filtering
+    const stockResult = await getCurrentStockAction(warehouseId);
+    if (!stockResult.success || !stockResult.stock) {
+      error("Gagal mengambil data stok terkini: " + (stockResult.error || "Unknown error"));
+      return;
+    }
+
+    const freshStock: any[] = stockResult.stock;
+
     // Generate all locations from range
     const allLocations: ManualLocationInput[] = [];
     for (let b = barisStartNum; b <= barisEndNum; b++) {
@@ -530,13 +539,13 @@ export function NplForm({
       }
     }
 
-    // Filter hanya lokasi yang KOSONG
+    // Filter hanya lokasi yang KOSONG (using real-time stock)
     const availableLocations = allLocations.filter((loc) => {
       const lorongNumCheck = parseInt(loc.lorong.replace("L", ""));
       const barisNumCheck = parseInt(loc.baris.replace("B", ""));
       const palletNumCheck = parseInt(loc.pallet.replace("P", ""));
 
-      const existingStock = initialStocks.find(
+      const existingStock = freshStock.find(
         (s: any) =>
           s.cluster === loc.clusterChar &&
           s.lorong === lorongNumCheck &&

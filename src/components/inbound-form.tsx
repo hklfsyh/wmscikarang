@@ -1385,8 +1385,8 @@ export function InboundForm({
     }
   };
 
-  // Function to expand range into individual locations
-  const expandRangeToLocations = () => {
+  // Function to expand range into individual locations (with real-time stock check)
+  const expandRangeToLocations = async () => {
     const {
       clusterChar,
       lorong,
@@ -1431,6 +1431,15 @@ export function InboundForm({
       return;
     }
 
+    // Fetch real-time stock data before filtering
+    const stockResult = await getCurrentStockAction(warehouseId);
+    if (!stockResult.success || !stockResult.stock) {
+      error("Gagal mengambil data stok terkini: " + (stockResult.error || "Unknown error"));
+      return;
+    }
+
+    const freshStock: StockItem[] = stockResult.stock;
+
     // Generate all locations from range
     const allLocations: ManualLocationInput[] = [];
     for (let b = barisStartNum; b <= barisEndNum; b++) {
@@ -1444,9 +1453,9 @@ export function InboundForm({
       }
     }
 
-    // SMART FILTER: Filter hanya lokasi yang KOSONG
+    // SMART FILTER: Filter hanya lokasi yang KOSONG (using real-time stock)
     const availableLocations = allLocations.filter(loc => {
-      const existingStock = currentStock.find(
+      const existingStock = freshStock.find(
         (s: StockItem) => s.warehouse_id === warehouseId &&
              s.cluster === loc.clusterChar && 
              s.lorong === parseInt(loc.lorong.replace('L', '')) && 

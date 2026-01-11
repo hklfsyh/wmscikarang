@@ -56,7 +56,7 @@ export default function ProductHomeEditor({
 
   const handleAdd = () => {
     setFormData({
-      id: `ph-${Date.now()}`,
+      id: `ph-new-${crypto.randomUUID()}`,
       warehouseId: "wh-001-cikarang",
       productId: "",
       clusterChar: clusters[0]?.clusterChar || "A",
@@ -98,6 +98,9 @@ export default function ProductHomeEditor({
       // Skip checking against itself when editing
       if (currentId && ph.id === currentId) return false;
       
+      // Skip if same product (same product can have multiple non-overlapping homes, but we'll allow it for now)
+      // Actually, we should prevent overlap even for same product to avoid confusion
+      
       // Check if same cluster
       if (ph.clusterChar !== formData.clusterChar) return false;
       
@@ -122,11 +125,21 @@ export default function ProductHomeEditor({
       const conflict = conflicts[0];
       const product = products.find(p => p.id === conflict.productId);
       const productName = product ? `${product.productCode} - ${product.productName}` : conflict.productId;
-      error(
-        `Lokasi sudah digunakan oleh produk lain!\n` +
-        `Produk: ${productName}\n` +
-        `Cluster ${conflict.clusterChar}, Lorong ${conflict.lorongStart}-${conflict.lorongEnd}, Baris ${conflict.barisStart}-${conflict.barisEnd}`
-      );
+      const isSameProduct = conflict.productId === formData.productId;
+      
+      if (isSameProduct) {
+        error(
+          `Produk ini sudah memiliki home di lokasi yang overlap!\n` +
+          `Cluster ${conflict.clusterChar}, Lorong ${conflict.lorongStart}-${conflict.lorongEnd}, Baris ${conflict.barisStart}-${conflict.barisEnd}\n` +
+          `Gunakan lokasi yang tidak overlap atau edit assignment yang sudah ada.`
+        );
+      } else {
+        error(
+          `Lokasi sudah digunakan oleh produk lain!\n` +
+          `Produk: ${productName}\n` +
+          `Cluster ${conflict.clusterChar}, Lorong ${conflict.lorongStart}-${conflict.lorongEnd}, Baris ${conflict.barisStart}-${conflict.barisEnd}`
+        );
+      }
       return false;
     }
     

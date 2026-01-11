@@ -20,6 +20,7 @@ import {
   deleteCellOverrideAction,
   createProductHome,
   updateProductHome,
+  deleteProductHome,
 } from "./actions";
 
 // Database types (snake_case)
@@ -965,7 +966,17 @@ export default function StockListMasterClient({
             }))}
             onUpdate={async (updatedMockProductHomes) => {
               try {
-                // Update or create product homes in database
+                // Identify what changed: new items, updated items, or deleted items
+                const existingIds = new Set(mockProductHomes.map(ph => ph.id));
+                const updatedIds = new Set(updatedMockProductHomes.map(ph => ph.id));
+                
+                // Find deleted items
+                const deletedIds = Array.from(existingIds).filter(id => !updatedIds.has(id));
+                for (const id of deletedIds) {
+                  await deleteProductHome(id);
+                }
+                
+                // Process new and updated items
                 for (const mockPH of updatedMockProductHomes) {
                   const isNew = mockPH.id.startsWith('ph-new-');
                   
@@ -985,18 +996,32 @@ export default function StockListMasterClient({
                       is_active: mockPH.isActive,
                     });
                   } else {
-                    // Update existing product home
-                    const dbData = mockProductHomeToDb(mockPH, warehouseId);
-                    await updateProductHome(mockPH.id, {
-                      cluster_char: dbData.cluster_char,
-                      lorong_start: dbData.lorong_start,
-                      lorong_end: dbData.lorong_end,
-                      baris_start: dbData.baris_start,
-                      baris_end: dbData.baris_end,
-                      max_pallet_per_location: dbData.max_pallet_per_location,
-                      priority: dbData.priority,
-                      is_active: mockPH.isActive,
-                    });
+                    // Check if this item actually changed
+                    const original = mockProductHomes.find(ph => ph.id === mockPH.id);
+                    const hasChanges = !original || 
+                      original.clusterChar !== mockPH.clusterChar ||
+                      original.lorongStart !== mockPH.lorongStart ||
+                      original.lorongEnd !== mockPH.lorongEnd ||
+                      original.barisStart !== mockPH.barisStart ||
+                      original.barisEnd !== mockPH.barisEnd ||
+                      original.maxPalletPerLocation !== mockPH.maxPalletPerLocation ||
+                      original.priority !== mockPH.priority ||
+                      original.isActive !== mockPH.isActive;
+                    
+                    // Only update if there are actual changes
+                    if (hasChanges) {
+                      const dbData = mockProductHomeToDb(mockPH, warehouseId);
+                      await updateProductHome(mockPH.id, {
+                        cluster_char: dbData.cluster_char,
+                        lorong_start: dbData.lorong_start,
+                        lorong_end: dbData.lorong_end,
+                        baris_start: dbData.baris_start,
+                        baris_end: dbData.baris_end,
+                        max_pallet_per_location: dbData.max_pallet_per_location,
+                        priority: dbData.priority,
+                        is_active: mockPH.isActive,
+                      });
+                    }
                   }
                 }
                 
