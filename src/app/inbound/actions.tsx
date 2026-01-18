@@ -29,6 +29,7 @@ export async function checkLocationAvailabilityAction(
             `
             id,
             qty_carton,
+            product_id,
             products(product_name, product_code)
           `
           )
@@ -44,6 +45,7 @@ export async function checkLocationAvailabilityAction(
           isAvailable: !existingStock,
           occupiedBy: existingStock
             ? {
+                productId: existingStock.product_id,
                 productName: (existingStock.products as any)?.product_name,
                 productCode: (existingStock.products as any)?.product_code,
                 qtyCarton: existingStock.qty_carton,
@@ -131,10 +133,26 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
     // CEK: Apakah ada lokasi yang sudah terisi?
     const occupiedLocations = locationCheck.results.filter(r => !r.isAvailable);
     
-    if (occupiedLocations.length > 0) {
-      const occupiedStr = occupiedLocations.map(r => `${r.locationKey} (${r.occupiedBy?.productName || 'Unknown'})`).join(", ");
+    // IMPORTANT: Allow RECEH to share same pallet if product matches
+    // Check if any occupied location conflicts with current submission (different product)
+    const conflictingLocations = occupiedLocations.filter(occ => {
+      // Find corresponding submission for this location
+      // submissions[].location is a STRING like "C-L1-B1-P1"
+      // occ.locationKey is also a STRING like "C-L1-B1-P1"
+      const matchingSubmission = submissions.find(s => s.location === occ.locationKey);
+      
+      // If submission is receh and product matches, allow sharing
+      if (matchingSubmission?.isReceh && occ.occupiedBy?.productId === formData.product_id) {
+        return false; // Not a conflict - receh can share
+      }
+      
+      return true; // Conflict - different product or not receh
+    });
+    
+    if (conflictingLocations.length > 0) {
+      const occupiedStr = conflictingLocations.map(r => `${r.locationKey} (${r.occupiedBy?.productName || 'Unknown'})`).join(", ");
       throw new Error(
-        `Lokasi sudah terisi! ${occupiedLocations.length} dari ${submissions.length} lokasi tidak tersedia.\n\n` +
+        `Lokasi sudah terisi dengan produk lain! ${conflictingLocations.length} dari ${submissions.length} lokasi tidak tersedia.\n\n` +
         `Lokasi terisi: ${occupiedStr}\n\n` +
         `Solusi: Klik 'Rekomendasi Lokasi' lagi untuk mendapat lokasi baru.`
       );
@@ -142,7 +160,8 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
 
     // Semua lokasi kosong, lanjutkan dengan submissions yang sudah dikirim dari client
 
-    // 3. Generate Transaction Code (Contoh: INB-20251230-0001)
+    // 3. Generate Transaction Code (Contoh: INB-20251230-0001-123456)
+    // PERBAIKAN: Tambahkan microseconds untuk prevent duplicate di submit berturut-turut
     const todayStr = getIndonesianDateString();
     const { count } = await supabaseService
       .from("inbound_history")
@@ -150,7 +169,8 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
       .gte("created_at", getIndonesianDate());
 
     const sequence = String((count || 0) + 1).padStart(4, "0");
-    const transactionCode = `INB-${todayStr}-${sequence}`;
+    const microseconds = String(Date.now() % 1000000).padStart(6, "0"); // Add microseconds
+    const transactionCode = `INB-${todayStr}-${sequence}-${microseconds}`;
 
     // 4. INSERT KE INBOUND_HISTORY - Using Service Role
     const { data: inboundEntry, error: errHistory } = await supabaseService
@@ -222,42 +242,88 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
           qty_carton: sub.qtyCarton,
         });
 
-        // Insert langsung ke stock_list di lokasi yang sudah ditentukan - Using Service Role
-        const { data: newStock, error: errStock } = await supabaseService
+        // RECEH LOGIC: Check if location already has same product (allow sharing)
+        const { data: existingStock, error: checkError } = await supabaseService
           .from("stock_list")
-          .insert({
-            warehouse_id: formData.warehouse_id,
-            product_id: formData.product_id,
-            bb_produk: formData.bb_produk,
-            cluster: cluster,
-            lorong: lorong,
-            baris: baris,
-            level: level,
-            qty_pallet: 1,
-            qty_carton: sub.qtyCarton,
-            expired_date: formData.expired_date,
-            inbound_date: getIndonesianDate(),
-            created_by: user.id,
-            status: sub.isReceh ? "receh" : "release",
-            fefo_status: "hold",
-          })
-          .select()
-          .single();
+          .select("*")
+          .eq("warehouse_id", formData.warehouse_id)
+          .eq("cluster", cluster)
+          .eq("lorong", lorong)
+          .eq("baris", baris)
+          .eq("level", level)
+          .maybeSingle();
 
-        if (errStock) {
-          const errorDetail = `Location: ${locationKey}, Error: ${errStock.message}, Code: ${errStock.code}, Details: ${errStock.details || 'N/A'}, Hint: ${errStock.hint || 'N/A'}`;
-          console.error("❌ Gagal insert stock_list:", {
-            error: errStock,
-            message: errStock.message,
-            details: errStock.details,
-            hint: errStock.hint,
-            code: errStock.code,
-          });
-          insertErrors.push(errorDetail);
-          continue; // Skip to next location instead of throwing
+        if (checkError) {
+          console.error("❌ Error checking existing stock:", checkError);
+          insertErrors.push(`${locationKey}: ${checkError.message}`);
+          continue;
         }
 
-        console.log(`✅ Stock inserted successfully:`, newStock.id);
+        let newStock: any;
+
+        if (existingStock) {
+          // Location occupied - check if same product (RECEH sharing allowed)
+          if (existingStock.product_id !== formData.product_id) {
+            throw new Error(
+              `Lokasi ${locationKey} sudah terisi produk lain (${existingStock.product_id}). Tidak bisa menambahkan produk berbeda!`
+            );
+          }
+
+          // Same product - UPDATE qty (RECEH sharing)
+          const newQty = existingStock.qty_carton + sub.qtyCarton;
+          const { data: updatedStock, error: updateError } = await supabaseService
+            .from("stock_list")
+            .update({
+              qty_carton: newQty,
+              updated_at: getIndonesianDateTime(),
+            })
+            .eq("id", existingStock.id)
+            .select()
+            .single();
+
+          if (updateError) {
+            const errorDetail = `Location: ${locationKey}, Error: ${updateError.message}`;
+            console.error("❌ Gagal update stock_list:", updateError);
+            insertErrors.push(errorDetail);
+            continue;
+          }
+
+          newStock = updatedStock;
+          console.log(`✅ Stock updated (RECEH sharing): ${existingStock.qty_carton} + ${sub.qtyCarton} = ${newQty}`);
+        } else {
+          // Location empty - INSERT new stock
+          const { data: insertedStock, error: errStock } = await supabaseService
+            .from("stock_list")
+            .insert({
+              warehouse_id: formData.warehouse_id,
+              product_id: formData.product_id,
+              bb_produk: formData.bb_produk,
+              cluster: cluster,
+              lorong: lorong,
+              baris: baris,
+              level: level,
+              qty_pallet: 1,
+              qty_carton: sub.qtyCarton,
+              expired_date: formData.expired_date,
+              inbound_date: getIndonesianDate(),
+              created_by: user.id,
+              status: sub.isReceh ? "receh" : "release",
+              fefo_status: "hold",
+            })
+            .select()
+            .single();
+
+          if (errStock) {
+            const errorDetail = `Location: ${locationKey}, Error: ${errStock.message}, Code: ${errStock.code}`;
+            console.error("❌ Gagal insert stock_list:", errStock);
+            insertErrors.push(errorDetail);
+            continue;
+          }
+
+          newStock = insertedStock;
+          console.log(`✅ Stock inserted successfully:`, newStock.id);
+        }
+
         successCount++;
 
         // Insert ke stock_movements - Using Service Role
@@ -545,7 +611,7 @@ export async function getSmartRecommendationAction(
         .eq("is_active", true),
       supabase
         .from("stock_list")
-        .select("cluster, lorong, baris, level")
+        .select("cluster, lorong, baris, level, product_id, status, qty_carton")
         .eq("warehouse_id", warehouseId)
         .in("cluster", relevantClusters), // Optimasi filter DB
       supabase
@@ -561,6 +627,27 @@ export async function getSmartRecommendationAction(
     const occupiedSet = new Set(
       occupied.map((s) => `${s.cluster}-${s.lorong}-${s.baris}-${s.level}`)
     );
+
+    // RECEH PRIORITY: Detect receh locations with same product for prioritization
+    // UUID comparison must be case-insensitive
+    const recehLocationsForProduct = occupied.filter((s) => {
+      const isSameProduct = s.product_id?.toLowerCase() === product.id?.toLowerCase();
+      const isReceh = s.status === "receh";
+      
+      // DEBUG LOG
+      if (isReceh) {
+        console.log(`🔍 RECEH detected at ${s.cluster}-L${s.lorong}-B${s.baris}-P${s.level}:`, {
+          stockProductId: s.product_id,
+          targetProductId: product.id,
+          isSameProduct,
+          qtyCarton: s.qty_carton
+        });
+      }
+      
+      return isSameProduct && isReceh;
+    });
+
+    console.log(`✅ Found ${recehLocationsForProduct.length} RECEH locations for product ${product.id}`);
 
     // Helper: Get valid baris count untuk lorong tertentu (memperhitungkan override)
     const getValidBarisCount = (clusterChar: string, lorongNum: number): number => {
@@ -599,6 +686,22 @@ export async function getSmartRecommendationAction(
 
     const recommendations: any[] = [];
     let remaining = palletsNeeded;
+
+    // --- PHASE 0: PRIORITASKAN RECEH LOCATIONS UNTUK PRODUK YANG SAMA ---
+    // Jika ada lokasi receh dengan produk yang sama, recommend untuk sharing
+    for (const recehLoc of recehLocationsForProduct) {
+      if (remaining === 0) break;
+      const key = `${recehLoc.cluster}-${recehLoc.lorong}-${recehLoc.baris}-${recehLoc.level}`;
+      recommendations.push({
+        clusterChar: recehLoc.cluster,
+        lorong: `L${recehLoc.lorong}`,
+        baris: `B${recehLoc.baris}`,
+        level: `P${recehLoc.level}`,
+        phase: "receh_sharing",
+        existingQty: recehLoc.qty_carton, // Metadata untuk UI
+      });
+      remaining--;
+    }
 
     // --- PHASE 1: CARI DI PRODUCT HOMES (Saran #3) ---
     // Mengurutkan product_homes agar yang sesuai dengan default_cluster dicek lebih dulu

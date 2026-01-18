@@ -41,7 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 # project documentation (exclude from git and vercel deploy)
-# *.md
+*.md
 !README.md
 # *.txt
 # *.dbml

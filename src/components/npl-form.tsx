@@ -620,22 +620,72 @@ export function NplForm({
     const realtimeStock: any[] = stockResult.stock;
     const homeCluster = selectedProduct?.default_cluster || "A";
 
-    const recommendation = findMultipleRecommendedLocationsRealtime(homeCluster, totalPalletsNeeded, realtimeStock);
+    // CRITICAL: Only prioritize RECEH if current input HAS remaining cartons (isReceh)
+    let recommendations: RecommendedLocation[] = [];
+    
+    if (isReceh) {
+      // Input is RECEH - prioritize existing RECEH locations for sharing
+      if (selectedProduct) {
+        const recehLocations = realtimeStock.filter(
+          (s) => s.product_id === selectedProduct.id && s.status === "receh"
+        );
+        
+        // Add existing RECEH locations first (for sharing)
+        recehLocations.slice(0, totalPalletsNeeded).forEach(receh => {
+          recommendations.push({
+            clusterChar: receh.cluster,
+            lorong: `L${receh.lorong}`,
+            baris: `B${receh.baris}`,
+            level: `P${receh.level}`,
+            qtyCarton: 0, // Will be calculated later
+            isReceh: true,
+          });
+        });
+        
+        // If still need more locations, use FEFO for empty spots
+        const remainingNeeded = totalPalletsNeeded - recommendations.length;
+        if (remainingNeeded > 0) {
+          const multiRec = findMultipleRecommendedLocationsRealtime(
+            homeCluster, 
+            remainingNeeded, 
+            realtimeStock
+          );
+          recommendations = [...recommendations, ...multiRec.locations];
+        }
+        
+        // Show special message for RECEH sharing
+        if (recehLocations.length > 0 && recommendations.length > 0) {
+          success(`✅ Merekomendasikan RECEH sharing di ${recommendations[0].clusterChar}-${recommendations[0].lorong}-${recommendations[0].baris}-${recommendations[0].level} (existing: ${recehLocations[0].qty_carton} carton)`);
+        }
+      }
+    } else {
+      // Input is FULL PALLET - skip RECEH, go directly to empty locations
+      const multiRec = findMultipleRecommendedLocationsRealtime(
+        homeCluster, 
+        totalPalletsNeeded, 
+        realtimeStock
+      );
+      recommendations = multiRec.locations;
+      success(`✅ Ditemukan ${recommendations.length} lokasi kosong yang sesuai!`);
+    }
 
-    if (recommendation.totalPalletsPlaced === 0) {
+    if (recommendations.length === 0) {
       error("Tidak ada lokasi kosong yang tersedia.");
       setMultiLocationRec(null);
       return;
     }
 
-    if (recommendation.totalPalletsPlaced < totalPalletsNeeded) {
+    if (recommendations.length < totalPalletsNeeded) {
       error(
-        `Hanya ditemukan ${recommendation.totalPalletsPlaced} lokasi dari ${totalPalletsNeeded} yang dibutuhkan. Sebagian akan masuk In Transit.`
+        `Hanya ditemukan ${recommendations.length} lokasi dari ${totalPalletsNeeded} yang dibutuhkan. Sebagian akan masuk In Transit.`
       );
     }
 
-    setMultiLocationRec(recommendation);
-    success(`Ditemukan ${recommendation.locations.length} lokasi penempatan.`);
+    setMultiLocationRec({
+      locations: recommendations,
+      totalPalletsPlaced: recommendations.length,
+      needsMultipleLocations: recommendations.length > 1
+    });
   };
 
   // Reset form
