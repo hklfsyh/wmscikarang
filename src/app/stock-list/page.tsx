@@ -45,7 +45,22 @@ export default async function StockListPage() {
     .eq("warehouse_id", profile.warehouse_id) // Filter agar produk gudang lain tidak muncul
     .order("product_name", { ascending: true });
 
-  // 5. Mapping data (Pastikan penamaan camelCase sesuai Interface Client)
+  // 5. Ambil Product Homes untuk validasi salah cluster
+  const { data: productHomes } = await supabase
+    .from("product_homes")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id)
+    .eq("is_active", true);
+
+  // 6. Ambil Cluster Configs untuk filter dropdown
+  const { data: clusterConfigs } = await supabase
+    .from("cluster_configs")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id)
+    .eq("is_active", true)
+    .order("cluster_char", { ascending: true });
+
+  // 7. Mapping data (Pastikan penamaan camelCase sesuai Interface Client)
   const formattedStock = (stockData || []).map((item: any) => ({
     id: item.id,
     productId: item.product_id,
@@ -77,6 +92,8 @@ export default async function StockListPage() {
       warehouse={warehouseData} // Kirim data warehouse ke Client
       initialStock={formattedStock} 
       productsList={productsMaster || []}
+      productHomes={productHomes || []}
+      clusterConfigs={clusterConfigs || []}
     />
   );
 }

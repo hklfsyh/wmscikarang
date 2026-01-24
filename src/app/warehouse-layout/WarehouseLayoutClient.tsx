@@ -218,14 +218,33 @@ export default function WarehouseLayoutClient({
               // Get product home rule
               const homeRule = productHomes.find((h: any) => h.product_id === stock.products?.id);
               
-              // Check if product is in wrong cluster
-              const isWrongCluster = stock.cluster !== stock.products?.default_cluster;
+              // Check if product is in wrong location (product_homes range validation)
+              let isWrongLocation = false;
+              
+              if (homeRule) {
+                // Check if current location is outside the product home range
+                isWrongLocation = (
+                  homeRule.cluster_char !== stock.cluster ||
+                  lorong < homeRule.lorong_start ||
+                  lorong > homeRule.lorong_end ||
+                  baris < homeRule.baris_start ||
+                  baris > homeRule.baris_end
+                );
+              } else if (stock.products?.default_cluster) {
+                // Fallback to default_cluster if no product_homes rule
+                isWrongLocation = stock.cluster !== stock.products.default_cluster;
+              }
+              
+              // Check database status
+              if (stock.status === "salah-cluster") {
+                isWrongLocation = true;
+              }
 
-              // PRIORITY LOGIC: salah-cluster > receh > expired > release/hold
+              // PRIORITY LOGIC: in-transit > salah-cluster > receh > expired > release/hold
               if (isTransitLorong) {
                 color = "red"; // In Transit always red
-              } else if (isWrongCluster || stock.status === "salah-cluster") {
-                color = "red"; // Wrong cluster or salah-cluster status
+              } else if (isWrongLocation) {
+                color = "red"; // Wrong location based on product_homes or default_cluster
               } else if (stock.status === "receh" || stock.is_receh) {
                 color = "blue"; // Receh
               } else if (stock.status === "expired") {
@@ -247,7 +266,7 @@ export default function WarehouseLayoutClient({
                 bbPallet: stock.bb_produk,
                 qtyPallet: stock.qty_pallet,
                 qtyCarton: stock.qty_carton,
-                status: isWrongCluster ? "wrong_cluster" : stock.status,
+                status: isWrongLocation ? "wrong_cluster" : stock.status,
                 fefoStatus: stock.fefo_status,
                 isReceh: stock.is_receh,
                 colorCode: color,

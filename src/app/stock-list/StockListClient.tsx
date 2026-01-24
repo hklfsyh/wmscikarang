@@ -40,17 +40,74 @@ interface Warehouse {
   city_name: string;
 }
 
+interface ProductHome {
+  id: string;
+  product_id: string;
+  cluster_char: string;
+  lorong_start: number;
+  lorong_end: number;
+  baris_start: number;
+  baris_end: number;
+  max_pallet_per_location: number;
+}
+
+interface ClusterConfig {
+  id: string;
+  cluster_char: string;
+  cluster_name: string;
+  is_active: boolean;
+}
+
 export default function StockListClient({
   userProfile,
   warehouse,
   initialStock,
   productsList,
+  productHomes,
+  clusterConfigs,
 }: {
   userProfile: any;
   warehouse: Warehouse | null;
   initialStock: StockItem[];
   productsList: Product[];
+  productHomes: ProductHome[];
+  clusterConfigs: ClusterConfig[];
 }) {
+  // Helper function: Check if stock is in wrong cluster/location based on product_homes
+  const isStockInWrongLocation = (item: StockItem): boolean => {
+    // Priority 1: Check if there's a product_homes rule for this product
+    const productHome = productHomes.find((h) => h.product_id === item.productId);
+    
+    if (productHome) {
+      // Check if current location is outside the product home range
+      const isOutsideHome = (
+        productHome.cluster_char !== item.cluster ||
+        parseInt(item.lorong) < productHome.lorong_start ||
+        parseInt(item.lorong) > productHome.lorong_end ||
+        parseInt(item.baris) < productHome.baris_start ||
+        parseInt(item.baris) > productHome.baris_end
+      );
+      
+      if (isOutsideHome) {
+        return true; // Wrong location based on product_homes
+      }
+    }
+    
+    // Priority 2: Fallback to default_cluster check if no product_homes rule
+    if (!productHome && item.productInfo?.defaultCluster) {
+      if (item.cluster !== item.productInfo.defaultCluster) {
+        return true; // Wrong cluster based on default_cluster
+      }
+    }
+    
+    // Priority 3: Check database status
+    if (item.status === 'salah-cluster') {
+      return true;
+    }
+    
+    return false; // Location is correct
+  };
+
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCluster, setFilterCluster] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -164,7 +221,8 @@ export default function StockListClient({
     const totalHold = data.filter((item) => item.fefoStatus === "hold").length;
     const totalRelease = data.filter((item) => item.fefoStatus === "release").length;
     const totalReceh = data.filter((item) => item.status === "receh" || item.isReceh).length;
-    const totalSalahCluster = data.filter((item) => item.status === "salah-cluster").length;
+    // Salah Cluster: cek dari status database ATAU product_homes range ATAU default_cluster
+    const totalSalahCluster = data.filter((item) => isStockInWrongLocation(item)).length;
     const totalQtyCarton = data.reduce((sum, item) => sum + item.qtyCarton, 0);
 
     const now = new Date();
@@ -178,10 +236,10 @@ export default function StockListClient({
     return { totalItems, totalExpired, totalHold, totalRelease, totalReceh, totalSalahCluster, totalQtyCarton, expiringSoon };
   }, [filteredAndSortedData]);
 
-  // Status Badge - PRIORITAS: salah-cluster > receh > release/hold
+  // Status Badge - PRIORITAS: salah-cluster > receh > expired > release/hold
   const getStatusBadge = (item: StockItem) => {
-    // Priority 1: Salah Cluster
-    if (item.status === 'salah-cluster') {
+    // Priority 1: Salah Cluster (status database OR product_homes range OR default_cluster)
+    if (isStockInWrongLocation(item)) {
       return (
         <span className="px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap bg-red-100 text-red-600">
           SALAH CLUSTER
@@ -236,7 +294,8 @@ export default function StockListClient({
   const getConditionBadges = (item: StockItem) => {
     const badges = [];
     
-    if (item.status === 'salah-cluster') {
+    // Cek salah cluster dari status database ATAU product_homes range ATAU default_cluster
+    if (isStockInWrongLocation(item)) {
       badges.push(
         <span key="salah-cluster" className="px-2 py-1 rounded text-xs font-semibold whitespace-nowrap bg-red-100 text-red-600">
           SALAH CLUSTER
@@ -403,10 +462,11 @@ export default function StockListClient({
                   className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
                 >
                   <option value="all">Semua</option>
-                  <option value="A">Cluster A</option>
-                  <option value="B">Cluster B</option>
-                  <option value="C">Cluster C</option>
-                  <option value="D">Cluster D</option>
+                  {clusterConfigs.map((cluster) => (
+                    <option key={cluster.id} value={cluster.cluster_char}>
+                      Cluster {cluster.cluster_char}
+                    </option>
+                  ))}
                 </select>
               </div>
 

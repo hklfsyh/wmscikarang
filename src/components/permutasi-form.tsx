@@ -112,30 +112,6 @@ export function PermutasiForm({
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fungsi validasi lokasi tujuan berdasarkan product_homes dan cluster_cell_overrides
-  const isTargetLocationValid = (productId: string, cluster: string, lorong: number, baris: number) => {
-    // Cek 1: Validasi berdasarkan product_homes (range lorong & baris)
-    const rule = productHomes.find((h: any) => h.product_id === productId);
-    if (rule) {
-      const withinRange = (
-        rule.cluster_char === cluster &&
-        lorong >= rule.lorong_start &&
-        lorong <= rule.lorong_end &&
-        baris >= rule.baris_start &&
-        baris <= rule.baris_end
-      );
-      if (!withinRange) return false; // Gagal validasi product_homes
-    }
-
-    // Cek 2: Validasi berdasarkan cluster_cell_overrides (batas baris per lorong)
-    const maxBaris = getBarisCountForLorong(cluster, lorong);
-    if (baris > maxBaris) {
-      return false; // Baris melebihi kapasitas lorong
-    }
-
-    return true; // Lolos semua validasi
-  };
-
   const showNotification = (title: string, message: string, type: "success" | "error" | "warning") => {
     setNotificationTitle(title);
     setNotificationMessage(message);
@@ -214,8 +190,10 @@ export function PermutasiForm({
           reason: "in-transit",
         });
       } else {
-        // Check if wrong cluster
-        const isWrongCluster = stock.cluster !== stock.products?.default_cluster;
+        // Check if wrong cluster (only if default_cluster is defined)
+        const isWrongCluster = 
+          stock.products?.default_cluster && 
+          stock.cluster !== stock.products?.default_cluster;
         if (isWrongCluster) {
           result.push({
             id: stock.id,
@@ -291,6 +269,14 @@ export function PermutasiForm({
 
   // Cluster & Location Options
   const clusterOptions = useMemo(() => clusterConfigs.filter((c: any) => c.is_active).map((c: any) => c.cluster_char), [clusterConfigs]);
+
+  // Dynamic lorong options for Free Move filter based on selected cluster
+  const freeMoveLorongFilterOptions = useMemo(() => {
+    if (!freeMoveFilterCluster) return [];
+    const config = clusterConfigs.find((c: any) => c.cluster_char === freeMoveFilterCluster);
+    if (!config) return [];
+    return Array.from({ length: config.default_lorong_count }, (_, i) => `L${i + 1}`);
+  }, [freeMoveFilterCluster, clusterConfigs]);
 
   const lorongOptions = useMemo(() => {
     if (!manualLocation.clusterChar) return [];
@@ -635,11 +621,8 @@ export function PermutasiForm({
     const barisNum = parseInt(target.baris.replace('B', ''));
     const levelNum = parseInt(target.level.replace('P', ''));
 
-    // Validasi Tambahan sebelum kirim ke Server
-    if (!isTargetLocationValid(itemToMove.products.id, target.clusterChar, lorongNum, barisNum)) {
-      error(`Lokasi tujuan tidak sesuai dengan aturan Cluster produk ini!`);
-      return;
-    }
+    // Note: Tidak ada blocking validation - Permutasi Bebas memang bebas!
+    // Validasi hanya untuk informasi di UI (badge, warning), bukan untuk blocking
 
     setIsSubmitting(true);
     try {
@@ -760,12 +743,8 @@ export function PermutasiForm({
         };
       }
 
-      // Validasi lokasi tujuan
-      if (!isTargetLocationValid(stock.products.id, targetLoc.cluster, targetLoc.lorong, targetLoc.baris)) {
-        failedItems.push(stock.products.product_name);
-        failedCount++;
-        continue;
-      }
+      // Note: Tidak ada blocking validation - Permutasi Bebas memang bebas!
+      // User sudah review di modal, langsung execute saja
 
       const res = await moveStockAction(
         warehouseId,
@@ -912,9 +891,10 @@ export function PermutasiForm({
                     value={freeMoveFilterLorong}
                     onChange={(e) => setFreeMoveFilterLorong(e.target.value)}
                     className="px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-blue-500 focus:outline-none"
+                    disabled={!freeMoveFilterCluster}
                   >
                     <option value="">Semua Lorong</option>
-                    {freeMoveFilterCluster && Array.from({ length: 20 }, (_, i) => `L${i + 1}`).map((l) => (
+                    {freeMoveLorongFilterOptions.map((l) => (
                       <option key={l} value={l}>{l}</option>
                     ))}
                   </select>
@@ -951,8 +931,9 @@ export function PermutasiForm({
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {freeMove_FilteredStocks.slice(0, 50).map((stock: any) => {
-                        const homeCheck = isOutsideProductHome(stock.product_id, stock.cluster, stock.lorong, stock.baris);
-                        const isWrongCluster = stock.cluster !== stock.products?.default_cluster;
+                        // For Free Move tab, don't show wrong cluster warning
+                        // This is "Permutasi Bebas" - truly free movement
+                        const isWrongCluster = false; // Always false for free move
                         
                         return (
                           <tr key={stock.id} className="hover:bg-blue-50 transition-colors">
@@ -979,16 +960,9 @@ export function PermutasiForm({
                               </span>
                             </td>
                             <td className="px-3 py-3 text-center">
-                              <div className="flex flex-col items-center gap-1">
-                                <span className={`inline-block px-2 py-1 rounded-lg text-xs font-bold ${
-                                  isWrongCluster ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"
-                                }`}>
-                                  {stock.cluster}-L{stock.lorong}-B{stock.baris}-P{stock.level}
-                                </span>
-                                {isWrongCluster && (
-                                  <span className="text-xs text-red-600">⚠️ Salah Cluster</span>
-                                )}
-                              </div>
+                              <span className="inline-block px-2 py-1 rounded-lg text-xs font-bold bg-gray-100 text-gray-800">
+                                {stock.cluster}-L{stock.lorong}-B{stock.baris}-P{stock.level}
+                              </span>
                             </td>
                             <td className="px-3 py-3 text-center">
                               <button
@@ -1635,6 +1609,59 @@ export function PermutasiForm({
                   <strong>Alasan:</strong> {moveReason}
                 </p>
               </div>
+              
+              {/* Warning jika bukan cluster yang seharusnya */}
+              {(() => {
+                const targetCluster = autoRecommend ? recommendedLocation?.clusterChar : manualLocation.clusterChar;
+                const homeCluster = itemToMove.products.default_cluster;
+                
+                // Cek product home rules
+                const productHomeRule = productHomes.find((h: any) => h.product_id === itemToMove.products.id);
+                const targetLorong = autoRecommend 
+                  ? parseInt(recommendedLocation?.lorong.replace('L', '') || '0')
+                  : parseInt(manualLocation.lorong.replace('L', ''));
+                const targetBaris = autoRecommend
+                  ? parseInt(recommendedLocation?.baris.replace('B', '') || '0')
+                  : parseInt(manualLocation.baris.replace('B', ''));
+                
+                const isOutsideHome = productHomeRule && (
+                  productHomeRule.cluster_char !== targetCluster ||
+                  targetLorong < productHomeRule.lorong_start ||
+                  targetLorong > productHomeRule.lorong_end ||
+                  targetBaris < productHomeRule.baris_start ||
+                  targetBaris > productHomeRule.baris_end
+                );
+                
+                const isWrongCluster = homeCluster && targetCluster !== homeCluster;
+                
+                if (isOutsideHome || isWrongCluster) {
+                  return (
+                    <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3 mb-4">
+                      <div className="flex items-start gap-2">
+                        <span className="text-2xl">⚠️</span>
+                        <div className="flex-1 text-sm">
+                          <p className="font-bold text-amber-800 mb-1">Peringatan:</p>
+                          {isWrongCluster && (
+                            <p className="text-amber-700">
+                              • Lokasi tujuan di <strong>Cluster {targetCluster}</strong>, sedangkan home cluster produk ini adalah <strong>Cluster {homeCluster}</strong>
+                            </p>
+                          )}
+                          {isOutsideHome && (
+                            <p className="text-amber-700 mt-1">
+                              • Lokasi di luar Product Home (seharusnya: {productHomeRule.cluster_char}-L{productHomeRule.lorong_start}-{productHomeRule.lorong_end}, B{productHomeRule.baris_start}-{productHomeRule.baris_end})
+                            </p>
+                          )}
+                          <p className="text-amber-600 font-semibold mt-2">
+                            Yakin tetap ingin memindahkan?
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+              
               <div className="flex gap-3">
                 <button onClick={() => setShowConfirmModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300">
                   Batal
