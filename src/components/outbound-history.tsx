@@ -708,7 +708,7 @@ export function OutboundHistoryPage({
                   <div className="text-sm">
                     <span className="text-gray-600">Dibuat pada:</span>
                     <p className="font-semibold text-gray-900">
-                      {new Date(selectedItem.createdAt).toLocaleString(
+                      {new Date(selectedItem.created_at).toLocaleString(
                         "id-ID",
                         {
                           dateStyle: "full",

@@ -76,25 +76,28 @@ export default function StockListClient({
   // Helper function: Check if stock is in wrong cluster/location based on product_homes
   const isStockInWrongLocation = (item: StockItem): boolean => {
     // Priority 1: Check if there's a product_homes rule for this product
-    const productHome = productHomes.find((h) => h.product_id === item.productId);
+    // IMPORTANT: Product can have MULTIPLE homes, check if location matches ANY of them
+    const productHomesForProduct = productHomes.filter((h) => h.product_id === item.productId);
     
-    if (productHome) {
-      // Check if current location is outside the product home range
-      const isOutsideHome = (
-        productHome.cluster_char !== item.cluster ||
-        parseInt(item.lorong) < productHome.lorong_start ||
-        parseInt(item.lorong) > productHome.lorong_end ||
-        parseInt(item.baris) < productHome.baris_start ||
-        parseInt(item.baris) > productHome.baris_end
-      );
+    if (productHomesForProduct.length > 0) {
+      // Check if current location matches ANY of the product homes
+      const isInAnyHome = productHomesForProduct.some((home) => {
+        return (
+          home.cluster_char === item.cluster &&
+          parseInt(item.lorong) >= home.lorong_start &&
+          parseInt(item.lorong) <= home.lorong_end &&
+          parseInt(item.baris) >= home.baris_start &&
+          parseInt(item.baris) <= home.baris_end
+        );
+      });
       
-      if (isOutsideHome) {
-        return true; // Wrong location based on product_homes
+      if (!isInAnyHome) {
+        return true; // Wrong location - not in any of the product homes
       }
     }
     
     // Priority 2: Fallback to default_cluster check if no product_homes rule
-    if (!productHome && item.productInfo?.defaultCluster) {
+    if (productHomesForProduct.length === 0 && item.productInfo?.defaultCluster) {
       if (item.cluster !== item.productInfo.defaultCluster) {
         return true; // Wrong cluster based on default_cluster
       }

@@ -248,7 +248,9 @@ Table product_homes {
   updated_at timestamp [default: `now()`]
   
   indexes {
-    (warehouse_id, product_id, cluster_char) [unique]
+    // NON-UNIQUE index for query performance only
+    // Allows one product to have MULTIPLE homes in same cluster (as long as ranges don't overlap)
+    (warehouse_id, product_id, cluster_char) [name: 'idx_product_homes_lookup']
   }
   
   Note: '''
@@ -256,6 +258,11 @@ Table product_homes {
   CRUD: admin_cabang (warehouse sendiri)
   Tampil di: Master Data > Tab Product Home
   Di tabel: product_id (UUID), Di halaman: product_name (dari JOIN products)
+  
+  UPDATED 2026-01-25: Allow multiple homes per product in SAME cluster
+  - Product can have multiple homes in same cluster (non-overlapping ranges)
+  - Example: Aqua 5 Galon in E L14-20 B1-5 AND E L25-30 B1-3 (OK)
+  - Overlap validation done in application layer (product-home-editor.tsx)
   '''
 }
 

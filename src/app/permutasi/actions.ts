@@ -48,30 +48,29 @@ export async function moveStockAction(
 
     if (errFetch || !oldStock) throw new Error("Data stok tidak ditemukan.");
 
-    // 2. Fetch product_homes untuk validasi lokasi
-    const { data: productHome, error: errProductHome } = await supabase
+    // 2. Fetch ALL product_homes untuk validasi lokasi (product can have multiple homes)
+    const { data: productHomes, error: errProductHome } = await supabase
       .from("product_homes")
       .select("cluster_char, lorong_start, lorong_end, baris_start, baris_end")
       .eq("product_id", oldStock.product_id)
       .eq("warehouse_id", warehouseId)
-      .eq("is_active", true)
-      .maybeSingle();
+      .eq("is_active", true);
 
     // 3. Tentukan status berdasarkan product_homes range
     let newStatus = oldStock.status; // Default: pertahankan status lama
     
-    // Check if target location is outside product_homes range
-    if (productHome) {
-      const isOutsideHome = (
-        productHome.cluster_char !== targetLoc.cluster ||
-        targetLoc.lorong < productHome.lorong_start ||
-        targetLoc.lorong > productHome.lorong_end ||
-        targetLoc.baris < productHome.baris_start ||
-        targetLoc.baris > productHome.baris_end
-      );
+    // Check if target location matches ANY of the product homes
+    if (productHomes && productHomes.length > 0) {
+      const isInAnyHome = productHomes.some((home: any) => (
+        home.cluster_char === targetLoc.cluster &&
+        targetLoc.lorong >= home.lorong_start &&
+        targetLoc.lorong <= home.lorong_end &&
+        targetLoc.baris >= home.baris_start &&
+        targetLoc.baris <= home.baris_end
+      ));
       
-      if (isOutsideHome) {
-        newStatus = 'salah-cluster'; // Wrong location
+      if (!isInAnyHome) {
+        newStatus = 'salah-cluster'; // Wrong location - not in any home
       } else if (oldStock.status === 'salah-cluster') {
         // If moving back to correct location from wrong cluster, restore to release
         newStatus = 'release';

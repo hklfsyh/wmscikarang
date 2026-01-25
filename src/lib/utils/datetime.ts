@@ -3,30 +3,34 @@
  */
 
 /**
- * Get current datetime in Indonesian timezone (WIB/UTC+7)
- * Returns ISO string format adjusted to Indonesian time
+ * Get current datetime in ISO string format using browser's local time
+ * No timezone conversion - uses the exact time shown in browser/sidebar
  */
 export function getIndonesianDateTime(): string {
   const now = new Date();
-  // Convert to Indonesian timezone (UTC+7)
-  const indonesianTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-  return indonesianTime.toISOString();
+  // Return ISO string directly without timezone manipulation
+  // This ensures the time saved matches what user sees in browser/sidebar
+  return now.toISOString();
 }
 
 /**
- * Get today's date string in YYYYMMDD format (Indonesian timezone)
+ * Get today's date string in YYYYMMDD format using browser's local time
  */
 export function getIndonesianDateString(): string {
   const now = new Date();
-  const indonesianTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-  return indonesianTime.toISOString().slice(0, 10).replace(/-/g, "");
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}${month}${day}`;
 }
 
 /**
- * Get today's date in YYYY-MM-DD format (Indonesian timezone)
+ * Get today's date in YYYY-MM-DD format using browser's local time
  */
 export function getIndonesianDate(): string {
   const now = new Date();
-  const indonesianTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-  return indonesianTime.toISOString().slice(0, 10);
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }

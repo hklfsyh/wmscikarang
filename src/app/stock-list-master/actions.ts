@@ -293,6 +293,42 @@ export async function createProductHome(data: {
   is_active: boolean;
 }) {
   const supabase = await createClient();
+  
+  // Check for overlapping locations with same product (application-level validation)
+  const { data: existing, error: checkError } = await supabase
+    .from("product_homes")
+    .select("*")
+    .eq("warehouse_id", data.warehouse_id)
+    .eq("product_id", data.product_id)
+    .eq("cluster_char", data.cluster_char);
+  
+  if (checkError) throw new Error(`Validation error: ${checkError.message}`);
+  
+  // Check if new range overlaps with any existing home
+  if (existing && existing.length > 0) {
+    for (const home of existing) {
+      const lorongOverlap = 
+        (data.lorong_start >= home.lorong_start && data.lorong_start <= home.lorong_end) ||
+        (data.lorong_end >= home.lorong_start && data.lorong_end <= home.lorong_end) ||
+        (data.lorong_start <= home.lorong_start && data.lorong_end >= home.lorong_end);
+      
+      if (lorongOverlap) {
+        const barisOverlap = 
+          (data.baris_start >= home.baris_start && data.baris_start <= home.baris_end) ||
+          (data.baris_end >= home.baris_start && data.baris_end <= home.baris_end) ||
+          (data.baris_start <= home.baris_start && data.baris_end >= home.baris_end);
+        
+        if (barisOverlap) {
+          throw new Error(
+            `Lokasi overlap dengan home yang sudah ada! ` +
+            `Existing: Cluster ${home.cluster_char}, L${home.lorong_start}-${home.lorong_end}, B${home.baris_start}-${home.baris_end}. ` +
+            `Pilih range yang tidak overlap.`
+          );
+        }
+      }
+    }
+  }
+  
   const { data: newProductHome, error } = await supabase
     .from("product_homes")
     .insert({
@@ -310,7 +346,30 @@ export async function createProductHome(data: {
     .select()
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    // Log full error for debugging
+    console.error('Product Home Insert Error:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    });
+    
+    // Provide user-friendly error message
+    if (error.message.includes('unique') || error.message.includes('duplicate key')) {
+      throw new Error(
+        `❌ Database Constraint Error!\n\n` +
+        `Error: ${error.message}\n\n` +
+        `Troubleshooting:\n` +
+        `1. Pastikan migration sudah dijalankan\n` +
+        `2. Restart Supabase connection/pooler\n` +
+        `3. Check indexes: SELECT indexname FROM pg_indexes WHERE tablename = 'product_homes';\n\n` +
+        `Jika masih error, constraint mungkin ada dengan nama lain. Share full error ke developer.`
+      );
+    }
+    throw new Error(`Database error: ${error.message}`);
+  }
+  
   revalidatePath("/stock-list-master");
   revalidatePath("/inbound");
   revalidatePath("/npl");

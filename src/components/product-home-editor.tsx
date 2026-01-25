@@ -93,13 +93,11 @@ export default function ProductHomeEditor({
   };
 
   // Validation function to check if location (lorong/baris ranges) already exists in the same cluster
+  // UPDATED: Allow same product to have multiple homes in different (non-overlapping) locations
   const validateLocationConflict = (currentId: string | null = null): boolean => {
     const conflicts = productHomes.filter((ph) => {
       // Skip checking against itself when editing
       if (currentId && ph.id === currentId) return false;
-      
-      // Skip if same product (same product can have multiple non-overlapping homes, but we'll allow it for now)
-      // Actually, we should prevent overlap even for same product to avoid confusion
       
       // Check if same cluster
       if (ph.clusterChar !== formData.clusterChar) return false;
@@ -129,15 +127,19 @@ export default function ProductHomeEditor({
       
       if (isSameProduct) {
         error(
-          `Produk ini sudah memiliki home di lokasi yang overlap!\n` +
-          `Cluster ${conflict.clusterChar}, Lorong ${conflict.lorongStart}-${conflict.lorongEnd}, Baris ${conflict.barisStart}-${conflict.barisEnd}\n` +
-          `Gunakan lokasi yang tidak overlap atau edit assignment yang sudah ada.`
+          `❌ Produk ini sudah memiliki home di lokasi yang OVERLAP!\n\n` +
+          `Existing Home: Cluster ${conflict.clusterChar}, Lorong ${conflict.lorongStart}-${conflict.lorongEnd}, Baris ${conflict.barisStart}-${conflict.barisEnd}\n` +
+          `Your Input: Cluster ${formData.clusterChar}, Lorong ${formData.lorongStart}-${formData.lorongEnd}, Baris ${formData.barisStart}-${formData.barisEnd}\n\n` +
+          `✅ TIP: Produk boleh punya BANYAK home di lokasi BERBEDA (non-overlap).\n` +
+          `Contoh: Aqua 5 Galon di E L14-20 B1-5 DAN D L1-24 B1-6 (OK ✓)\n` +
+          `Contoh: Aqua 5 Galon di E L14-20 B1-5 DAN E L18-25 B3-8 (OVERLAP ✗)`
         );
       } else {
         error(
-          `Lokasi sudah digunakan oleh produk lain!\n` +
-          `Produk: ${productName}\n` +
-          `Cluster ${conflict.clusterChar}, Lorong ${conflict.lorongStart}-${conflict.lorongEnd}, Baris ${conflict.barisStart}-${conflict.barisEnd}`
+          `❌ Lokasi sudah digunakan oleh produk lain!\n\n` +
+          `Existing: ${productName}\n` +
+          `Cluster ${conflict.clusterChar}, Lorong ${conflict.lorongStart}-${conflict.lorongEnd}, Baris ${conflict.barisStart}-${conflict.barisEnd}\n\n` +
+          `Pilih lokasi yang tidak overlap dengan produk lain.`
         );
       }
       return false;

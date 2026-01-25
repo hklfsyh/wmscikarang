@@ -345,39 +345,46 @@ export function NplForm({
       return { locations: [], totalPalletsPlaced: 0, needsMultipleLocations: false };
     }
 
-    const productHome = selectedProduct ? productHomes.find((h: any) => h.product_id === selectedProduct.id) : null;
+    // Get ALL product homes for this product in this cluster (can have multiple)
+    const productHomesInCluster = selectedProduct 
+      ? productHomes.filter((h: any) => h.product_id === selectedProduct.id && h.cluster_char === clusterChar)
+      : [];
 
-    const lorongStart = productHome ? productHome.lorong_start : 1;
-    const lorongEnd = productHome ? productHome.lorong_end : clusterConfig.default_lorong_count;
-
-    // PHASE 1: Primary product home locations
-    for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
-      if (remainingPallets === 0) break;
-      // Skip In Transit area (Cluster C, Lorong 8-11)
-      if (clusterChar === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
-
-      // Get baris count DINAMIS dari override
-      const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
-      const barisStart = productHome ? productHome.baris_start : 1;
-      const barisEnd = productHome ? Math.min(productHome.baris_end, maxBaris) : maxBaris;
-
-      for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
+    // PHASE 1: Iterate through ALL product homes in this cluster
+    if (productHomesInCluster.length > 0) {
+      for (const productHome of productHomesInCluster) {
         if (remainingPallets === 0) break;
 
-        // Get pallet capacity DINAMIS dari override
-        const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
-        const productMaxPallet = productHome?.max_pallet_per_location || 999;
-        const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
+        const lorongStart = productHome.lorong_start;
+        const lorongEnd = productHome.lorong_end;
 
-        for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
+        for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
           if (remainingPallets === 0) break;
+          // Skip In Transit area (Cluster C, Lorong 8-11)
+          if (clusterChar === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
 
-          const lorong = `L${lorongNum}`;
-          const baris = `B${barisNum}`;
-          const level = `P${palletNum}`;
+          // Get baris count DINAMIS dari override
+          const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
+          const barisStart = productHome.baris_start;
+          const barisEnd = Math.min(productHome.baris_end, maxBaris);
 
-          const locationExists = stockData.some(
-            (item: any) =>
+          for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
+            if (remainingPallets === 0) break;
+
+            // Get pallet capacity DINAMIS dari override
+            const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
+            const productMaxPallet = productHome.max_pallet_per_location || 999;
+            const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
+
+            for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
+              if (remainingPallets === 0) break;
+
+              const lorong = `L${lorongNum}`;
+              const baris = `B${barisNum}`;
+              const level = `P${palletNum}`;
+
+              const locationExists = stockData.some(
+                (item: any) =>
               item.warehouse_id === warehouseId &&
               item.cluster === clusterChar &&
               item.lorong === lorongNum &&
@@ -403,6 +410,63 @@ export function NplForm({
               isReceh: isLastPallet && remainingCartons > 0,
             });
             remainingPallets--;
+          }
+        } // close for palletNum
+      } // close for barisNum
+    } // close for lorongNum
+  } // close for productHome
+} else {
+      // FALLBACK: Product has NO homes in this cluster - use entire cluster range
+      const lorongStart = 1;
+      const lorongEnd = clusterConfig.default_lorong_count;
+
+      for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
+        if (remainingPallets === 0) break;
+        // Skip In Transit area (Cluster C, Lorong 8-11)
+        if (clusterChar === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
+
+        const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
+
+        for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
+          if (remainingPallets === 0) break;
+
+          const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
+
+          for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
+            if (remainingPallets === 0) break;
+
+            const lorong = `L${lorongNum}`;
+            const baris = `B${barisNum}`;
+            const level = `P${palletNum}`;
+
+            const locationExists = stockData.some(
+              (item: any) =>
+                item.warehouse_id === warehouseId &&
+                item.cluster === clusterChar &&
+                item.lorong === lorongNum &&
+                item.baris === barisNum &&
+                item.level === palletNum
+            );
+
+            if (!locationExists) {
+              const isLastPallet = remainingPallets === 1;
+              const qtyForThisLocation =
+                isLastPallet && shouldAttachReceh
+                  ? qtyPerPalletStd + remainingCartons
+                  : isLastPallet && remainingCartons > 0 && !shouldAttachReceh
+                  ? remainingCartons
+                  : qtyPerPalletStd;
+
+              locations.push({
+                clusterChar,
+                lorong,
+                baris,
+                level,
+                qtyCarton: qtyForThisLocation,
+                isReceh: isLastPallet && remainingCartons > 0,
+              });
+              remainingPallets--;
+            }
           }
         }
       }

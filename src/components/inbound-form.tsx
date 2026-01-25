@@ -332,15 +332,16 @@ export function InboundForm({
     const product = getProductByCode(productCode);
     if (!product) return null;
 
-    const home = productHomes.find((h) => h.product_id === product.id);
-    if (!home) return null;
+    // Product can have MULTIPLE homes - return all of them
+    const homes = productHomes.filter((h) => h.product_id === product.id);
+    if (homes.length === 0) return null;
 
-    return {
+    return homes.map(home => ({
       clusterChar: home.cluster_char,
       lorongRange: [home.lorong_start, home.lorong_end] as [number, number],
       barisRange: [home.baris_start, home.baris_end] as [number, number],
       maxPalletPerLocation: home.max_pallet_per_location,
-    };
+    }));
   };
 
   const validateProductLocation = (
@@ -352,30 +353,21 @@ export function InboundForm({
     const validLocs = getValidLocationsForProduct(productCode);
     if (!validLocs) return { isValid: true }; // Jika tidak ada home, boleh di mana saja
 
-    if (validLocs.clusterChar !== clusterChar) {
-      return {
-        isValid: false,
-        message: "Cluster tidak sesuai dengan product home",
-      };
-    }
+    // Check if location matches ANY of the product homes
+    const matchesAnyHome = validLocs.some(loc => {
+      return (
+        loc.clusterChar === clusterChar &&
+        lorongNum >= loc.lorongRange[0] &&
+        lorongNum <= loc.lorongRange[1] &&
+        barisNum >= loc.barisRange[0] &&
+        barisNum <= loc.barisRange[1]
+      );
+    });
 
-    if (
-      lorongNum < validLocs.lorongRange[0] ||
-      lorongNum > validLocs.lorongRange[1]
-    ) {
+    if (!matchesAnyHome) {
       return {
         isValid: false,
-        message: "Lorong tidak sesuai dengan product home",
-      };
-    }
-
-    if (
-      barisNum < validLocs.barisRange[0] ||
-      barisNum > validLocs.barisRange[1]
-    ) {
-      return {
-        isValid: false,
-        message: "Baris tidak sesuai dengan product home",
+        message: "Lokasi tidak sesuai dengan product home yang tersedia",
       };
     }
 
@@ -804,12 +796,20 @@ export function InboundForm({
     }
 
     // AUTO MODE: If product has home assignment, limit to allowed lorong range
-    if (
-      productValidLocations &&
-      productValidLocations.clusterChar === targetCluster
-    ) {
-      const [start, end] = productValidLocations.lorongRange;
-      return Array.from({ length: end - start + 1 }, (_, i) => `L${start + i}`);
+    if (productValidLocations && productValidLocations.length > 0) {
+      const homesInCluster = productValidLocations.filter(loc => loc.clusterChar === targetCluster);
+      
+      if (homesInCluster.length > 0) {
+        // Collect all lorong from all homes in this cluster
+        const lorongSet = new Set<number>();
+        homesInCluster.forEach(home => {
+          const [start, end] = home.lorongRange;
+          for (let l = start; l <= end; l++) {
+            lorongSet.add(l);
+          }
+        });
+        return Array.from(lorongSet).sort((a, b) => a - b).map(l => `L${l}`);
+      }
     }
 
     return Array.from(
@@ -873,16 +873,24 @@ export function InboundForm({
     }
 
     // AUTO MODE: If product has home assignment, limit to allowed baris range
-    if (
-      productValidLocations &&
-      productValidLocations.clusterChar === targetCluster
-    ) {
-      const [start, end] = productValidLocations.barisRange;
-      const maxBaris = Math.min(end, barisCount);
-      return Array.from(
-        { length: maxBaris - start + 1 },
-        (_, i) => `B${start + i}`
+    if (productValidLocations && productValidLocations.length > 0) {
+      const homesInCluster = productValidLocations.filter(
+        loc => loc.clusterChar === targetCluster &&
+              lorongNum >= loc.lorongRange[0] &&
+              lorongNum <= loc.lorongRange[1]
       );
+      
+      if (homesInCluster.length > 0) {
+        // Collect all baris from all homes that include this lorong
+        const barisSet = new Set<number>();
+        homesInCluster.forEach(home => {
+          const [start, end] = home.barisRange;
+          for (let b = start; b <= Math.min(end, barisCount); b++) {
+            barisSet.add(b);
+          }
+        });
+        return Array.from(barisSet).sort((a, b) => a - b).map(b => `B${b}`);
+      }
     }
 
     return Array.from({ length: barisCount }, (_, i) => `B${i + 1}`);
@@ -916,10 +924,24 @@ export function InboundForm({
       return Array.from({ length: palletCapacity }, (_, i) => `P${i + 1}`);
     }
 
-    // AUTO MODE: If product has max pallet limit, use minimum
-    const maxPallet = productValidLocations
-      ? Math.min(palletCapacity, productValidLocations.maxPalletPerLocation)
-      : palletCapacity;
+    // AUTO MODE: If product has max pallet limit, use minimum from matching homes
+    let maxPallet = palletCapacity;
+    
+    if (productValidLocations && productValidLocations.length > 0) {
+      const matchingHomes = productValidLocations.filter(
+        loc => loc.clusterChar === targetCluster &&
+              lorongNum >= loc.lorongRange[0] &&
+              lorongNum <= loc.lorongRange[1] &&
+              barisNum >= loc.barisRange[0] &&
+              barisNum <= loc.barisRange[1]
+      );
+      
+      if (matchingHomes.length > 0) {
+        // Use the max pallet from any matching home (take the highest limit)
+        const maxFromHomes = Math.max(...matchingHomes.map(h => h.maxPalletPerLocation));
+        maxPallet = Math.min(palletCapacity, maxFromHomes);
+      }
+    }
 
     return Array.from({ length: maxPallet }, (_, i) => `P${i + 1}`);
   }, [
@@ -1050,83 +1072,147 @@ export function InboundForm({
       };
     }
 
-    // Get valid locations for product (if exists)
+    // Get valid locations for product (if exists) - returns array of homes
     const validLocs = form.productCode
       ? getValidLocationsForProduct(form.productCode)
       : null;
 
-    // PHASE 1: Try to fill primary product home locations
-    const lorongStart = validLocs && validLocs.clusterChar === clusterChar ? validLocs.lorongRange[0] : 1;
-    const lorongEnd = validLocs && validLocs.clusterChar === clusterChar 
-      ? validLocs.lorongRange[1] 
-      : clusterConfig.default_lorong_count;
-    
-    for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
-      if (remainingPallets === 0) break;
+    // Filter homes for current cluster
+    const homesInCluster = validLocs?.filter(loc => loc.clusterChar === clusterChar) || [];
 
-      // Skip In Transit area in primary phase
-      if (isInTransitLocation(clusterChar, lorongNum)) {
-        continue;
-      }
-      
-      // Get baris count for this lorong (dynamic)
-      const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
-      
-      // Determine baris range
-      const barisStart = validLocs && validLocs.clusterChar === clusterChar ? validLocs.barisRange[0] : 1;
-      const barisEnd = validLocs && validLocs.clusterChar === clusterChar 
-        ? Math.min(validLocs.barisRange[1], maxBaris)
-        : maxBaris;
-      
-      for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
+    // PHASE 1: Try to fill primary product home locations
+    if (homesInCluster.length > 0) {
+      // Product has homes in this cluster - iterate through all of them
+      for (const home of homesInCluster) {
         if (remainingPallets === 0) break;
 
-        // Get pallet capacity for this cell (dynamic)
-        const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
-        const productMaxPallet = validLocs ? validLocs.maxPalletPerLocation : 999;
-        const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
+        const lorongStart = home.lorongRange[0];
+        const lorongEnd = home.lorongRange[1];
+        
+        for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
+          if (remainingPallets === 0) break;
 
-        // Find empty slots in this baris
-        const emptySlotsInBaris: RecommendedLocation[] = [];
-        for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
-          const lorong = `L${lorongNum}`;
-          const baris = `B${barisNum}`;
-          const level = `P${palletNum}`;
-
-          // Validate product can be placed here
-          if (form.productCode) {
-            const validation = validateProductLocation(form.productCode, clusterChar, lorongNum, barisNum);
-            if (!validation.isValid) {
-              continue;
-            }
+          // Skip In Transit area in primary phase
+          if (isInTransitLocation(clusterChar, lorongNum)) {
+            continue;
           }
           
-          // Check if location is empty (filter by current warehouse)
-          const locationExists = stockData.some(
-            (item: StockItem) =>
-              item.warehouse_id === warehouseId && // Filter by current warehouse
-              item.cluster === clusterChar &&
-              item.lorong === parseInt(lorong.replace('L', '')) &&
-              item.baris === parseInt(baris.replace('B', '')) &&
-              item.level === parseInt(level.replace('P', ''))
-          );
+          // Get baris count for this lorong (dynamic)
+          const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
+          
+          // Determine baris range
+          const barisStart = home.barisRange[0];
+          const barisEnd = Math.min(home.barisRange[1], maxBaris);
+          
+          for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
+            if (remainingPallets === 0) break;
 
-          if (!locationExists) {
-            emptySlotsInBaris.push({
-              clusterChar,
-              lorong,
-              baris,
-              level,
-              palletsCanFit: 1,
-            });
+            // Get pallet capacity for this cell (dynamic)
+            const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
+            const productMaxPallet = home.maxPalletPerLocation;
+            const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
+
+            // Find empty slots in this baris
+            const emptySlotsInBaris: RecommendedLocation[] = [];
+            for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
+              const lorong = `L${lorongNum}`;
+              const baris = `B${barisNum}`;
+              const level = `P${palletNum}`;
+
+              // Validate product can be placed here (already checked by home range, but double-check)
+              if (form.productCode) {
+                const validation = validateProductLocation(form.productCode, clusterChar, lorongNum, barisNum);
+                if (!validation.isValid) {
+                  continue;
+                }
+              }
+              
+              // Check if location is empty (filter by current warehouse)
+              const locationExists = stockData.some(
+                (item: StockItem) =>
+                  item.warehouse_id === warehouseId && // Filter by current warehouse
+                  item.cluster === clusterChar &&
+                  item.lorong === parseInt(lorong.replace('L', '')) &&
+                  item.baris === parseInt(baris.replace('B', '')) &&
+                  item.level === parseInt(level.replace('P', ''))
+              );
+
+              if (!locationExists) {
+                emptySlotsInBaris.push({
+                  clusterChar,
+                  lorong,
+                  baris,
+                  level,
+                  palletsCanFit: 1,
+                });
+              }
+            }
+
+            // Allocate empty slots
+            for (const slot of emptySlotsInBaris) {
+              if (remainingPallets === 0) break;
+              locations.push(slot);
+              remainingPallets--;
+            }
           }
         }
+      }
+    } else {
+      // Product has NO homes in this cluster - use entire cluster range
+      const lorongStart = 1;
+      const lorongEnd = clusterConfig.default_lorong_count;
+      
+      for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
+        if (remainingPallets === 0) break;
 
-        // Allocate empty slots
-        for (const slot of emptySlotsInBaris) {
+        // Skip In Transit area in primary phase
+        if (isInTransitLocation(clusterChar, lorongNum)) {
+          continue;
+        }
+        
+        // Get baris count for this lorong (dynamic)
+        const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
+        
+        for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
           if (remainingPallets === 0) break;
-          locations.push(slot);
-          remainingPallets--;
+
+          // Get pallet capacity for this cell (dynamic)
+          const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
+
+          // Find empty slots in this baris
+          const emptySlotsInBaris: RecommendedLocation[] = [];
+          for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
+            const lorong = `L${lorongNum}`;
+            const baris = `B${barisNum}`;
+            const level = `P${palletNum}`;
+
+            // Check if location is empty (filter by current warehouse)
+            const locationExists = stockData.some(
+              (item: StockItem) =>
+                item.warehouse_id === warehouseId &&
+                item.cluster === clusterChar &&
+                item.lorong === parseInt(lorong.replace('L', '')) &&
+                item.baris === parseInt(baris.replace('B', '')) &&
+                item.level === parseInt(level.replace('P', ''))
+            );
+
+            if (!locationExists) {
+              emptySlotsInBaris.push({
+                clusterChar,
+                lorong,
+                baris,
+                level,
+                palletsCanFit: 1,
+              });
+            }
+          }
+
+          // Allocate empty slots
+          for (const slot of emptySlotsInBaris) {
+            if (remainingPallets === 0) break;
+            locations.push(slot);
+            remainingPallets--;
+          }
         }
       }
     }

@@ -38,9 +38,27 @@ export default async function OutboundPage() {
       .eq("warehouse_id", profile.warehouse_id)
       .order("created_at", { ascending: false });
 
+    // Map database fields (snake_case) to component interface (camelCase)
+    const formattedHistory = (realHistory || []).map((item: any) => ({
+      id: item.id,
+      warehouse_id: item.warehouse_id,
+      transaction_code: item.transaction_code,
+      product_id: item.product_id,
+      bb_produk: item.bb_produk,
+      qty_carton: item.qty_carton,
+      locations: item.locations,
+      expedition_id: item.expedition_id,
+      driver_name: item.driver_name,
+      vehicle_number: item.vehicle_number,
+      processed_by: item.processed_by,
+      departure_time: item.departure_time,
+      notes: item.notes,
+      created_at: item.created_at,
+    }));
+
     return (
       <OutboundHistoryPage
-        history={realHistory || []}
+        history={formattedHistory}
         products={products || []}
       />
     );
@@ -55,11 +73,29 @@ export default async function OutboundPage() {
     .gte("created_at", todayStart)
     .order("created_at", { ascending: false });
 
+  // Map for consistency
+  const formattedTodayHistory = (historyToday || []).map((item: any) => ({
+    id: item.id,
+    warehouse_id: item.warehouse_id,
+    transaction_code: item.transaction_code,
+    product_id: item.product_id,
+    bb_produk: item.bb_produk,
+    qty_carton: item.qty_carton,
+    locations: item.locations,
+    expedition_id: item.expedition_id,
+    driver_name: item.driver_name,
+    vehicle_number: item.vehicle_number,
+    processed_by: item.processed_by,
+    departure_time: item.departure_time,
+    notes: item.notes,
+    created_at: item.created_at,
+  }));
+
   return (
     <OutboundForm
       products={products || []}
       warehouseId={profile.warehouse_id || ""}
-      history={historyToday || []}
+      history={formattedTodayHistory}
     />
   );
 }

@@ -215,21 +215,23 @@ export default function WarehouseLayoutClient({
             if (stock) {
               let color: "green" | "yellow" | "blue" | "red" = "green";
               
-              // Get product home rule
-              const homeRule = productHomes.find((h: any) => h.product_id === stock.products?.id);
+              // Get ALL product homes for this product (can have multiple homes)
+              const homeRules = productHomes.filter((h: any) => h.product_id === stock.products?.id);
               
               // Check if product is in wrong location (product_homes range validation)
               let isWrongLocation = false;
               
-              if (homeRule) {
-                // Check if current location is outside the product home range
-                isWrongLocation = (
-                  homeRule.cluster_char !== stock.cluster ||
-                  lorong < homeRule.lorong_start ||
-                  lorong > homeRule.lorong_end ||
-                  baris < homeRule.baris_start ||
-                  baris > homeRule.baris_end
-                );
+              if (homeRules.length > 0) {
+                // Check if current location matches ANY of the product homes
+                const isInAnyHome = homeRules.some((home: any) => (
+                  home.cluster_char === stock.cluster &&
+                  lorong >= home.lorong_start &&
+                  lorong <= home.lorong_end &&
+                  baris >= home.baris_start &&
+                  baris <= home.baris_end
+                ));
+                
+                isWrongLocation = !isInAnyHome;
               } else if (stock.products?.default_cluster) {
                 // Fallback to default_cluster if no product_homes rule
                 isWrongLocation = stock.cluster !== stock.products.default_cluster;
