@@ -70,10 +70,19 @@ export async function moveStockAction(
       ));
       
       if (!isInAnyHome) {
+        // Target location is OUTSIDE all product homes
         newStatus = 'salah-cluster'; // Wrong location - not in any home
-      } else if (oldStock.status === 'salah-cluster') {
-        // If moving back to correct location from wrong cluster, restore to release
-        newStatus = 'release';
+      } else {
+        // Target location is INSIDE at least one product home - correct location!
+        // Reset to appropriate status (release or receh, not salah-cluster)
+        if (oldStock.status === 'expired') {
+          newStatus = 'expired'; // Preserve expired status
+        } else if (oldStock.status === 'receh' || oldStock.is_receh) {
+          newStatus = 'receh'; // Preserve receh status
+        } else {
+          // Was salah-cluster or release - now in correct home, set to release
+          newStatus = 'release';
+        }
       }
       // If already expired or receh, keep those statuses even in correct location
       if (oldStock.status === 'expired') {

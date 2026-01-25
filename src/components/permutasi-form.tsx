@@ -1714,7 +1714,11 @@ return null;
                 if (!targetCluster || !targetLorong || !targetBaris) return null;
                 
                 const homeCheckResult = isOutsideProductHome(itemToMove.products.id, targetCluster, targetLorong, targetBaris);
-                const isWrongCluster = homeCluster && targetCluster !== homeCluster;
+                
+                // FIXED: Check if target cluster exists in ANY product home rules (not just default_cluster)
+                const productHomeRules = productHomes.filter((h: any) => h.product_id === itemToMove.products.id && h.is_active);
+                const hasHomeInTargetCluster = productHomeRules.some((rule: any) => rule.cluster_char === targetCluster);
+                const isWrongCluster = homeCluster && targetCluster !== homeCluster && !hasHomeInTargetCluster;
                 
                 if (homeCheckResult.isOutside || isWrongCluster) {
                   return (
