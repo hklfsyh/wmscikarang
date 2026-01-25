@@ -111,6 +111,8 @@ export function PermutasiForm({
   const [notificationType, setNotificationType] = useState<"success" | "error" | "warning">("success");
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedHistory, setSelectedHistory] = useState<any>(null);
 
   const showNotification = (title: string, message: string, type: "success" | "error" | "warning") => {
     setNotificationTitle(title);
@@ -190,11 +192,35 @@ export function PermutasiForm({
           reason: "in-transit",
         });
       } else {
-        // Check if wrong cluster (only if default_cluster is defined)
-        const isWrongCluster = 
-          stock.products?.default_cluster && 
-          stock.cluster !== stock.products?.default_cluster;
-        if (isWrongCluster) {
+        // Check if wrong location (ENHANCED: Check against Product Home range!)
+        // Priority 1: Check Product Home rules (lorong & baris range)
+        const productHomeRules = productHomes.filter((h: any) => 
+          h.product_id === stock.product_id && h.is_active
+        );
+        
+        let isWrongLocation = false;
+        
+        if (productHomeRules.length > 0) {
+          // Product has homes - check if current location is in ANY of them
+          const isInAnyHome = productHomeRules.some((rule: any) =>
+            rule.cluster_char === cluster &&
+            lorongNum >= rule.lorong_start &&
+            lorongNum <= rule.lorong_end &&
+            stock.baris >= rule.baris_start &&
+            stock.baris <= rule.baris_end
+          );
+          
+          // If NOT in any home = wrong location
+          isWrongLocation = !isInAnyHome;
+        } else {
+          // No product home rules - fallback to default cluster check
+          const isWrongCluster = 
+            stock.products?.default_cluster && 
+            cluster !== stock.products?.default_cluster;
+          isWrongLocation = isWrongCluster;
+        }
+        
+        if (isWrongLocation) {
           result.push({
             id: stock.id,
             cluster: stock.cluster,
@@ -212,7 +238,7 @@ export function PermutasiForm({
     });
 
     return result;
-  }, [initialStocks]);
+  }, [initialStocks, productHomes]);
 
   // Filter by tab
   const filteredStocks = useMemo(() => {
@@ -349,22 +375,23 @@ export function PermutasiForm({
   // Find recommended location for a product using database
   // excludeLocations: array of location strings "A-L1-B8-P1" yang sudah reserved dalam batch
   const findRecommendedLocation = (productId: string, productCode: string, stockData: any[], excludeLocations: Set<string> = new Set()): RecommendedLocation | null => {
-    // Cari aturan product home
-    const productHome = productHomes.find((h: any) => h.product_id === productId);
+    // Cari SEMUA product homes untuk produk ini (bisa ada multiple homes!)
+    const productHomesForProduct = productHomes.filter((h: any) => h.product_id === productId && h.is_active);
     
     // Cari produk untuk mendapatkan default cluster
     const product = stockData.find((s: any) => s.product_id === productId)?.products;
-    const cluster = productHome?.cluster_char || product?.default_cluster || "";
+    
+    // PHASE 1: Coba cari di semua product homes yang terdaftar
+    if (productHomesForProduct.length > 0) {
+      for (const productHome of productHomesForProduct) {
+        const cluster = productHome.cluster_char;
+        const clusterConfig = clusterConfigs.find((c: any) => c.cluster_char === cluster);
+        if (!clusterConfig) continue;
 
-    if (!cluster) return null;
+        const lorongStart = productHome.lorong_start;
+        const lorongEnd = productHome.lorong_end;
 
-    const clusterConfig = clusterConfigs.find((c: any) => c.cluster_char === cluster);
-    if (!clusterConfig) return null;
-
-    const lorongStart = productHome ? productHome.lorong_start : 1;
-    const lorongEnd = productHome ? productHome.lorong_end : clusterConfig.default_lorong_count;
-
-    for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
+        for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
       // Skip In Transit area (Cluster C, Lorong 8-11)
       if (cluster === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
 
@@ -400,11 +427,53 @@ export function PermutasiForm({
           if (!locationExists) {
             return { clusterChar: cluster, lorong, baris, level };
           }
+        } // close for palletNum
+      } // close for barisNum
+    } // close for lorongNum
+  } // close for productHome
+} else {
+  // PHASE 2: FALLBACK - Produk tidak punya product home, gunakan default cluster
+  const cluster = product?.default_cluster || "";
+  if (!cluster) return null;
+
+  const clusterConfig = clusterConfigs.find((c: any) => c.cluster_char === cluster);
+  if (!clusterConfig) return null;
+
+  const lorongStart = 1;
+  const lorongEnd = clusterConfig.default_lorong_count;
+
+  for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
+    // Skip In Transit area (Cluster C, Lorong 8-11)
+    if (cluster === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
+
+    // DINAMIS: Ambil batas baris lorong ini
+    const currentMaxBaris = getBarisCountForLorong(cluster, lorongNum);
+    const barisStart = 1;
+    const barisEnd = currentMaxBaris;
+
+    for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
+      // DINAMIS: Ambil kapasitas pallet level untuk sel ini
+      const maxPallet = getPalletCapacityForCell(cluster, lorongNum, barisNum);
+      const effectiveMaxPallet = maxPallet;
+
+      for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
+        const lorong = `L${lorongNum}`;
+        const baris = `B${barisNum}`;
+        const level = `P${palletNum}`;
+
+        const locationKey = `${cluster}-${lorong}-${baris}-${level}`;
+        if (excludeLocations.has(locationKey)) continue;
+
+        const occupied = isLocationOccupied(cluster, lorongNum, barisNum, palletNum, stockData);
+        if (!occupied) {
+          return { clusterChar: cluster, lorong, baris, level };
         }
       }
     }
+  }
+}
 
-    return null;
+return null;
   };
 
   // Check if target location is already occupied
@@ -421,9 +490,10 @@ export function PermutasiForm({
 
   // Check if target location is outside product home
   const isOutsideProductHome = (productId: string, cluster: string, lorong: number, baris: number): { isOutside: boolean; message: string } => {
-    const rule = productHomes.find((h: any) => h.product_id === productId);
+    // Cari SEMUA product homes untuk produk ini
+    const rules = productHomes.filter((h: any) => h.product_id === productId && h.is_active);
     
-    if (!rule) {
+    if (rules.length === 0) {
       // Tidak ada aturan, berarti bebas (tapi warning)
       return {
         isOutside: false,
@@ -431,7 +501,8 @@ export function PermutasiForm({
       };
     }
 
-    const isInHome = (
+    // Check apakah lokasi ada di SALAH SATU dari semua product homes
+    const isInAnyHome = rules.some((rule: any) => 
       rule.cluster_char === cluster &&
       lorong >= rule.lorong_start &&
       lorong <= rule.lorong_end &&
@@ -439,10 +510,15 @@ export function PermutasiForm({
       baris <= rule.baris_end
     );
 
-    if (!isInHome) {
+    if (!isInAnyHome) {
+      // Build daftar semua homes untuk pesan error
+      const homesList = rules.map((r: any) => 
+        `${r.cluster_char}-L${r.lorong_start}-${r.lorong_end}, B${r.baris_start}-${r.baris_end}`
+      ).join(" ATAU ");
+      
       return {
         isOutside: true,
-        message: `⚠️ PERINGATAN: Lokasi ini di luar Product Home (seharusnya: ${rule.cluster_char}-L${rule.lorong_start}-${rule.lorong_end}, B${rule.baris_start}-${rule.baris_end})`
+        message: `⚠️ PERINGATAN: Lokasi ini di luar Product Home (seharusnya: ${homesList})`
       };
     }
 
@@ -1135,6 +1211,7 @@ export function PermutasiForm({
                         <th className="px-3 py-3 text-center text-xs font-bold uppercase">Dari</th>
                         <th className="px-3 py-3 text-center text-xs font-bold uppercase">Ke</th>
                         <th className="px-3 py-3 text-left text-xs font-bold uppercase">Alasan</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold uppercase">Aksi</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
@@ -1177,6 +1254,17 @@ export function PermutasiForm({
                             </span>
                           </td>
                           <td className="px-3 py-3 text-sm text-gray-600">{h.reason}</td>
+                          <td className="px-3 py-3 text-center">
+                            <button
+                              onClick={() => {
+                                setSelectedHistory(h);
+                                setShowDetailModal(true);
+                              }}
+                              className="px-3 py-1 bg-violet-100 text-violet-700 rounded-lg text-xs font-semibold hover:bg-violet-200 transition-colors"
+                            >
+                              📋 Detail
+                            </button>
+                          </td>
                         </tr>
                         );
                       })}
@@ -1615,8 +1703,7 @@ export function PermutasiForm({
                 const targetCluster = autoRecommend ? recommendedLocation?.clusterChar : manualLocation.clusterChar;
                 const homeCluster = itemToMove.products.default_cluster;
                 
-                // Cek product home rules
-                const productHomeRule = productHomes.find((h: any) => h.product_id === itemToMove.products.id);
+                // Cek menggunakan function isOutsideProductHome yang sudah support multiple homes
                 const targetLorong = autoRecommend 
                   ? parseInt(recommendedLocation?.lorong.replace('L', '') || '0')
                   : parseInt(manualLocation.lorong.replace('L', ''));
@@ -1624,17 +1711,12 @@ export function PermutasiForm({
                   ? parseInt(recommendedLocation?.baris.replace('B', '') || '0')
                   : parseInt(manualLocation.baris.replace('B', ''));
                 
-                const isOutsideHome = productHomeRule && (
-                  productHomeRule.cluster_char !== targetCluster ||
-                  targetLorong < productHomeRule.lorong_start ||
-                  targetLorong > productHomeRule.lorong_end ||
-                  targetBaris < productHomeRule.baris_start ||
-                  targetBaris > productHomeRule.baris_end
-                );
+                if (!targetCluster || !targetLorong || !targetBaris) return null;
                 
+                const homeCheckResult = isOutsideProductHome(itemToMove.products.id, targetCluster, targetLorong, targetBaris);
                 const isWrongCluster = homeCluster && targetCluster !== homeCluster;
                 
-                if (isOutsideHome || isWrongCluster) {
+                if (homeCheckResult.isOutside || isWrongCluster) {
                   return (
                     <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3 mb-4">
                       <div className="flex items-start gap-2">
@@ -1646,9 +1728,9 @@ export function PermutasiForm({
                               • Lokasi tujuan di <strong>Cluster {targetCluster}</strong>, sedangkan home cluster produk ini adalah <strong>Cluster {homeCluster}</strong>
                             </p>
                           )}
-                          {isOutsideHome && (
+                          {homeCheckResult.isOutside && (
                             <p className="text-amber-700 mt-1">
-                              • Lokasi di luar Product Home (seharusnya: {productHomeRule.cluster_char}-L{productHomeRule.lorong_start}-{productHomeRule.lorong_end}, B{productHomeRule.baris_start}-{productHomeRule.baris_end})
+                              • {homeCheckResult.message}
                             </p>
                           )}
                           <p className="text-amber-600 font-semibold mt-2">
@@ -1705,6 +1787,106 @@ export function PermutasiForm({
               <button
                 onClick={() => setShowNotificationModal(false)}
                 className="w-full mt-4 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {showDetailModal && selectedHistory && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={(e) => handleBackdropClick(e, () => setShowDetailModal(false))}
+        >
+          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden">
+            <div className="bg-gradient-to-r from-violet-500 to-purple-600 px-6 py-4">
+              <h3 className="text-xl font-bold text-white">Detail Permutasi</h3>
+              <p className="text-violet-100 text-sm mt-1">{selectedHistory.transaction_code}</p>
+            </div>
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* Product Info */}
+              <div className="bg-violet-50 rounded-xl p-4">
+                <h4 className="font-bold text-violet-900 mb-3 flex items-center gap-2">
+                  <span className="text-xl">📦</span> Informasi Produk
+                </h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-600">Kode Produk:</span>
+                    <p className="font-bold text-gray-900">{selectedHistory.products?.product_code || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Nama Produk:</span>
+                    <p className="font-bold text-gray-900">{selectedHistory.products?.product_name || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Jumlah:</span>
+                    <p className="font-bold text-violet-700">{selectedHistory.qty_carton} Carton</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Status FEFO:</span>
+                    <p className="font-bold text-gray-900">
+                      {selectedHistory.stock_list?.fefo_status === 'release' ? '🟢 Release' : 
+                       selectedHistory.stock_list?.fefo_status === 'hold' ? '🟡 Hold' : '⚪ Unknown'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Location Movement */}
+              <div className="bg-gray-50 rounded-xl p-4">
+                <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <span className="text-xl">📍</span> Perpindahan Lokasi
+                </h4>
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 bg-red-50 border-2 border-red-200 rounded-lg p-3">
+                    <p className="text-xs text-red-600 font-semibold mb-1">DARI</p>
+                    <p className="font-mono font-bold text-red-700">
+                      {selectedHistory.from_cluster}-L{selectedHistory.from_lorong}-B{selectedHistory.from_baris}-P{selectedHistory.from_level}
+                    </p>
+                  </div>
+                  <span className="text-2xl">➡️</span>
+                  <div className="flex-1 bg-green-50 border-2 border-green-200 rounded-lg p-3">
+                    <p className="text-xs text-green-600 font-semibold mb-1">KE</p>
+                    <p className="font-mono font-bold text-green-700">
+                      {selectedHistory.to_cluster}-L{selectedHistory.to_lorong}-B{selectedHistory.to_baris}-P{selectedHistory.to_level}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Transaction Info */}
+              <div className="bg-blue-50 rounded-xl p-4">
+                <h4 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+                  <span className="text-xl">ℹ️</span> Informasi Transaksi
+                </h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Kode Transaksi:</span>
+                    <span className="font-mono font-bold text-gray-900">{selectedHistory.transaction_code}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Waktu Pemindahan:</span>
+                    <span className="font-bold text-gray-900">
+                      {new Date(selectedHistory.moved_at).toLocaleString('id-ID', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short'
+                      })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Alasan:</span>
+                    <span className="font-semibold text-gray-900">{selectedHistory.reason}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-gray-50 px-6 py-4 flex justify-end">
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="px-6 py-2 bg-violet-600 text-white rounded-xl font-semibold hover:bg-violet-700 transition-colors"
               >
                 Tutup
               </button>

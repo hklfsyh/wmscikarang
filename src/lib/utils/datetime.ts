@@ -3,14 +3,15 @@
  */
 
 /**
- * Get current datetime in ISO string format using browser's local time
- * No timezone conversion - uses the exact time shown in browser/sidebar
+ * Get current datetime in ISO string format in WIB timezone (UTC+7)
+ * Converts to Indonesia timezone to match sidebar display
  */
 export function getIndonesianDateTime(): string {
   const now = new Date();
-  // Return ISO string directly without timezone manipulation
-  // This ensures the time saved matches what user sees in browser/sidebar
-  return now.toISOString();
+  // Convert to WIB (UTC+7) by adding 7 hours to UTC time
+  const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+  // Return ISO string with WIB time
+  return wibTime.toISOString();
 }
 
 /**
