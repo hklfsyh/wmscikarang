@@ -2,6 +2,8 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { Navigation } from "@/components/navigation";
+import { deleteStockItems } from "./actions";
+import { useToast, ToastContainer } from "@/components/toast";
 
 // Interface sesuai data dari database
 interface StockItem {
@@ -73,6 +75,8 @@ export default function StockListClient({
   productHomes: ProductHome[];
   clusterConfigs: ClusterConfig[];
 }) {
+  const { toasts, showToast, removeToast } = useToast();
+  
   // Helper function: Check if stock is in wrong cluster/location based on product_homes
   const isStockInWrongLocation = (item: StockItem): boolean => {
     // Priority 1: Check if there's a product_homes rule for this product
@@ -121,6 +125,9 @@ export default function StockListClient({
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedStockIds, setSelectedStockIds] = useState<string[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const itemsPerPage = 10;
 
   // Get unique products for filter
@@ -373,6 +380,62 @@ export default function StockListClient({
     setShowDetailModal(true);
   };
 
+  // Checkbox selection handlers - only for admin_cabang
+  const isAdminCabang = userProfile?.role === "admin_cabang";
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedStockIds(currentData.map(item => item.id));
+    } else {
+      setSelectedStockIds([]);
+    }
+  };
+
+  const handleSelectItem = (stockId: string, checked: boolean) => {
+    if (checked) {
+      setSelectedStockIds(prev => [...prev, stockId]);
+    } else {
+      setSelectedStockIds(prev => prev.filter(id => id !== stockId));
+    }
+  };
+
+  const isAllSelected = currentData.length > 0 && selectedStockIds.length === currentData.length;
+  const isSomeSelected = selectedStockIds.length > 0 && selectedStockIds.length < currentData.length;
+
+  // Delete stock items
+  const handleDeleteClick = () => {
+    setShowDeleteConfirmModal(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    setIsDeleting(true);
+    try {
+      const result = await deleteStockItems(selectedStockIds);
+      
+      if (result.success) {
+        showToast(`✓ Berhasil menghapus ${result.deletedCount} data stock`, "success");
+        setSelectedStockIds([]);
+        setShowDeleteConfirmModal(false);
+        // Refresh halaman
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } else {
+        showToast(`✕ ${result.error}`, "error");
+      }
+    } catch (error) {
+      console.error("Error deleting stock:", error);
+      showToast("✕ Terjadi kesalahan saat menghapus data", "error");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Reset selection when page changes
+  useEffect(() => {
+    setSelectedStockIds([]);
+  }, [currentPage]);
+
   return (
     <>
       <Navigation userProfile={userProfile} />
@@ -531,6 +594,22 @@ export default function StockListClient({
               Menampilkan <span className="font-bold text-gray-800">{startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)}</span> dari{" "}
               <span className="font-bold text-gray-800">{filteredAndSortedData.length}</span> item
             </div>
+
+            {/* Delete Button - Only for admin-cabang */}
+            {isAdminCabang && selectedStockIds.length > 0 && (
+              <div className="mt-3 flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
+                <span className="text-xs sm:text-sm text-red-700 font-semibold">
+                  {selectedStockIds.length} item terpilih
+                </span>
+                <button
+                  onClick={handleDeleteClick}
+                  disabled={isDeleting}
+                  className="ml-auto px-3 py-1.5 bg-red-600 text-white text-xs sm:text-sm font-semibold rounded-lg hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isDeleting ? "Menghapus..." : "🗑️ Hapus Data"}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Stock Table */}
@@ -539,6 +618,21 @@ export default function StockListClient({
               <table className="w-full min-w-[650px]">
                 <thead className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white">
                   <tr>
+                    {isAdminCabang && (
+                      <th className="px-2 py-2 text-center text-[10px] sm:text-xs font-bold w-10">
+                        <input
+                          type="checkbox"
+                          checked={isAllSelected}
+                          ref={input => {
+                            if (input) {
+                              input.indeterminate = isSomeSelected;
+                            }
+                          }}
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                          className="w-4 h-4 cursor-pointer"
+                        />
+                      </th>
+                    )}
                     <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold w-8">No</th>
                     <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold">Produk</th>
                     <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-bold">Lokasi</th>
@@ -552,7 +646,7 @@ export default function StockListClient({
                 <tbody>
                   {currentData.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center">
+                      <td colSpan={isAdminCabang ? 9 : 8} className="px-4 py-8 text-center">
                         <div className="text-4xl mb-2">📦</div>
                         <p className="text-gray-500 text-sm font-semibold">Tidak ada data ditemukan</p>
                       </td>
@@ -563,8 +657,20 @@ export default function StockListClient({
                         key={item.id} 
                         className={`border-b border-gray-100 hover:bg-blue-50 transition-colors ${
                           item.fefoStatus === 'release' ? 'bg-green-50/30' : ''
+                        } ${
+                          selectedStockIds.includes(item.id) ? 'bg-blue-100' : ''
                         }`}
                       >
+                        {isAdminCabang && (
+                          <td className="px-2 py-1.5 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedStockIds.includes(item.id)}
+                              onChange={(e) => handleSelectItem(item.id, e.target.checked)}
+                              className="w-4 h-4 cursor-pointer"
+                            />
+                          </td>
+                        )}
                         <td className="px-2 py-1.5 text-[10px] sm:text-xs text-gray-600">{startIndex + index + 1}</td>
                         <td className="px-2 py-1.5">
                           <div className="font-semibold text-gray-800 text-[10px] sm:text-xs line-clamp-1">{item.productName || 'N/A'}</div>
@@ -638,6 +744,49 @@ export default function StockListClient({
             )}
           </div>
         </div>
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+              {/* Modal Header */}
+              <div className="bg-gradient-to-r from-red-500 to-red-600 p-4 sm:p-5 text-white rounded-t-2xl">
+                <div className="flex items-center gap-3">
+                  <div className="text-3xl">⚠️</div>
+                  <h2 className="text-lg sm:text-xl font-bold">Konfirmasi Hapus Data</h2>
+                </div>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-4 sm:p-5">
+                <p className="text-sm sm:text-base text-gray-700 mb-4">
+                  Apakah Anda yakin ingin menghapus <span className="font-bold text-red-600">{selectedStockIds.length} data stock</span> yang dipilih?
+                </p>
+                <p className="text-xs sm:text-sm text-gray-500 mb-4">
+                  ⚠️ Tindakan ini tidak dapat dibatalkan dan data akan dihapus permanen dari database.
+                </p>
+
+                {/* Action Buttons */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowDeleteConfirmModal(false)}
+                    disabled={isDeleting}
+                    className="flex-1 px-4 py-2.5 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors text-sm"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={handleConfirmDelete}
+                    disabled={isDeleting}
+                    className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm"
+                  >
+                    {isDeleting ? "Menghapus..." : "Ya, Hapus"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Detail Modal */}
         {showDetailModal && selectedItem && (
@@ -779,6 +928,7 @@ export default function StockListClient({
           </div>
         )}
       </div>
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </>
   );
 }
