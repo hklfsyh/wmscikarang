@@ -866,25 +866,25 @@ return null;
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 to-purple-100 p-4 md:p-8">
       <div className="max-w-5xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8">
+        <div className="bg-white rounded-xl sm:rounded-2xl shadow-xl p-4 sm:p-6 md:p-8">
           {/* Header */}
-          <div className="mb-6">
+          <div className="mb-4 sm:mb-6">
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-12 h-12 bg-violet-500 rounded-xl flex items-center justify-center">
-                <ArrowRightLeft className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-violet-500 rounded-lg sm:rounded-xl flex items-center justify-center">
+                <ArrowRightLeft className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Permutasi Stock</h1>
-                <p className="text-sm text-gray-600">Relokasi produk yang salah cluster atau berada di In Transit</p>
+                <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Permutasi Stock</h1>
+                <p className="text-xs sm:text-sm text-gray-600">Relokasi produk yang salah cluster atau berada di In Transit</p>
               </div>
             </div>
           </div>
 
           {/* Tabs */}
-          <div className="flex flex-wrap gap-2 mb-6 border-b border-gray-200 pb-4">
+          <div className="flex flex-wrap gap-2 mb-4 sm:mb-6 border-b border-gray-200 pb-3 sm:pb-4">
             <button
               onClick={() => setActiveTab("salah-cluster")}
-              className={`px-4 md:px-6 py-2 md:py-3 rounded-xl font-semibold transition-all text-sm md:text-base ${
+              className={`px-3 sm:px-4 md:px-6 py-2 md:py-3 rounded-lg sm:rounded-xl font-semibold transition-all text-xs sm:text-sm md:text-base ${
                 activeTab === "salah-cluster"
                   ? "bg-red-500 text-white shadow-lg"
                   : "bg-gray-100 text-gray-700 hover:bg-gray-200"

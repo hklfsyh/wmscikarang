@@ -139,6 +139,16 @@ interface MultiLocationRecommendation {
   needsMultipleLocations: boolean;
 }
 
+// Interface untuk Multi-BB Input
+interface MultiBBItem {
+  id: string; // unique id untuk tracking
+  bbProduk: string;
+  kdPlant: string;
+  expiredDate: string;
+  qtyPalletInput: string;
+  qtyCartonInput: string;
+}
+
 type InboundFormState = {
   ekspedisi: string;
   tanggal: string;
@@ -515,6 +525,10 @@ export function InboundForm({
   const [autoRecommend, setAutoRecommend] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Multi-BB Mode State
+  const [isMultiBBMode, setIsMultiBBMode] = useState(false);
+  const [multiBBItems, setMultiBBItems] = useState<MultiBBItem[]>([]);
+
   // --- INPUT HISTORY/AUTOCOMPLETE STATE ---
   const [driverHistory, setDriverHistory] = useState<string[]>([]);
   const [dnHistory, setDnHistory] = useState<string[]>([]);
@@ -665,6 +679,43 @@ export function InboundForm({
 
   const { totalPallets, remainingCartons, totalCartons, shouldAttachReceh } =
     useMemo(() => {
+      // MULTI-BB MODE: Calculate from all BB items
+      if (isMultiBBMode && multiBBItems.length > 0) {
+        let totalPalletFromBB = 0;
+        let totalCartonFromBB = 0;
+
+        multiBBItems.forEach((item) => {
+          const palletInput = Number(item.qtyPalletInput) || 0;
+          const cartonInput = Number(item.qtyCartonInput) || 0;
+          totalPalletFromBB += palletInput;
+          totalCartonFromBB += palletInput * qtyPerPalletStd + cartonInput;
+        });
+
+        if (qtyPerPalletStd === 0) {
+          return {
+            totalPallets: 0,
+            remainingCartons: totalCartonFromBB,
+            totalCartons: totalCartonFromBB,
+            shouldAttachReceh: false,
+          };
+        }
+
+        const calculatedPallets = Math.floor(totalCartonFromBB / qtyPerPalletStd);
+        const remaining = totalCartonFromBB % qtyPerPalletStd;
+
+        // SMART RECEH LOGIC: If remaining ≤ RECEH_THRESHOLD, attach to last pallet
+        const shouldAttach =
+          remaining > 0 && remaining <= RECEH_THRESHOLD && calculatedPallets > 0;
+
+        return {
+          totalPallets: calculatedPallets,
+          remainingCartons: remaining,
+          totalCartons: totalCartonFromBB,
+          shouldAttachReceh: shouldAttach,
+        };
+      }
+
+      // SINGLE BB MODE: Original calculation
       const palletInput = Number(form.qtyPalletInput) || 0;
       const cartonInput = Number(form.qtyCartonInput) || 0;
 
@@ -693,7 +744,7 @@ export function InboundForm({
         totalCartons: totalCartons,
         shouldAttachReceh: shouldAttach,
       };
-    }, [form.qtyPalletInput, form.qtyCartonInput, qtyPerPalletStd]);
+    }, [form.qtyPalletInput, form.qtyCartonInput, qtyPerPalletStd, isMultiBBMode, multiBBItems]);
 
   const isReceh = remainingCartons > 0;
   // Total Lokasi Dibutuhkan:
@@ -1854,22 +1905,52 @@ export function InboundForm({
       errorList.push("Produk harus dipilih");
     }
 
-    if (!form.bbProduk || form.bbProduk.length !== 10 || errors.bbProduk) {
-      newErrors.bbProduk =
-        errors.bbProduk ||
-        "BB Produk harus 10 karakter (YYMMDDXXXX) dan format tanggal valid.";
-      errorList.push(newErrors.bbProduk);
-    }
+    // Validasi Multi-BB Mode
+    if (isMultiBBMode) {
+      if (multiBBItems.length === 0) {
+        errorList.push("Minimal 1 BB harus diinput dalam Multi-BB Mode");
+      } else {
+        multiBBItems.forEach((item, index) => {
+          if (!item.bbProduk || item.bbProduk.length !== 10) {
+            errorList.push(`BB #${index + 1}: BB Produk harus 10 karakter (YYMMDDXXXX)`);
+          }
+          if (!item.expiredDate) {
+            errorList.push(`BB #${index + 1}: Format BB tidak valid, expired date tidak terbaca`);
+          }
+          if (Number(item.qtyPalletInput) === 0 && Number(item.qtyCartonInput) === 0) {
+            errorList.push(`BB #${index + 1}: Qty Pallet atau Carton harus diisi`);
+          }
+        });
+      }
 
-    // Validasi Qty: Salah satu harus terisi
-    if (totalCartons === 0) {
-      newErrors.qtyPalletInput = "Total Qty (Pallet/Karton) tidak boleh nol.";
-      errorList.push("Qty (Pallet/Karton) harus diisi.");
+      // Skip validasi BB single mode jika di multi-BB mode
+      if (errorList.length > 0) {
+        setErrors(newErrors);
+        setErrorMessages(errorList);
+        setShowErrorModal(true);
+        return;
+      }
+    } else {
+      // Validasi Single BB Mode (Original)
+      if (!form.bbProduk || form.bbProduk.length !== 10 || errors.bbProduk) {
+        newErrors.bbProduk =
+          errors.bbProduk ||
+          "BB Produk harus 10 karakter (YYMMDDXXXX) dan format tanggal valid.";
+        errorList.push(newErrors.bbProduk);
+      }
+
+      // Validasi Qty: Salah satu harus terisi
+      if (totalCartons === 0) {
+        newErrors.qtyPalletInput = "Total Qty (Pallet/Karton) tidak boleh nol.";
+        errorList.push("Qty (Pallet/Karton) harus diisi.");
+      }
     }
 
     // Validasi Cluster: Skip jika auto recommend aktif dan ada multi-location recommendation
     // ATAU jika manual locations sudah diisi lengkap
+    // ATAU jika dalam Multi-BB Mode (lokasi auto ditentukan sistem)
     const skipClusterValidation =
+      isMultiBBMode ||
       (autoRecommend &&
       multiLocationRec &&
       multiLocationRec.locations.length > 0) ||
@@ -2078,19 +2159,19 @@ export function InboundForm({
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4 md:p-8">
       <ToastContainer toasts={toasts} onRemove={removeToast} />
 
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
           {/* Header with QR Scanner Button */}
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-4 md:mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-1 md:mb-2">
                 📦 Form Inbound Produk
               </h1>
-              <p className="text-sm text-gray-600">
+              <p className="text-xs sm:text-sm text-gray-600">
                 Gudang {warehouseId ? "Cikarang" : "..."}
               </p>
             </div>
-            <div>
+            <div className="w-full sm:w-auto">
               <QRScanner
                 onScanSuccess={handleQRScanSuccess}
                 onScanError={(errorMsg) => {
@@ -2103,27 +2184,27 @@ export function InboundForm({
           {/* Error Modal */}
           {showErrorModal && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4"
               onClick={() => setShowErrorModal(false)}
             >
               <div
-                className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-xl max-h-[80vh] overflow-y-auto"
+                className="w-full max-w-md overflow-hidden rounded-lg sm:rounded-xl bg-white shadow-xl max-h-[85vh] sm:max-h-[80vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="bg-gradient-to-r from-red-500 to-pink-600 p-5">
+                <div className="bg-gradient-to-r from-red-500 to-pink-600 p-4 sm:p-5">
                   <div className="flex flex-col items-center text-center">
-                    <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/20">
-                      <XCircle className="h-8 w-8 text-white" />
+                    <div className="mb-2 sm:mb-3 flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full bg-white/20">
+                      <XCircle className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                     </div>
-                    <h3 className="text-xl font-bold text-white mb-1">
+                    <h3 className="text-lg sm:text-xl font-bold text-white mb-1">
                       Validasi Gagal
                     </h3>
-                    <p className="text-red-100 text-sm">
+                    <p className="text-red-100 text-xs sm:text-sm">
                       Periksa kembali data yang Anda masukkan
                     </p>
                   </div>
                 </div>
-                <div className="p-5">
+                <div className="p-4 sm:p-5">
                   <ul className="space-y-2 mb-4">
                     {errorMessages.map((msg, idx) => (
                       <li
@@ -2149,11 +2230,11 @@ export function InboundForm({
           {/* Confirmation Modal */}
           {showConfirmModal && finalSubmissionData && (
             <div
-              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 sm:p-4"
               onClick={() => setShowConfirmModal(false)}
             >
               <div
-                className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+                className="bg-white rounded-lg sm:rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] sm:max-h-[85vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="p-5">
@@ -2629,7 +2710,7 @@ export function InboundForm({
             </div>
 
             {/* Nama Pengemudi, No DN, Nomor Polisi */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               {/* Nama Pengemudi */}
               <div className="relative">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -2807,7 +2888,235 @@ export function InboundForm({
               )}
             </div>
 
-            {/* BB Produk */}
+            {/* Checkbox Multi-BB Mode - Muncul setelah produk dipilih */}
+            {form.productCode && (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 p-3 sm:p-4 bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-400 rounded-lg sm:rounded-xl shadow-sm">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <input
+                    type="checkbox"
+                    id="multiBBMode"
+                    checked={isMultiBBMode}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsMultiBBMode(checked);
+                      if (checked && multiBBItems.length === 0) {
+                        // Initialize dengan 1 item kosong
+                        setMultiBBItems([
+                          {
+                            id: Date.now().toString(),
+                            bbProduk: "",
+                            kdPlant: "",
+                            expiredDate: "",
+                            qtyPalletInput: "",
+                            qtyCartonInput: "",
+                          },
+                        ]);
+                      } else if (!checked) {
+                        // Reset jika di-uncheck
+                        setMultiBBItems([]);
+                      }
+                    }}
+                    className="w-5 h-5 text-amber-600 rounded focus:ring-2 focus:ring-amber-500 cursor-pointer flex-shrink-0"
+                  />
+                  <label
+                    htmlFor="multiBBMode"
+                    className="text-sm font-bold text-amber-900 cursor-pointer flex items-center gap-2"
+                  >
+                    <span className="text-lg sm:text-xl">📦</span>
+                    <span className="flex items-center gap-2">
+                      Multi-BB Mode <span className="text-xs bg-amber-200 px-2 py-0.5 rounded-full">BARU</span>
+                    </span>
+                  </label>
+                </div>
+                <p className="text-xs text-amber-700 sm:ml-auto pl-7 sm:pl-0">
+                  Aktifkan jika 1 shipment ada beberapa BB berbeda
+                </p>
+              </div>
+            )}
+
+            {/* Conditional Rendering: Multi-BB atau Single BB */}
+            {isMultiBBMode ? (
+              /* ===== MULTI-BB MODE ===== */
+              <div className="border-2 border-amber-400 bg-gradient-to-br from-amber-50 to-orange-50 rounded-lg sm:rounded-xl p-4 sm:p-6 space-y-3 sm:space-y-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-3 sm:mb-4">
+                  <h3 className="font-bold text-amber-900 text-base sm:text-lg flex items-center gap-2">
+                    <span className="text-xl sm:text-2xl">📦</span> 
+                    <span className="flex flex-wrap items-center gap-2">
+                      Input Multiple BB <span className="text-xs sm:text-sm bg-amber-600 text-white px-2 py-1 rounded-full whitespace-nowrap">({multiBBItems.length} BB)</span>
+                    </span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMultiBBItems([
+                        ...multiBBItems,
+                        {
+                          id: Date.now().toString(),
+                          bbProduk: "",
+                          kdPlant: "",
+                          expiredDate: "",
+                          qtyPalletInput: "",
+                          qtyCartonInput: "",
+                        },
+                      ]);
+                    }}
+                    className="w-full sm:w-auto px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-colors shadow-md"
+                  >
+                    ➕ Tambah BB
+                  </button>
+                </div>
+
+                <div className="bg-amber-100 border border-amber-300 rounded-lg p-3 mb-4">
+                  <p className="text-xs text-amber-800">
+                    <strong>💡 Cara Pakai:</strong> Setiap BB produk yang berbeda dalam 1 shipment diinput di form terpisah. 
+                    Lokasi akan ditentukan otomatis oleh sistem.
+                  </p>
+                </div>
+
+                {multiBBItems.map((item, index) => (
+                  <div key={item.id} className="bg-white border-2 border-amber-300 rounded-lg sm:rounded-xl p-3 sm:p-5 space-y-3 sm:space-y-4 shadow-sm">
+                    <div className="flex items-center justify-between pb-2 sm:pb-3 border-b border-amber-200">
+                      <h4 className="font-bold text-gray-800 text-sm sm:text-base lg:text-lg">BB Produk #{index + 1}</h4>
+                      {multiBBItems.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMultiBBItems(multiBBItems.filter((_, i) => i !== index));
+                          }}
+                          className="px-3 py-1.5 text-red-600 hover:bg-red-50 border border-red-300 rounded-lg text-sm font-semibold transition-colors"
+                        >
+                          🗑️ Hapus
+                        </button>
+                      )}
+                    </div>
+
+                    {/* BB Produk Input */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        BB Produk (YYMMDDXXXX) <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={item.bbProduk}
+                        onChange={(e) => {
+                          const value = e.target.value.toUpperCase();
+                          const parsed = parseBBProduk(value);
+                          const updated = [...multiBBItems];
+                          updated[index] = {
+                            ...item,
+                            bbProduk: value,
+                            kdPlant: parsed.kdPlant,
+                            expiredDate: parsed.expiredDate,
+                          };
+                          setMultiBBItems(updated);
+                        }}
+                        maxLength={10}
+                        className="w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-amber-100 focus:border-amber-500 transition-all border-gray-300"
+                        placeholder="Contoh: 2709029001"
+                      />
+                      <div className="mt-2 text-xs grid grid-cols-2 gap-2">
+                        <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                          <span className="text-slate-600">Kd Plant:</span>{" "}
+                          <span className="font-bold text-slate-900">
+                            {item.kdPlant || "-"}
+                          </span>
+                        </div>
+                        <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                          <span className="text-slate-600">Expired:</span>{" "}
+                          <span className="font-bold text-slate-900">
+                            {item.expiredDate || "-"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Qty Input Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                      <div>
+                        <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-2">
+                          Qty Pallet Utuh <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          value={item.qtyPalletInput}
+                          onChange={(e) => {
+                            const updated = [...multiBBItems];
+                            updated[index] = { ...item, qtyPalletInput: e.target.value };
+                            setMultiBBItems(updated);
+                          }}
+                          min="0"
+                          className="w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-amber-100 focus:border-amber-500 transition-all border-gray-300"
+                          placeholder="0"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-2">
+                          Qty Karton Sisa <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          value={item.qtyCartonInput}
+                          onChange={(e) => {
+                            const updated = [...multiBBItems];
+                            updated[index] = { ...item, qtyCartonInput: e.target.value };
+                            setMultiBBItems(updated);
+                          }}
+                          min="0"
+                          className="w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-amber-100 focus:border-amber-500 transition-all border-gray-300"
+                          placeholder="0"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Summary per BB */}
+                    {selectedProduct && (Number(item.qtyPalletInput) > 0 || Number(item.qtyCartonInput) > 0) && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <p className="text-xs font-semibold text-blue-800">
+                          📊 Total BB #{index + 1}: {" "}
+                          <span className="font-bold">
+                            {Number(item.qtyPalletInput) || 0} pallet + {Number(item.qtyCartonInput) || 0} carton
+                            {" = "}
+                            {((Number(item.qtyPalletInput) || 0) * (selectedProduct.qty_carton_per_pallet || 0) + 
+                              (Number(item.qtyCartonInput) || 0)) * (selectedProduct.qty_per_carton || 0)} pcs
+                          </span>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {/* Grand Total Multi-BB */}
+                {selectedProduct && multiBBItems.length > 0 && (
+                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-400 rounded-lg sm:rounded-xl p-3 sm:p-4">
+                    <h4 className="font-bold text-green-900 mb-2 sm:mb-3 text-base sm:text-lg">📊 Grand Total Semua BB:</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 text-center">
+                      <div className="bg-white rounded-lg p-2 sm:p-3 border border-green-300">
+                        <p className="text-xs text-green-700 font-semibold">Total BB</p>
+                        <p className="text-xl sm:text-2xl font-bold text-green-900">{multiBBItems.length}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-2 sm:p-3 border border-green-300">
+                        <p className="text-xs text-green-700 font-semibold">Total Pallet</p>
+                        <p className="text-xl sm:text-2xl font-bold text-green-900">
+                          {multiBBItems.reduce((sum, item) => sum + (Number(item.qtyPalletInput) || 0), 0)}
+                        </p>
+                      </div>
+                      <div className="bg-white rounded-lg p-2 sm:p-3 border border-green-300">
+                        <p className="text-xs text-green-700 font-semibold">Total Carton</p>
+                        <p className="text-xl sm:text-2xl font-bold text-green-900">
+                          {multiBBItems.reduce((sum, item) => 
+                            sum + ((Number(item.qtyPalletInput) || 0) * selectedProduct.qty_carton_per_pallet) + 
+                            (Number(item.qtyCartonInput) || 0), 0
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* ===== SINGLE BB MODE (ORIGINAL) ===== */
+              <>
+            {/* BB Produk (Single Mode) */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 BB Produk (YYMMDDXXXX) <span className="text-red-500">*</span>
@@ -2939,33 +3248,38 @@ export function InboundForm({
                 </div>
               </div>
             )}
+            </>
+            )}
 
-            {/* Checkbox Rekomendasi Otomatis */}
-            <div className="flex items-center gap-3 p-4 bg-purple-50 border-2 border-purple-200 rounded-xl">
-              <input
-                type="checkbox"
-                id="autoRecommend"
-                checked={autoRecommend}
-                onChange={(e) => setAutoRecommend(e.target.checked)}
-                className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
-              />
-              <label
-                htmlFor="autoRecommend"
-                className="text-sm font-semibold text-purple-900 cursor-pointer"
-              >
-                🤖 Rekomendasi Lokasi Otomatis
-              </label>
-            </div>
+            {/* Checkbox Rekomendasi Otomatis - Hanya tampil di Single BB Mode */}
+            {!isMultiBBMode && (
+              <div className="flex items-center gap-3 p-4 bg-purple-50 border-2 border-purple-200 rounded-xl">
+                <input
+                  type="checkbox"
+                  id="autoRecommend"
+                  checked={autoRecommend}
+                  onChange={(e) => setAutoRecommend(e.target.checked)}
+                  className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
+                />
+                <label
+                  htmlFor="autoRecommend"
+                  className="text-sm font-semibold text-purple-900 cursor-pointer"
+                >
+                  🤖 Rekomendasi Lokasi Otomatis
+                </label>
+              </div>
+            )}
 
-            {/* Location Fields - Conditional rendering based on autoRecommend and totalPalletsNeeded */}
-            {autoRecommend ? (
+            {/* Location Fields - Hanya tampil di Single BB Mode */}
+            {!isMultiBBMode && (
+              autoRecommend ? (
               /* AUTO RECOMMEND MODE - Single location input (original) */
-              <div className="border-2 border-gray-200 rounded-xl p-4">
-                <h3 className="font-semibold text-gray-800 mb-4">
+              <div className="border-2 border-gray-200 rounded-lg sm:rounded-xl p-3 sm:p-4">
+                <h3 className="font-semibold text-gray-800 mb-3 sm:mb-4 text-sm sm:text-base">
                   📍 Lokasi Penyimpanan
                 </h3>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                   {/* Cluster */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -3082,16 +3396,16 @@ export function InboundForm({
               </div>
             ) : (
               /* MANUAL MODE - Multiple location inputs if totalPalletsNeeded > 1 */
-              <div className="border-2 border-orange-300 bg-orange-50 rounded-xl p-4">
-                <h3 className="font-semibold text-orange-900 mb-2 flex items-center gap-2">
+              <div className="border-2 border-orange-300 bg-orange-50 rounded-lg sm:rounded-xl p-3 sm:p-4">
+                <h3 className="font-semibold text-orange-900 mb-2 flex flex-wrap items-center gap-2 text-sm sm:text-base">
                   ✍️ Input Lokasi Manual
                   {totalPalletsNeeded > 1 && (
-                    <span className="text-xs bg-orange-200 px-2 py-1 rounded-full">
+                    <span className="text-xs bg-orange-200 px-2 py-1 rounded-full whitespace-nowrap">
                       {totalPalletsNeeded} lokasi diperlukan
                     </span>
                   )}
                 </h3>
-                <p className="text-xs text-orange-700 mb-4">
+                <p className="text-xs text-orange-700 mb-3 sm:mb-4">
                   {totalPalletsNeeded > 1
                     ? `Mohon isi ${totalPalletsNeeded} lokasi berbeda untuk ${totalPalletsNeeded} pallet.`
                     : "Masukkan lokasi penyimpanan secara manual."}
@@ -3099,7 +3413,7 @@ export function InboundForm({
 
                 {totalPalletsNeeded === 1 ? (
                   /* Single location input for manual mode */
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">
                         Cluster <span className="text-red-500">*</span>
@@ -3468,10 +3782,11 @@ export function InboundForm({
                   </div>
                 )}
               </div>
-            )}
+            )
+            )} {/* Closing bracket untuk Single BB Mode Location Fields */}
 
-            {/* Calculated Qty & Logika Receh */}
-            {totalCartons > 0 && selectedProduct && (
+            {/* Calculated Qty & Logika Receh - Hanya tampil di Single BB Mode */}
+            {!isMultiBBMode && totalCartons > 0 && selectedProduct && (
               <div
                 className={`p-4 border-2 rounded-xl ${
                   isReceh
@@ -3516,8 +3831,35 @@ export function InboundForm({
               </div>
             )}
 
-            {/* Summary Data */}
-            {form.productCode && form.ekspedisi && (
+            {/* Summary Data Multi-BB Mode */}
+            {isMultiBBMode && form.productCode && multiBBItems.length > 0 && (
+              <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4">
+                <h3 className="font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                  <span>📋</span> Ringkasan Multi-BB Inbound
+                </h3>
+                <div className="space-y-2">
+                  <div>
+                    <span className="text-amber-800 font-semibold">Total BB:</span>{" "}
+                    <span className="font-bold text-amber-900">{multiBBItems.length} BB</span>
+                  </div>
+                  <div>
+                    <span className="text-amber-800 font-semibold">Total Pallet:</span>{" "}
+                    <span className="font-bold text-amber-900">
+                      {multiBBItems.reduce((sum, item) => sum + (Number(item.qtyPalletInput) || 0), 0)} pallet
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-amber-800 font-semibold">Total Carton:</span>{" "}
+                    <span className="font-bold text-amber-900">
+                      {multiBBItems.reduce((sum, item) => sum + (Number(item.qtyCartonInput) || 0), 0)} carton
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Summary Data Single BB Mode */}
+            {!isMultiBBMode && form.productCode && form.ekspedisi && (
               <div className="bg-slate-50 border-2 border-slate-300 rounded-xl p-4">
                 <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
                   <span>📋</span> Ringkasan Data Inbound
@@ -3686,20 +4028,20 @@ export function InboundForm({
 
             <button
               type="submit"
-              className="w-full bg-linear-to-r from-blue-500 to-indigo-600 text-white py-4 rounded-xl font-bold text-lg hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+              className="w-full bg-linear-to-r from-blue-500 to-indigo-600 text-white py-3 sm:py-4 rounded-lg sm:rounded-xl font-bold text-base sm:text-lg hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
             >
               🚀 Submit Inbound & Konfirmasi Lokasi
             </button>
           </form>
 
           {/* Tabel Transaksi Hari Ini */}
-          <div className="mt-8">
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
-              <div className="bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-4">
-                <h3 className="text-xl font-bold text-white">
+          <div className="mt-6 sm:mt-8">
+            <div className="bg-white rounded-lg sm:rounded-xl shadow-lg overflow-hidden border border-gray-200">
+              <div className="bg-gradient-to-r from-blue-500 to-indigo-600 px-4 sm:px-6 py-3 sm:py-4">
+                <h3 className="text-lg sm:text-xl font-bold text-white">
                   📋 Transaksi Hari Ini
                 </h3>
-                <p className="text-blue-100 text-sm mt-1">
+                <p className="text-blue-100 text-xs sm:text-sm mt-1">
                   {new Date().toLocaleDateString("id-ID", {
                     weekday: "long",
                     year: "numeric",
@@ -3709,9 +4051,9 @@ export function InboundForm({
                 </p>
               </div>
               {todayTransactions.length === 0 ? (
-                <div className="px-6 py-12 text-center">
-                  <div className="text-5xl mb-3">📭</div>
-                  <p className="text-gray-500 font-medium">
+                <div className="px-4 sm:px-6 py-8 sm:py-12 text-center">
+                  <div className="text-4xl sm:text-5xl mb-3">📭</div>
+                  <p className="text-gray-500 font-medium text-sm sm:text-base">
                     Belum ada transaksi inbound hari ini
                   </p>
                 </div>
@@ -3721,28 +4063,28 @@ export function InboundForm({
                     <table className="w-full">
                       <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
-                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">
+                          <th className="px-2 sm:px-3 py-2 sm:py-3 text-left text-xs font-semibold text-gray-700 uppercase">
                             Waktu
                           </th>
-                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">
+                          <th className="px-2 sm:px-3 py-2 sm:py-3 text-left text-xs font-semibold text-gray-700 uppercase">
                             Ekspedisi
                           </th>
-                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">
+                          <th className="px-2 sm:px-3 py-2 sm:py-3 text-left text-xs font-semibold text-gray-700 uppercase">
                             Pengemudi
                           </th>
-                          <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">
+                          <th className="px-2 sm:px-3 py-2 sm:py-3 text-left text-xs font-semibold text-gray-700 uppercase">
                             Produk
                           </th>
-                          <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase">
+                          <th className="px-1 sm:px-2 py-2 sm:py-3 text-center text-xs font-semibold text-gray-700 uppercase">
                             Pallet
                           </th>
-                          <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase">
+                          <th className="px-1 sm:px-2 py-2 sm:py-3 text-center text-xs font-semibold text-gray-700 uppercase">
                             Carton
                           </th>
-                          <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700 uppercase">
+                          <th className="px-1 sm:px-2 py-2 sm:py-3 text-center text-xs font-semibold text-gray-700 uppercase">
                             Status
                           </th>
-                          <th className="px-3 py-3 text-center text-xs font-semibold text-gray-700 uppercase">
+                          <th className="px-2 sm:px-3 py-2 sm:py-3 text-center text-xs font-semibold text-gray-700 uppercase">
                             Aksi
                           </th>
                         </tr>
@@ -3757,42 +4099,42 @@ export function InboundForm({
                               key={item.id}
                               className="hover:bg-blue-50 transition-colors"
                             >
-                              <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
+                              <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs sm:text-sm text-gray-900 whitespace-nowrap">
                                 {new Date(item.arrivalTime).toLocaleTimeString(
                                   "id-ID",
                                   { hour: "2-digit", minute: "2-digit" }
                                 )}
                               </td>
-                              <td className="px-3 py-3 text-sm text-gray-900">
+                              <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs sm:text-sm text-gray-900 max-w-[100px] sm:max-w-none truncate">
                                 {expedition?.expedition_name ||
                                   item.expeditionId ||
                                   "-"}
                               </td>
-                              <td className="px-3 py-3 text-sm text-gray-900 max-w-[120px] truncate">
+                              <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs sm:text-sm text-gray-900 max-w-[80px] sm:max-w-[120px] truncate">
                                 {item.driverName}
                               </td>
-                              <td className="px-3 py-3 text-sm">
+                              <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs sm:text-sm">
                                 <div className="font-medium text-gray-900">
                                   {products.find((p) => p.id === item.productId)
                                     ?.product_code || "-"}
                                 </div>
-                                <div className="text-gray-500 text-xs truncate max-w-[150px]">
+                                <div className="text-gray-500 text-xs truncate max-w-[100px] sm:max-w-[150px]">
                                   {products.find((p) => p.id === item.productId)
                                     ?.product_name || "-"}
                                 </div>
                               </td>
-                              <td className="px-2 py-3 text-sm text-center font-bold text-green-600">
+                              <td className="px-1 sm:px-2 py-2 sm:py-3 text-xs sm:text-sm text-center font-bold text-green-600">
                                 {item.locations.length}
                               </td>
-                              <td className="px-2 py-3 text-sm text-center font-bold text-blue-600">
+                              <td className="px-1 sm:px-2 py-2 sm:py-3 text-xs sm:text-sm text-center font-bold text-blue-600">
                                 {item.qtyCarton}
                               </td>
-                              <td className="px-2 py-3 text-center">
+                              <td className="px-1 sm:px-2 py-2 sm:py-3 text-center">
                                 <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
                                   ✓
                                 </span>
                               </td>
-                              <td className="px-3 py-3">
+                              <td className="px-2 sm:px-3 py-2 sm:py-3">
                                 <div className="flex items-center justify-center gap-1">
                                   <button
                                     onClick={() => {
@@ -3801,7 +4143,8 @@ export function InboundForm({
                                     }}
                                     className="px-2 py-1 bg-blue-500 text-white text-xs font-semibold rounded hover:bg-blue-600 transition-colors"
                                   >
-                                    Detail
+                                    <span className="hidden sm:inline">Detail</span>
+                                    <span className="sm:hidden">ℹ️</span>
                                   </button>
                                   <button
                                     onClick={() => handleEditClick(item)}
@@ -3844,26 +4187,25 @@ export function InboundForm({
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Header */}
-                <div className="sticky top-0 bg-linear-to-r from-blue-500 to-indigo-600 px-6 py-4 flex justify-between items-center">
-                  <h2 className="text-xl font-bold text-white">
+                <div className="sticky top-0 bg-linear-to-r from-blue-500 to-indigo-600 px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
+                  <h2 className="text-base sm:text-xl font-bold text-white">
                     📋 Detail Transaksi Inbound
                   </h2>
                   <button
                     onClick={() => setShowHistoryDetailModal(false)}
-                    className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
-                  >
+                    className="text-white hover:bg-white/20 rounded-lg p-1.5 sm:p-2 transition-colors">
                     ✕
                   </button>
                 </div>
 
                 {/* Content */}
-                <div className="p-6 space-y-6">
+                <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
                   {/* Informasi Pengiriman */}
-                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
-                    <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
-                      <span className="text-lg">🚚</span> Informasi Pengiriman
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg sm:rounded-xl p-3 sm:p-4 border border-blue-200">
+                    <h3 className="font-bold text-blue-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                      <span className="text-base sm:text-lg">🚚</span> Informasi Pengiriman
                     </h3>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
                       <div>
                         <span className="text-gray-600">Tanggal:</span>
                         <p className="font-semibold text-gray-900">
@@ -3993,9 +4335,9 @@ export function InboundForm({
                   </div>
 
                   {/* Lokasi Penyimpanan */}
-                  <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-200">
-                    <h3 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
-                      <span className="text-lg">📍</span> Lokasi Penyimpanan
+                  <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg sm:rounded-xl p-3 sm:p-4 border border-purple-200">
+                    <h3 className="font-bold text-purple-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                      <span className="text-base sm:text-lg">📍</span> Lokasi Penyimpanan
                     </h3>
                     <div className="space-y-2">
                       {selectedHistoryItem.locations.map((loc, idx) => (
