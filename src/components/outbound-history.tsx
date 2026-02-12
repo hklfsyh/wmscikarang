@@ -10,11 +10,13 @@ import * as XLSX from "xlsx";
 interface OutboundHistoryPageProps {
   history: any[];
   products: any[];
+  users: any[];
 }
 
 export function OutboundHistoryPage({
   history,
   products,
+  users,
 }: OutboundHistoryPageProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -139,11 +141,15 @@ export function OutboundHistoryPage({
           });
         }
 
+        // Get user who processed this outbound
+        const processedByUser = users.find((u) => u.id === item.processed_by);
+
         exportData.push({
           No: rowNum++,
           "Kode Transaksi": item.transaction_code,
           Tanggal: formatDate(item.created_at),
           Pengemudi: item.driver_name,
+          "Dikeluarkan Oleh": processedByUser?.full_name || item.processed_by || "-",
           "No. Polisi": item.vehicle_number,
           "Kode Produk": product?.product_code || "-",
           "Nama Produk": product?.product_name || "-",
@@ -167,18 +173,21 @@ export function OutboundHistoryPage({
     // Set column widths
     const colWidths = [
       { wch: 5 }, // No
-      { wch: 18 }, // ID Transaksi
+      { wch: 18 }, // Kode Transaksi
       { wch: 12 }, // Tanggal
       { wch: 20 }, // Pengemudi
+      { wch: 25 }, // Dikeluarkan Oleh
       { wch: 12 }, // No. Polisi
       { wch: 12 }, // Kode Produk
       { wch: 40 }, // Nama Produk
+      { wch: 10 }, // Total PCS
       { wch: 8 }, // Lokasi #
       { wch: 15 }, // Lokasi
+      { wch: 12 }, // Qty Carton
       { wch: 20 }, // BB Produk
       { wch: 14 }, // Expired Date
       { wch: 10 }, // Status
-      { wch: 18 }, // Waktu Input
+      { wch: 18 }, // Waktu Keluar
     ];
     ws["!cols"] = colWidths;
 

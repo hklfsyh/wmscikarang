@@ -38,6 +38,12 @@ export default async function OutboundPage() {
       .eq("warehouse_id", profile.warehouse_id)
       .order("created_at", { ascending: false });
 
+    // Fetch users for "Dikeluarkan Oleh" column in export
+    const { data: users } = await supabase
+      .from("users")
+      .select("id, full_name")
+      .eq("warehouse_id", profile.warehouse_id);
+
     // Map database fields (snake_case) to component interface (camelCase)
     const formattedHistory = (realHistory || []).map((item: any) => ({
       id: item.id,
@@ -60,6 +66,7 @@ export default async function OutboundPage() {
       <OutboundHistoryPage
         history={formattedHistory}
         products={products || []}
+        users={users || []}
       />
     );
   }
