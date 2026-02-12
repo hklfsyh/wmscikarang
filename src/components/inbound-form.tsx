@@ -176,6 +176,8 @@ interface FinalSubmission {
   qtyCarton: number; // Qty Karton Aktual per lokasi
   bbPallet: string | string[]; // BB Produk (string) atau BB Receh (string[])
   isReceh: boolean;
+  bbProduk?: string; // MULTI-BB: BB specific untuk submission ini
+  expiredDate?: string; // MULTI-BB: Expired date specific untuk submission ini
 }
 // --- AKHIR INTERFACE ---
 
@@ -433,82 +435,7 @@ export function InboundForm({
     showNotification("⚠️ Peringatan", message, "warning");
   };
 
-  // --- SUBMIT LOGIC ---
-  const confirmSubmit = async () => {
-    if (!finalSubmissionData || !selectedProduct) return;
-
-    setIsSubmitting(true);
-    const dataForServer = {
-      warehouse_id: warehouseId,
-      product_id: selectedProduct.id,
-      bb_produk: form.bbProduk,
-      total_qty_carton: totalCartons,
-      expired_date: form.expiredDate,
-      ekspedisi: form.ekspedisi,
-      namaPengemudi: form.namaPengemudi,
-      nomorPolisi: form.nomorPolisi,
-      noDN: form.noDN,
-    };
-
-    try {
-      const result = await submitInboundAction(
-        dataForServer,
-        finalSubmissionData
-      );
-      
-      if (result.success) {
-        setShowConfirmModal(false);
-        
-        // Check if there were partial errors
-        if (result.errors && result.errors.length > 0) {
-          warning(
-            `Inbound berhasil dengan peringatan:\n` +
-            `${result.stockInserted}/${result.totalLocations} lokasi berhasil.\n` +
-            `Errors: ${result.errors.join('\n')}`
-          );
-        } else {
-          success(`✅ Inbound berhasil! Kode Transaksi: ${result.transactionCode}`);
-        }
-        
-        setShowSuccess(true);
-        // Save input history to localStorage
-        saveToHistory(
-          "wms_driver_history",
-          form.namaPengemudi,
-          driverHistory,
-          setDriverHistory
-        );
-        saveToHistory("wms_dn_history", form.noDN, dnHistory, setDnHistory);
-        saveToHistory(
-          "wms_police_no_history",
-          form.nomorPolisi,
-          policeNoHistory,
-          setPoliceNoHistory
-        );
-
-        // Refresh data dari server untuk update stock dan history
-        router.refresh();
-
-        setTimeout(() => {
-          setShowSuccess(false);
-          // JANGAN RESET FORM - Biarkan data tetap untuk memudahkan input berikutnya
-          // Hanya reset state yang berkaitan dengan submission
-          setMultiLocationRec(null);
-          setRecommendedLocation(null);
-          setFinalSubmissionData(null);
-          setManualLocations([]);
-          setIsSubmitting(false);
-        }, 2000);
-      } else {
-        error(result.message || "Terjadi kesalahan database.");
-        setIsSubmitting(false);
-      }
-    } catch (err: any) {
-      error(err.message || "System error occurred.");
-      setIsSubmitting(false);
-    }
-  };
-  // --- END SUBMIT LOGIC ---
+  // --- STATE DECLARATIONS ---
   const [form, setForm] = useState<InboundFormState>(initialState);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [recommendedLocation, setRecommendedLocation] =
@@ -1871,6 +1798,211 @@ export function InboundForm({
     setSelectedItemForAction(null);
   };
 
+  // --- SUBMIT LOGIC ---
+  const confirmSubmit = async () => {
+    if (!finalSubmissionData || !selectedProduct) return;
+
+    setIsSubmitting(true);
+
+    try {
+      // MULTI-BB MODE: Submit each BB as separate transaction
+      if (isMultiBBMode && multiBBItems.length > 0) {
+        const results: any[] = [];
+        const errors: string[] = [];
+
+        // Group submissions by BB
+        const submissionsByBB = new Map<string, FinalSubmission[]>();
+        finalSubmissionData.forEach((sub) => {
+          const bb = sub.bbProduk || form.bbProduk;
+          if (!submissionsByBB.has(bb)) {
+            submissionsByBB.set(bb, []);
+          }
+          submissionsByBB.get(bb)!.push(sub);
+        });
+
+        // Submit each BB sequentially
+        for (const bbItem of multiBBItems) {
+          const bbSubmissions = submissionsByBB.get(bbItem.bbProduk) || [];
+          if (bbSubmissions.length === 0) continue;
+
+          const bbTotalCartons = bbSubmissions.reduce(
+            (sum, sub) => sum + sub.qtyCarton,
+            0
+          );
+
+          const dataForServer = {
+            warehouse_id: warehouseId,
+            product_id: selectedProduct.id,
+            bb_produk: bbItem.bbProduk,
+            total_qty_carton: bbTotalCartons,
+            expired_date: bbItem.expiredDate,
+            ekspedisi: form.ekspedisi,
+            namaPengemudi: form.namaPengemudi,
+            nomorPolisi: form.nomorPolisi,
+            noDN: form.noDN,
+          };
+
+          try {
+            const result = await submitInboundAction(
+              dataForServer,
+              bbSubmissions
+            );
+            if (result.success) {
+              results.push({
+                bb: bbItem.bbProduk,
+                transactionCode: result.transactionCode,
+                locations: bbSubmissions.length,
+              });
+            } else {
+              errors.push(`BB ${bbItem.bbProduk}: ${result.message || "Unknown error"}`);
+            }
+          } catch (err: any) {
+            errors.push(`BB ${bbItem.bbProduk}: ${err.message}`);
+          }
+        }
+
+        setShowConfirmModal(false);
+
+        // Show results
+        if (results.length > 0 && errors.length === 0) {
+          const successMsg = `✅ Multi-BB Inbound Berhasil!\n\n${results
+            .map(
+              (r, i) =>
+                `${i + 1}. BB: ${r.bb}\n   Transaksi: ${r.transactionCode}\n   Lokasi: ${r.locations} pallet`
+            )
+            .join("\n\n")}`;
+          success(successMsg);
+          setShowSuccess(true);
+
+          // Save input history to localStorage
+          saveToHistory(
+            "wms_driver_history",
+            form.namaPengemudi,
+            driverHistory,
+            setDriverHistory
+          );
+          saveToHistory("wms_dn_history", form.noDN, dnHistory, setDnHistory);
+          saveToHistory(
+            "wms_police_no_history",
+            form.nomorPolisi,
+            policeNoHistory,
+            setPoliceNoHistory
+          );
+
+          // Refresh data dari server untuk update stock dan history
+          router.refresh();
+
+          setTimeout(() => {
+            setShowSuccess(false);
+            // Reset state untuk multi-BB submission berikutnya
+            setMultiLocationRec(null);
+            setRecommendedLocation(null);
+            setFinalSubmissionData(null);
+            setManualLocations([]);
+            setIsSubmitting(false);
+          }, 3000);
+        } else if (results.length > 0 && errors.length > 0) {
+          const warningMsg = `⚠️ Partial Success\n\nBerhasil: ${results.length} BB\nGagal: ${errors.length} BB\n\nErrors:\n${errors.join("\n")}`;
+          warning(warningMsg);
+          
+          // Partial success - still save history and refresh
+          saveToHistory(
+            "wms_driver_history",
+            form.namaPengemudi,
+            driverHistory,
+            setDriverHistory
+          );
+          saveToHistory("wms_dn_history", form.noDN, dnHistory, setDnHistory);
+          saveToHistory(
+            "wms_police_no_history",
+            form.nomorPolisi,
+            policeNoHistory,
+            setPoliceNoHistory
+          );
+          router.refresh();
+          setIsSubmitting(false);
+        } else {
+          error(`❌ Semua BB gagal:\n${errors.join("\n")}`);
+          setIsSubmitting(false);
+          return;
+        }
+      } else {
+        // SINGLE BB MODE (Original Logic)
+        const dataForServer = {
+          warehouse_id: warehouseId,
+          product_id: selectedProduct.id,
+          bb_produk: form.bbProduk,
+          total_qty_carton: totalCartons,
+          expired_date: form.expiredDate,
+          ekspedisi: form.ekspedisi,
+          namaPengemudi: form.namaPengemudi,
+          nomorPolisi: form.nomorPolisi,
+          noDN: form.noDN,
+        };
+
+        const result = await submitInboundAction(
+          dataForServer,
+          finalSubmissionData
+        );
+
+        if (result.success) {
+          setShowConfirmModal(false);
+
+          // Check if there were partial errors
+          if (result.errors && result.errors.length > 0) {
+            warning(
+              `Inbound berhasil dengan peringatan:\n` +
+                `${result.stockInserted}/${result.totalLocations} lokasi berhasil.\n` +
+                `Errors: ${result.errors.join("\n")}`
+            );
+          } else {
+            success(
+              `✅ Inbound berhasil! Kode Transaksi: ${result.transactionCode}`
+            );
+          }
+
+          setShowSuccess(true);
+
+          // Save input history to localStorage
+          saveToHistory(
+            "wms_driver_history",
+            form.namaPengemudi,
+            driverHistory,
+            setDriverHistory
+          );
+          saveToHistory("wms_dn_history", form.noDN, dnHistory, setDnHistory);
+          saveToHistory(
+            "wms_police_no_history",
+            form.nomorPolisi,
+            policeNoHistory,
+            setPoliceNoHistory
+          );
+
+          // Refresh data dari server untuk update stock dan history
+          router.refresh();
+
+          setTimeout(() => {
+            setShowSuccess(false);
+            // JANGAN RESET FORM - Biarkan data tetap untuk memudahkan input berikutnya
+            // Hanya reset state yang berkaitan dengan submission
+            setMultiLocationRec(null);
+            setRecommendedLocation(null);
+            setFinalSubmissionData(null);
+            setManualLocations([]);
+            setIsSubmitting(false);
+          }, 2000);
+        } else {
+          error(result.message || "Terjadi kesalahan database.");
+          setIsSubmitting(false);
+        }
+      }
+    } catch (err: any) {
+      error(err.message || "System error occurred.");
+      setIsSubmitting(false);
+    }
+  };
+  // --- END SUBMIT LOGIC ---
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -2112,38 +2244,95 @@ export function InboundForm({
     const finalSubmissions: FinalSubmission[] = [];
     const standardCartons = qtyPerPalletStd;
 
-    locationsToSubmit.forEach((loc, index) => {
-      const isLastPallet = index === locationsToSubmit.length - 1;
+    // MULTI-BB MODE: Split locations per BB item
+    if (isMultiBBMode && multiBBItems.length > 0) {
+      let locationIndex = 0;
 
-      // SMART RECEH LOGIC:
-      // If shouldAttachReceh (≤5 cartons) AND this is the last pallet, attach receh to this pallet
-      let qtyToRecord = standardCartons;
-      let bbToRecord: string | string[] = form.bbProduk;
-      let isRecehPallet = false;
+      multiBBItems.forEach((bbItem) => {
+        const bbPalletCount = Number(bbItem.qtyPalletInput) || 0;
+        const bbCartonCount = Number(bbItem.qtyCartonInput) || 0;
+        const bbTotalCartons = bbPalletCount * standardCartons + bbCartonCount;
+        const bbIsReceh = bbCartonCount > 0 && bbCartonCount < standardCartons;
+        const bbRemainingCartons = bbCartonCount;
+        const bbShouldAttachReceh = bbIsReceh && bbRemainingCartons <= RECEH_THRESHOLD && bbPalletCount > 0;
+        
+        // Calculate how many locations this BB needs
+        const bbPalletsNeeded = bbShouldAttachReceh
+          ? bbPalletCount
+          : bbPalletCount + (bbIsReceh ? 1 : 0);
 
-      if (isLastPallet && isReceh) {
-        if (shouldAttachReceh) {
-          // Attach small receh (≤5) to last full pallet
-          qtyToRecord = standardCartons + remainingCartons;
-          bbToRecord = form.bbReceh.length > 0 ? form.bbReceh : form.bbProduk;
-          isRecehPallet = true; // Mark as receh because it contains mixed qty
-        } else {
-          // Create separate receh pallet for larger remainders (>5)
-          qtyToRecord = remainingCartons;
-          bbToRecord = form.bbReceh.length > 0 ? form.bbReceh : form.bbProduk;
-          isRecehPallet = true;
+        // Assign locations to this BB
+        for (let i = 0; i < bbPalletsNeeded; i++) {
+          const loc = locationsToSubmit[locationIndex];
+          if (!loc) break; // Safety check
+
+          const isLastPalletOfBB = i === bbPalletsNeeded - 1;
+          let qtyToRecord = standardCartons;
+          let isRecehPallet = false;
+
+          if (isLastPalletOfBB && bbIsReceh) {
+            if (bbShouldAttachReceh) {
+              // Attach small receh (≤5) to last full pallet
+              qtyToRecord = standardCartons + bbRemainingCartons;
+              isRecehPallet = true;
+            } else {
+              // Create separate receh pallet for larger remainders (>5)
+              qtyToRecord = bbRemainingCartons;
+              isRecehPallet = true;
+            }
+          }
+
+          finalSubmissions.push({
+            productCode: form.productCode,
+            location: `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.level}`,
+            qtyPallet: 1,
+            qtyCarton: qtyToRecord,
+            bbPallet: bbItem.bbProduk,
+            isReceh: isRecehPallet,
+            bbProduk: bbItem.bbProduk, // Store BB for grouping
+            expiredDate: bbItem.expiredDate, // Store expired date
+          });
+
+          locationIndex++;
         }
-      }
-
-      finalSubmissions.push({
-        productCode: form.productCode,
-        location: `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.level}`,
-        qtyPallet: 1, // Selalu 1 pallet stack per lokasi
-        qtyCarton: qtyToRecord,
-        bbPallet: bbToRecord,
-        isReceh: isRecehPallet,
       });
-    });
+    } else {
+      // SINGLE BB MODE (Original Logic)
+      locationsToSubmit.forEach((loc, index) => {
+        const isLastPallet = index === locationsToSubmit.length - 1;
+
+        // SMART RECEH LOGIC:
+        // If shouldAttachReceh (≤5 cartons) AND this is the last pallet, attach receh to this pallet
+        let qtyToRecord = standardCartons;
+        let bbToRecord: string | string[] = form.bbProduk;
+        let isRecehPallet = false;
+
+        if (isLastPallet && isReceh) {
+          if (shouldAttachReceh) {
+            // Attach small receh (≤5) to last full pallet
+            qtyToRecord = standardCartons + remainingCartons;
+            bbToRecord = form.bbReceh.length > 0 ? form.bbReceh : form.bbProduk;
+            isRecehPallet = true; // Mark as receh because it contains mixed qty
+          } else {
+            // Create separate receh pallet for larger remainders (>5)
+            qtyToRecord = remainingCartons;
+            bbToRecord = form.bbReceh.length > 0 ? form.bbReceh : form.bbProduk;
+            isRecehPallet = true;
+          }
+        }
+
+        finalSubmissions.push({
+          productCode: form.productCode,
+          location: `${loc.clusterChar}-${loc.lorong}-${loc.baris}-${loc.level}`,
+          qtyPallet: 1, // Selalu 1 pallet stack per lokasi
+          qtyCarton: qtyToRecord,
+          bbPallet: bbToRecord,
+          isReceh: isRecehPallet,
+          bbProduk: form.bbProduk,
+          expiredDate: form.expiredDate,
+        });
+      });
+    }
 
     setFinalSubmissionData(finalSubmissions);
 
