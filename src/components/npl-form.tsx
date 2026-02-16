@@ -154,6 +154,8 @@ export function NplForm({
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showBatalConfirmModal, setShowBatalConfirmModal] = useState(false);
   const [selectedNplForAction, setSelectedNplForAction] = useState<any | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedNplDetail, setSelectedNplDetail] = useState<any | null>(null);
 
   // Notification helpers
   const showNotification = (title: string, message: string, type: "success" | "error" | "warning") => {
@@ -412,67 +414,13 @@ export function NplForm({
             remainingPallets--;
           }
         } // close for palletNum
-      } // close for barisNum
-    } // close for lorongNum
-  } // close for productHome
-} else {
-      // FALLBACK: Product has NO homes in this cluster - use entire cluster range
-      const lorongStart = 1;
-      const lorongEnd = clusterConfig.default_lorong_count;
-
-      for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
-        if (remainingPallets === 0) break;
-        // Skip In Transit area (Cluster C, Lorong 8-11)
-        if (clusterChar === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
-
-        const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
-
-        for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
-          if (remainingPallets === 0) break;
-
-          const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
-
-          for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
-            if (remainingPallets === 0) break;
-
-            const lorong = `L${lorongNum}`;
-            const baris = `B${barisNum}`;
-            const level = `P${palletNum}`;
-
-            const locationExists = stockData.some(
-              (item: any) =>
-                item.warehouse_id === warehouseId &&
-                item.cluster === clusterChar &&
-                item.lorong === lorongNum &&
-                item.baris === barisNum &&
-                item.level === palletNum
-            );
-
-            if (!locationExists) {
-              const isLastPallet = remainingPallets === 1;
-              const qtyForThisLocation =
-                isLastPallet && shouldAttachReceh
-                  ? qtyPerPalletStd + remainingCartons
-                  : isLastPallet && remainingCartons > 0 && !shouldAttachReceh
-                  ? remainingCartons
-                  : qtyPerPalletStd;
-
-              locations.push({
-                clusterChar,
-                lorong,
-                baris,
-                level,
-                qtyCarton: qtyForThisLocation,
-                isReceh: isLastPallet && remainingCartons > 0,
-              });
-              remainingPallets--;
-            }
-          }
-        }
-      }
-    }
-
-    // PHASE 2: Overflow ke In Transit (dinamis dari cluster_cell_overrides)
+        } // close for barisNum
+      } // close for lorongNum
+    } // close for productHome
+  }
+  // CRITICAL FIX: REMOVED DANGEROUS FALLBACK!
+  // Jika produk tidak punya home, jangan coba-coba alokasi lokasi fiktif!
+  // Validasi di validateForm() akan mencegah submit jika no product home.    // PHASE 2: Overflow ke In Transit (dinamis dari cluster_cell_overrides)
     if (remainingPallets > 0) {
       // Cari area transit dari clusterCellOverrides dengan is_transit_area = true
       const transitOverrides = clusterCellOverrides.filter((o: any) => o.is_transit_area === true);
@@ -791,6 +739,14 @@ export function NplForm({
       error("Pilih produk terlebih dahulu.");
       return false;
     }
+    // CRITICAL: Validasi produk HARUS punya product home
+    if (selectedProduct) {
+      const hasProductHome = productHomes.some((h: any) => h.product_id === selectedProduct.id && h.is_active === true);
+      if (!hasProductHome) {
+        error(`Produk "${selectedProduct.product_name}" belum memiliki Product Home! Silakan hubungi Admin Cabang untuk menambahkan Product Home terlebih dahulu di Master Data Stock.`);
+        return false;
+      }
+    }
     if (!bbProduk || bbProduk.length !== 10) {
       error("BB Produk harus diisi dengan format 10 digit (YYMMDDXXXX).");
       return false;
@@ -847,6 +803,11 @@ export function NplForm({
 
   // Open confirm modal
   const handleSubmitClick = () => {
+    // Proteksi: Jika sedang submit, tampilkan notifikasi dan return
+    if (isSubmitting) {
+      showNotification("Proses Sedang Berjalan", "Mohon tunggu, proses sebelumnya masih belum selesai.", "warning");
+      return;
+    }
     if (!validateForm()) return;
     setShowConfirmModal(true);
   };
@@ -937,6 +898,12 @@ export function NplForm({
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Detail NPL
+  const handleDetailClick = (npl: any) => {
+    setSelectedNplDetail(npl);
+    setShowDetailModal(true);
   };
 
   // Edit NPL (Soft Delete - Hapus stok, populate form)
@@ -1730,6 +1697,13 @@ export function NplForm({
                           <td className="px-3 py-3">
                             <div className="flex items-center justify-center gap-1">
                               <button
+                                onClick={() => handleDetailClick(npl)}
+                                className="px-2 py-1 bg-blue-500 text-white text-xs font-semibold rounded hover:bg-blue-600 transition-colors"
+                                title="Lihat Detail"
+                              >
+                                Detail
+                              </button>
+                              <button
                                 onClick={() => handleEditClick(npl)}
                                 className="px-2 py-1 bg-amber-500 text-white text-xs font-semibold rounded hover:bg-amber-600 transition-colors"
                               >
@@ -1881,6 +1855,172 @@ export function NplForm({
                   Ya, Batalkan
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {showDetailModal && selectedNplDetail && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setShowDetailModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="sticky top-0 bg-gradient-to-r from-teal-500 to-cyan-600 px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
+              <h2 className="text-base sm:text-xl font-bold text-white">
+                📋 Detail Transaksi NPL
+              </h2>
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="text-white hover:bg-white/20 rounded-lg p-1.5 sm:p-2 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+              {/* Informasi Pengembalian */}
+              <div className="bg-gradient-to-br from-teal-50 to-cyan-50 rounded-lg sm:rounded-xl p-3 sm:p-4 border border-teal-200">
+                <h3 className="font-bold text-teal-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                  <span className="text-base sm:text-lg">🔄</span> Informasi Pengembalian
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
+                  <div>
+                    <span className="text-gray-600">Tanggal:</span>
+                    <p className="font-semibold text-gray-900">
+                      {new Date(selectedNplDetail.return_time).toLocaleDateString("id-ID", {
+                        weekday: "long",
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      })}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Kode Transaksi:</span>
+                    <p className="font-semibold text-gray-900 font-mono">
+                      {selectedNplDetail.transaction_code}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Nama Pengemudi:</span>
+                    <p className="font-semibold text-gray-900">
+                      {selectedNplDetail.driver_name}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">No. Polisi:</span>
+                    <p className="font-semibold text-gray-900">
+                      {selectedNplDetail.vehicle_number}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informasi Produk */}
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
+                <h3 className="font-bold text-green-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">📦</span> Informasi Produk
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="col-span-2">
+                    <span className="text-gray-600">Nama Produk:</span>
+                    <p className="font-semibold text-gray-900">
+                      {selectedNplDetail.products?.product_name || "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Kode Produk:</span>
+                    <p className="font-semibold text-gray-900">
+                      {selectedNplDetail.products?.product_code || "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Total PCS:</span>
+                    <p className="font-semibold text-gray-900">
+                      {((selectedNplDetail.products?.qty_per_carton || 0) * selectedNplDetail.qty_carton).toLocaleString()} pcs
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Qty Lokasi:</span>
+                    <p className="font-semibold text-gray-900">
+                      {Array.isArray(selectedNplDetail.locations) ? selectedNplDetail.locations.length : 0} lokasi
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Qty Carton:</span>
+                    <p className="font-semibold text-gray-900">
+                      {selectedNplDetail.qty_carton} carton
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informasi Batch & Expired */}
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-200">
+                <h3 className="font-bold text-amber-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">🏷️</span> Informasi Batch & Expired
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-600">BB Produk:</span>
+                    <p className="font-semibold text-gray-900 font-mono">
+                      {selectedNplDetail.bb_produk}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Expired Date:</span>
+                    <p className="font-semibold text-gray-900">
+                      {new Date(selectedNplDetail.expired_date).toLocaleDateString("id-ID")}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lokasi Penyimpanan */}
+              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg sm:rounded-xl p-3 sm:p-4 border border-purple-200">
+                <h3 className="font-bold text-purple-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                  <span className="text-base sm:text-lg">📍</span> Lokasi Penyimpanan
+                </h3>
+                <div className="space-y-2">
+                  {(selectedNplDetail.locations || []).map((loc: any, idx: number) => (
+                    <div key={idx} className="bg-white rounded-lg p-3 border border-purple-200">
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-gray-600">Lokasi:</span>
+                          <p className="font-semibold text-gray-900">
+                            {loc.cluster}-L{loc.lorong}-B{loc.baris}-P{loc.level}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Qty:</span>
+                          <p className="font-semibold text-gray-900">
+                            {loc.qtyCarton} carton{loc.isReceh ? " (Receh)" : ""}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Catatan (jika ada) */}
+              {selectedNplDetail.notes && (
+                <div className="bg-gradient-to-br from-gray-50 to-slate-50 rounded-xl p-4 border border-gray-200">
+                  <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span className="text-lg">📝</span> Catatan
+                  </h3>
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                    {selectedNplDetail.notes}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

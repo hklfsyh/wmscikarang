@@ -120,24 +120,17 @@ export async function submitOutboundAction(formData: any, allocation: any[]) {
       ", "
     );
 
-    // 1. Generate Transaction Code (ambil nomor terakhir, bukan count)
+    // 1. Generate Transaction Code
+    // PERBAIKAN: Gunakan count + microseconds untuk prevent race condition duplicate
     const todayStr = getIndonesianDateString();
-    const { data: lastTransaction } = await supabase
+    const { count } = await supabase
       .from("outbound_history")
-      .select("transaction_code")
-      .like("transaction_code", `OUT-${todayStr}%`)
-      .order("transaction_code", { ascending: false })
-      .limit(1)
-      .single();
+      .select("*", { count: "exact", head: true })
+      .gte("created_at", getIndonesianDate());
 
-    let nextNumber = 1;
-    if (lastTransaction?.transaction_code) {
-      // Extract nomor terakhir dari format OUT-YYYYMMDD-XXXX
-      const lastNumber = parseInt(lastTransaction.transaction_code.split("-")[2]);
-      nextNumber = lastNumber + 1;
-    }
-
-    const transactionCode = `OUT-${todayStr}-${String(nextNumber).padStart(4, "0")}`;
+    const sequence = String((count || 0) + 1).padStart(4, "0");
+    const microseconds = String(Date.now() % 1000000).padStart(6, "0"); // Add microseconds
+    const transactionCode = `OUT-${todayStr}-${sequence}-${microseconds}`;
 
     // 2. Simpan ke outbound_history dengan lokasi LENGKAP + FEFO STATUS
     const { data: outboundEntry, error: errOut } = await supabase

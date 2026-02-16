@@ -114,11 +114,16 @@ export async function moveStockAction(
     }
 
     // 4. Generate Transaction Code Permutasi
+    // PERBAIKAN: Gunakan count + microseconds untuk prevent duplicate (bukan random string)
     const todayStr = getIndonesianDateString();
-    const transactionCode = `PMT-${todayStr}-${Math.random()
-      .toString(36)
-      .substr(2, 4)
-      .toUpperCase()}`;
+    const { count } = await supabase
+      .from("permutasi_history")
+      .select("*", { count: "exact", head: true })
+      .gte("created_at", getIndonesianDateString());
+
+    const sequence = String((count || 0) + 1).padStart(4, "0");
+    const microseconds = String(Date.now() % 1000000).padStart(6, "0"); // Add microseconds
+    const transactionCode = `PMT-${todayStr}-${sequence}-${microseconds}`;
 
     // 5. Update stock_list (Pindah lokasi + Update status - PRESERVE created_at!)
     const { error: errUpdate } = await supabase

@@ -81,12 +81,14 @@ interface OutboundFormProps {
   products: Product[];
   warehouseId: string;
   history?: OutboundHistory[];
+  productHomes: any[]; // CRITICAL: For validation
 }
 
 export function OutboundForm({
   products,
   warehouseId,
   history = [],
+  productHomes,
 }: OutboundFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
@@ -218,6 +220,12 @@ export function OutboundForm({
 
   // Handle submit
   const handleSubmit = () => {
+    // Proteksi: Jika sedang submit, tampilkan error dan return
+    if (isSubmitting) {
+      error("Proses sedang berjalan. Mohon tunggu, proses sebelumnya masih belum selesai.");
+      return;
+    }
+
     // Validation
     const errors: string[] = [];
 
@@ -229,6 +237,16 @@ export function OutboundForm({
     }
     if (!form.productCode) {
       errors.push("Produk harus dipilih!");
+    }
+    // CRITICAL: Validasi produk HARUS punya product home
+    const selectedProduct = products.find(p => p.product_code === form.productCode);
+    if (selectedProduct) {
+      const hasProductHome = productHomes.some((h: any) => 
+        h.product_id === selectedProduct.id && h.is_active === true
+      );
+      if (!hasProductHome) {
+        errors.push(`Produk "${selectedProduct.product_name}" belum memiliki Product Home! Silakan hubungi Admin Cabang untuk menambahkan Product Home terlebih dahulu di Master Data Stock.`);
+      }
     }
     if (totalPalletsNeeded <= 0) {
       errors.push("Qty (Pallet/Karton) harus diisi!");

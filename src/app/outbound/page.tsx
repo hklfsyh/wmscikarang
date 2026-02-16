@@ -30,6 +30,13 @@ export default async function OutboundPage() {
     .eq("warehouse_id", profile.warehouse_id)
     .order("product_name", { ascending: true });
 
+  // CRITICAL: Ambil product_homes untuk validasi produk
+  const { data: productHomes } = await supabase
+    .from("product_homes")
+    .select("*")
+    .eq("warehouse_id", profile.warehouse_id)
+    .eq("is_active", true);
+
   // 3. LOGIKA BARU: Jika Admin Cabang, ambil SEMUA riwayat riil
   if (profile.role === "admin_cabang") {
     const { data: realHistory } = await supabase
@@ -103,6 +110,7 @@ export default async function OutboundPage() {
       products={products || []}
       warehouseId={profile.warehouse_id || ""}
       history={formattedTodayHistory}
+      productHomes={productHomes || []}
     />
   );
 }

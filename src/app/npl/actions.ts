@@ -35,15 +35,16 @@ export async function submitNplAction(formData: any, placements: any[]) {
     if (!user) throw new Error("Sesi berakhir.");
 
     // 1. Generate Transaction Code NPL
+    // PERBAIKAN: Tambahkan microseconds untuk prevent duplicate di submit berturut-turut
     const todayStr = getIndonesianDateString();
     const { count } = await supabase
       .from("npl_history")
       .select("*", { count: "exact", head: true })
       .gte("created_at", getIndonesianDate());
 
-    const transactionCode = `NPL-${todayStr}-${String(
-      (count || 0) + 1
-    ).padStart(4, "0")}`;
+    const sequence = String((count || 0) + 1).padStart(4, "0");
+    const microseconds = String(Date.now() % 1000000).padStart(6, "0"); // Add microseconds
+    const transactionCode = `NPL-${todayStr}-${sequence}-${microseconds}`;
 
     // 2. Simpan ke npl_history dengan enhanced locations (include stock_id nanti)
     const enhancedPlacements = placements.map(loc => ({

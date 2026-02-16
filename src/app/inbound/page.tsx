@@ -55,7 +55,7 @@ export default async function InboundPage() {
     .select("id, full_name, username")
     .eq("warehouse_id", profile.warehouse_id);
 
-  // 2. Ambil Riwayat Inbound (History)
+  // 2. Ambil Riwayat Inbound (History) - Include NPL untuk admin_cabang
   let historyQuery = supabase
     .from("inbound_history")
     .select("*")
@@ -69,6 +69,17 @@ export default async function InboundPage() {
   }
 
   const { data: historyData } = await historyQuery;
+
+  // Untuk admin_cabang, INCLUDE NPL history sebagai secondary inbound
+  let nplHistoryData: any[] = [];
+  if (profile.role === "admin_cabang") {
+    const { data: nplData } = await supabase
+      .from("npl_history")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id)
+      .order("return_time", { ascending: false });
+    nplHistoryData = nplData || [];
+  }
 
   // Mapping data history agar camelCase sesuai interface UI lama Anda
   const formattedHistory = (historyData || []).map((item: any) => ({
@@ -85,8 +96,33 @@ export default async function InboundPage() {
     qtyCarton: item.qty_carton,
     receivedBy: item.received_by,
     notes: item.notes,
-    locations: item.locations // JSONB sudah otomatis jadi array of objects
+    locations: item.locations, // JSONB sudah otomatis jadi array of objects
+    source: "inbound" // Tag untuk membedakan sumber
   }));
+
+  // Map NPL history dengan format yang sama (sebagai secondary inbound)
+  const formattedNPLHistory = nplHistoryData.map((item: any) => ({
+    id: item.id,
+    transactionCode: item.transaction_code,
+    productId: item.product_id,
+    arrivalTime: item.return_time, // NPL use return_time
+    expeditionId: null, // NPL tidak ada expedition
+    driverName: item.driver_name,
+    vehicleNumber: item.vehicle_number,
+    dnNumber: null, // NPL tidak ada DN number
+    bbProduk: item.bb_produk,
+    expiredDate: item.expired_date,
+    qtyCarton: item.qty_carton,
+    receivedBy: item.returned_by, // returned_by = received_by
+    notes: item.notes || "NPL (Nota Pengembalian Lapangan)",
+    locations: item.locations,
+    source: "npl" // Tag untuk membedakan sumber
+  }));
+
+  // Gabungkan dan sort by time (descending)
+  const combinedHistory = [...formattedHistory, ...formattedNPLHistory].sort((a, b) => 
+    new Date(b.arrivalTime).getTime() - new Date(a.arrivalTime).getTime()
+  );
 
   return (
     <InboundClientDispatcher 
@@ -98,7 +134,7 @@ export default async function InboundPage() {
       warehouseId={profile.warehouse_id}
       clusterConfigs={clusterConfigs || []}
       clusterOverrides={clusterOverrides || []}
-      historyData={formattedHistory}
+      historyData={combinedHistory}
       users={users || []}
     />
   );

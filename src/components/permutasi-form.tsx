@@ -647,6 +647,12 @@ return null;
 
   // Open confirm modal before move
   const handleMoveClick = () => {
+    // Proteksi: Jika sedang submit, tampilkan error dan return
+    if (isSubmitting) {
+      error("Proses sedang berjalan. Mohon tunggu, proses sebelumnya masih belum selesai.");
+      return;
+    }
+
     if (!itemToMove) return;
 
     if (!moveReason.trim()) {

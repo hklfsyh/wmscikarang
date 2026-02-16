@@ -1135,65 +1135,10 @@ export function InboundForm({
           }
         }
       }
-    } else {
-      // Product has NO homes in this cluster - use entire cluster range
-      const lorongStart = 1;
-      const lorongEnd = clusterConfig.default_lorong_count;
-      
-      for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
-        if (remainingPallets === 0) break;
-
-        // Skip In Transit area in primary phase
-        if (isInTransitLocation(clusterChar, lorongNum)) {
-          continue;
-        }
-        
-        // Get baris count for this lorong (dynamic)
-        const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
-        
-        for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
-          if (remainingPallets === 0) break;
-
-          // Get pallet capacity for this cell (dynamic)
-          const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
-
-          // Find empty slots in this baris
-          const emptySlotsInBaris: RecommendedLocation[] = [];
-          for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
-            const lorong = `L${lorongNum}`;
-            const baris = `B${barisNum}`;
-            const level = `P${palletNum}`;
-
-            // Check if location is empty (filter by current warehouse)
-            const locationExists = stockData.some(
-              (item: StockItem) =>
-                item.warehouse_id === warehouseId &&
-                item.cluster === clusterChar &&
-                item.lorong === parseInt(lorong.replace('L', '')) &&
-                item.baris === parseInt(baris.replace('B', '')) &&
-                item.level === parseInt(level.replace('P', ''))
-            );
-
-            if (!locationExists) {
-              emptySlotsInBaris.push({
-                clusterChar,
-                lorong,
-                baris,
-                level,
-                palletsCanFit: 1,
-              });
-            }
-          }
-
-          // Allocate empty slots
-          for (const slot of emptySlotsInBaris) {
-            if (remainingPallets === 0) break;
-            locations.push(slot);
-            remainingPallets--;
-          }
-        }
-      }
     }
+    // CRITICAL FIX: REMOVED DANGEROUS FALLBACK!
+    // Jika produk tidak punya home, jangan coba-coba alokasi lokasi fiktif!
+    // Validasi di handleSubmit() akan mencegah submit jika no product home.
 
     // PHASE 2: If still have remaining pallets, use In Transit area (overflow)
     // CROSS-CLUSTER IN TRANSIT: Search Cluster C In Transit for ALL products (global overflow buffer)
@@ -2006,6 +1951,12 @@ export function InboundForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Proteksi: Jika sedang submit, tampilkan notifikasi dan return
+    if (isSubmitting) {
+      error("Proses sedang berjalan. Mohon tunggu, proses sebelumnya masih belum selesai.");
+      return;
+    }
+
     // DEBUG: Log state saat submit
 
 
@@ -2035,6 +1986,13 @@ export function InboundForm({
     if (!form.productCode) {
       newErrors.productCode = "Produk harus dipilih";
       errorList.push("Produk harus dipilih");
+    }
+    // CRITICAL: Validasi produk HARUS punya product home
+    if (selectedProduct) {
+      const hasProductHome = productHomes.some((h: any) => h.product_id === selectedProduct.id && h.is_active === true);
+      if (!hasProductHome) {
+        errorList.push(`Produk "${selectedProduct.product_name}" belum memiliki Product Home! Silakan hubungi Admin Cabang untuk menambahkan Product Home terlebih dahulu di Master Data Stock.`);
+      }
     }
 
     // Validasi Multi-BB Mode
