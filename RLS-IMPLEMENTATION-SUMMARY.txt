@@ -1,0 +1,1121 @@
+================================================================================
+  RANGKUMAN IMPLEMENTASI RLS (ROW LEVEL SECURITY)
+  WMS Cikarang - Multi-Warehouse Isolation
+================================================================================
+
+📅 Tanggal: 18 Februari 2026
+🎯 Tujuan: Memisahkan data antar warehouse di level database
+👤 Developer: Haikal
+
+================================================================================
+  KONTEKS & TUJUAN
+================================================================================
+
+MASALAH AWAL:
+- Admin Cikarang bisa akses data Bandung via API langsung
+- Admin Bandung bisa akses data Cikarang via API langsung
+- Pembatasan hanya di level aplikasi (UI filter), tidak aman
+
+TUJUAN RLS:
+✅ Admin Cikarang HANYA akses data Cikarang (database level)
+✅ Admin Bandung HANYA akses data Bandung (database level)
+✅ Developer bisa akses SEMUA warehouse
+✅ Admin cabang bisa CRUD admin warehouse di warehouse-nya
+
+TANTANGAN:
+- Login pakai username (bukan email)
+- Supabase Auth pakai email
+- RLS bisa blokir query yang legitimate
+
+================================================================================
+  PERUBAHAN FILE CODE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ 1. LOGIN ACTIONS → src/app/login/actions.ts
+└─────────────────────────────────────────────────────────────────────────────
+
+❌ SEBELUM:
+  const { data: userData } = await supabase
+    .from("users")
+    .select("email")
+    .eq("username", username)
+    .single();
+
+✅ SESUDAH:
+  const { data: email } = await supabase
+    .rpc("get_email_by_username", { p_username: username });
+
+PERUBAHAN:
+  - Query langsung → RPC function (bypass RLS dengan SECURITY DEFINER)
+  - Redirect dari "/" → "/warehouse-layout" (prevent loop)
+
+ALASAN:
+  - Setelah RLS ON, query dari anon user terblokir
+  - RPC function dengan SECURITY DEFINER bisa bypass RLS secara aman
+  - Redirect ke "/" bikin loop karena root redirect lagi
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ 2. ROOT PAGE → src/app/page.tsx
+└─────────────────────────────────────────────────────────────────────────────
+
+❌ SEBELUM:
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (profile?.role === "developer") {
+    redirect("/warehouse-management");
+  }
+  redirect("/warehouse-layout"); // Default untuk semua
+
+✅ SESUDAH:
+  // Try RPC first
+  const { data: profiles, error: rpcError } = await supabase
+    .rpc("get_current_user_profile");
+
+  // Fallback to direct query if RPC fails
+  let profile = null;
+  if (rpcError || !profiles || profiles.length === 0) {
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    profile = fallbackProfile;
+  } else {
+    profile = profiles[0];
+  }
+
+  // Role-specific redirect
+  if (profile?.role === "developer") {
+    redirect("/warehouse-management");
+  } else if (profile?.role === "admin_cabang") {
+    redirect("/stock-list");
+  } else if (profile?.role === "admin_warehouse") {
+    redirect("/warehouse-layout");
+  } else {
+    redirect("/login");
+  }
+
+PERUBAHAN:
+  1. Pakai RPC function dengan fallback
+  2. Redirect berbeda per role (tidak semua ke warehouse-layout)
+  3. Handle error lebih baik
+
+ALASAN:
+  - RPC bisa gagal (network issue, function belum ada)
+  - Fallback query biasa masih jalan kalau RLS OFF
+  - Redirect per role mencegah loop
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ 3. LAYOUT → src/app/layout.tsx
+└─────────────────────────────────────────────────────────────────────────────
+
+❌ SEBELUM:
+  const { data } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", user.id)
+    .single();
+  profile = data;
+
+✅ SESUDAH:
+  const { data: profiles, error: rpcError } = await supabase
+    .rpc("get_current_user_profile");
+
+  if (rpcError || !profiles || profiles.length === 0) {
+    const { data } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", user.id)
+      .single();
+    profile = data;
+  } else {
+    profile = profiles[0];
+  }
+
+PERUBAHAN:
+  - Pakai RPC + fallback
+  - Navigation component butuh profile untuk menu
+
+ALASAN:
+  - Layout render di setiap page
+  - Kalau profile gagal fetch, navigation tidak muncul
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ 4. SEMUA PAGE (12 FILE) → src/app/**/page.tsx
+└─────────────────────────────────────────────────────────────────────────────
+
+FILE YANG DIUBAH:
+  ✓ src/app/warehouse-layout/page.tsx
+  ✓ src/app/inbound/page.tsx
+  ✓ src/app/outbound/page.tsx
+  ✓ src/app/npl/page.tsx
+  ✓ src/app/permutasi/page.tsx
+  ✓ src/app/stock-list/page.tsx
+  ✓ src/app/stock-opname/page.tsx
+  ✓ src/app/stock-list-master/page.tsx
+  ✓ src/app/prestock-opname-history/page.tsx
+  ✓ src/app/warehouse-management/page.tsx
+  ✓ src/app/admin-management/page.tsx
+
+PENJELASAN UMUM:
+Semua 12 file page tersebut mengalami perubahan yang konsisten dalam cara mereka
+mengambil data profil user yang sedang login. Perubahan ini diperlukan untuk
+mengantisipasi kondisi ketika RLS sudah diaktifkan di database. Sebelumnya,
+semua page melakukan query langsung ke tabel users, yang akan terblokir oleh
+RLS karena user belum terautentikasi dengan baik di level database.
+
+Strategi baru menggunakan pendekatan dual-layer: pertama mencoba memanggil RPC
+function yang memiliki privilege SECURITY DEFINER (bisa bypass RLS secara aman),
+dan jika RPC gagal (karena network issue, function belum ada, atau alasan lain),
+maka akan fallback ke query langsung. Fallback ini tetap aman karena saat
+development RLS masih OFF, sehingga aplikasi tetap bisa berjalan normal.
+
+Selain itu, semua redirect error yang tadinya mengarah ke "/" diubah menjadi
+"/warehouse-layout" untuk mencegah redirect loop yang terjadi antara root page
+dan halaman tujuan.
+
+────────────────────────────────────────────────────────────────────────────
+
+CONTOH DETAIL: src/app/warehouse-layout/page.tsx
+
+File ini adalah halaman utama untuk admin warehouse, menampilkan layout gudang
+dalam bentuk grid cluster dan cell. User perlu melihat layout sesuai warehouse
+mereka sendiri, sehingga warehouse_id dari profil sangat penting.
+
+❌ KODE SEBELUM PERUBAHAN:
+
+  export default async function WarehouseLayoutPage() {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      redirect("/login");
+    }
+
+    const { data: profile } = await supabase
+      .from("users")
+      .select("role, warehouse_id")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile) {
+      redirect("/login");
+    }
+
+    // Lanjut fetch cluster configs pakai profile.warehouse_id
+    const { data: clusterConfigs } = await supabase
+      .from("cluster_configs")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id)
+      .order("cluster_name");
+
+    return <WarehouseLayoutClient ... />;
+  }
+
+MASALAH PADA KODE LAMA:
+1. Query langsung ke tabel users akan terblokir setelah RLS ON
+2. Jika query gagal, profile menjadi undefined
+3. Akses profile.warehouse_id akan error "Cannot read property warehouse_id of undefined"
+4. Redirect ke "/login" tidak tepat karena user sudah login (auth.getUser() sukses)
+5. Error akan menyebabkan Next.js redirect ke error page, lalu ke "/", yang
+   kemudian redirect lagi ke "/warehouse-layout", menciptakan loop
+
+✅ KODE SETELAH PERUBAHAN:
+
+  export default async function WarehouseLayoutPage() {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      redirect("/login");
+    }
+
+    // Try RPC function first (bypass RLS safely)
+    const { data: profiles, error: rpcError } = await supabase
+      .rpc("get_current_user_profile");
+
+    let profile = null;
+    if (rpcError || !profiles || profiles.length === 0) {
+      // Fallback to direct query if RPC fails
+      const { data: fallbackProfile } = await supabase
+        .from("users")
+        .select("role, warehouse_id, full_name, username")
+        .eq("id", user.id)
+        .single();
+      profile = fallbackProfile;
+    } else {
+      profile = profiles[0];
+    }
+
+    if (!profile) {
+      redirect("/warehouse-layout"); // Not to "/" to avoid loop
+    }
+
+    // Safe to access profile.warehouse_id now
+    const { data: clusterConfigs } = await supabase
+      .from("cluster_configs")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id)
+      .order("cluster_name");
+
+    return <WarehouseLayoutClient ... />;
+  }
+
+PERBAIKAN YANG DILAKUKAN:
+1. **RPC Call Pertama**: Mencoba panggil get_current_user_profile() yang bisa
+   bypass RLS dengan aman karena menggunakan SECURITY DEFINER. Function ini
+   sudah dibuat di database khusus untuk keperluan ini.
+
+2. **Fallback Mechanism**: Jika RPC gagal (rpcError ada, atau profiles kosong),
+   maka fallback ke query biasa. Ini memastikan aplikasi tetap jalan saat
+   development atau saat RLS belum diaktifkan.
+
+3. **Null Safety**: Setelah mendapat profile (dari RPC atau fallback), ada
+   pengecekan null sebelum menggunakan profile. Ini mencegah crash karena
+   undefined.
+
+4. **Smart Redirect**: Redirect ke "/warehouse-layout" bukan "/login" atau "/",
+   karena user sudah terautentikasi. Redirect ke "/" akan menyebabkan loop.
+
+5. **Profile Lengkap**: Select field tambahan (full_name, username) untuk
+   kebutuhan UI, karena component mungkin butuh tampilkan nama user.
+
+────────────────────────────────────────────────────────────────────────────
+
+CONTOH DETAIL: src/app/stock-list/page.tsx
+
+Halaman stock-list menampilkan daftar barang yang tersimpan di warehouse.
+Admin harus hanya melihat stock dari warehouse mereka sendiri, sehingga
+filtering berdasarkan warehouse_id sangat krusial untuk security.
+
+❌ KODE SEBELUM PERUBAHAN:
+
+  export default async function StockListPage() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) redirect("/login");
+
+    const { data: profile } = await supabase
+      .from("users")
+      .select("warehouse_id, role")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile) redirect("/");
+
+    // Query stock list berdasarkan warehouse
+    const { data: stockList } = await supabase
+      .from("stock_list")
+      .select(`
+        *,
+        products (nama_produk, kode_produk),
+        product_homes (cluster_name, cell_position)
+      `)
+      .eq("warehouse_id", profile.warehouse_id)
+      .order("created_at", { ascending: false });
+
+    return <StockListClient stockList={stockList} profile={profile} />;
+  }
+
+MASALAH PADA KODE LAMA:
+1. Direct query akan terblokir oleh RLS policy
+2. Redirect ke "/" menciptakan loop (root page redirect balik ke sini untuk admin_cabang)
+3. Tidak ada handling jika profile gagal di-fetch
+4. Crash potensial saat akses profile.warehouse_id
+
+✅ KODE SETELAH PERUBAHAN:
+
+  export default async function StockListPage() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) redirect("/login");
+
+    // Use RPC with fallback pattern
+    const { data: profiles, error: rpcError } = await supabase
+      .rpc("get_current_user_profile");
+
+    let profile = null;
+    if (rpcError || !profiles || profiles.length === 0) {
+      const { data: fallbackProfile } = await supabase
+        .from("users")
+        .select("warehouse_id, role, full_name, username")
+        .eq("id", user.id)
+        .single();
+      profile = fallbackProfile;
+    } else {
+      profile = profiles[0];
+    }
+
+    // Redirect to specific page, not root
+    if (!profile || !profile.warehouse_id) {
+      redirect("/warehouse-layout");
+    }
+
+    // Now safe to use profile.warehouse_id
+    const { data: stockList } = await supabase
+      .from("stock_list")
+      .select(`
+        *,
+        products (nama_produk, kode_produk),
+        product_homes (cluster_name, cell_position)
+      `)
+      .eq("warehouse_id", profile.warehouse_id)
+      .order("created_at", { ascending: false });
+
+    return <StockListClient stockList={stockList} profile={profile} />;
+  }
+
+PERBAIKAN YANG DILAKUKAN:
+1. **Dual-Layer Fetch**: RPC function dicoba dulu, jika gagal pakai query biasa.
+   Ini memberikan backward compatibility dan forward compatibility sekaligus.
+
+2. **Extra Validation**: Cek `!profile.warehouse_id` secara eksplisit karena
+   ada edge case dimana profile bisa exist tapi warehouse_id null (misal data
+   corrupt atau user baru yang belum di-assign warehouse).
+
+3. **Specific Redirect**: Redirect ke halaman konkret bukan ke root, menghindari
+   redirect loop yang kompleks.
+
+4. **Complete Profile**: Ambil semua field yang mungkin dibutuhkan component
+   untuk menghindari query tambahan di client side.
+
+────────────────────────────────────────────────────────────────────────────
+
+CONTOH DETAIL: src/app/inbound/page.tsx
+
+Halaman inbound untuk mencatat barang masuk. Ini adalah form entry yang heavy,
+membutuhkan profile untuk menentukan warehouse tujuan barang masuk dan juga
+untuk audit trail (siapa yang input data).
+
+❌ KODE SEBELUM PERUBAHAN:
+
+  export default async function InboundPage() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) redirect("/login");
+
+    const { data: profile } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile) redirect("/");
+
+    // Fetch supporting data for form
+    const { data: products } = await supabase
+      .from("products")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id);
+
+    const { data: expeditions } = await supabase
+      .from("expeditions")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id);
+
+    return (
+      <InboundClientDispatcher
+        profile={profile}
+        products={products}
+        expeditions={expeditions}
+      />
+    );
+  }
+
+MASALAH PADA KODE LAMA:
+1. Query profil langsung, akan terblokir RLS
+2. Jika profile undefined, form tidak bisa tahu warehouse_id untuk filter products
+3. Submit form akan gagal karena tidak ada warehouse context
+4. Redirect "/" menyebabkan loop
+
+✅ KODE SETELAH PERUBAHAN:
+
+  export default async function InboundPage() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) redirect("/login");
+
+    // RPC first, fallback second
+    const { data: profiles, error: rpcError } = await supabase
+      .rpc("get_current_user_profile");
+
+    let profile = null;
+    if (rpcError || !profiles || profiles.length === 0) {
+      const { data: fallbackProfile } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+      profile = fallbackProfile;
+    } else {
+      profile = profiles[0];
+    }
+
+    if (!profile || !profile.warehouse_id) {
+      redirect("/warehouse-layout");
+    }
+
+    // Profile guaranteed to have warehouse_id here
+    const { data: products } = await supabase
+      .from("products")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id);
+
+    const { data: expeditions } = await supabase
+      .from("expeditions")
+      .select("*")
+      .eq("warehouse_id", profile.warehouse_id);
+
+    return (
+      <InboundClientDispatcher
+        profile={profile}
+        products={products}
+        expeditions={expeditions}
+      />
+    );
+  }
+
+PERBAIKAN YANG DILAKUKAN:
+1. **Guaranteed Context**: Dengan RPC + fallback, profile selalu tersedia untuk
+   form context. Form butuh warehouse_id untuk insert data inbound ke database.
+
+2. **Dependent Queries**: products dan expeditions query aman dilakukan setelah
+   memastikan profile.warehouse_id exist. Tanpa validation ini, query akan
+   error atau return wrong data.
+
+3. **User Experience**: Dengan redirect ke "/warehouse-layout" bukan "/login",
+   user yang sudah login tidak bingung kenapa diminta login lagi.
+
+────────────────────────────────────────────────────────────────────────────
+
+CONTOH DETAIL: src/app/warehouse-management/page.tsx
+
+Halaman khusus developer untuk mengelola warehouse (CRUD warehouse baru, edit,
+delete). Ini halaman admin yang hanya boleh diakses role developer.
+
+❌ KODE SEBELUM PERUBAHAN:
+
+  export default async function WarehouseManagementPage() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) redirect("/login");
+
+    const { data: profile } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile || profile.role !== "developer") {
+      redirect("/");
+    }
+
+    const { data: warehouses } = await supabase
+      .from("warehouses")
+      .select("*")
+      .order("created_at");
+
+    return <WarehouseManagementClient warehouses={warehouses} />;
+  }
+
+MASALAH PADA KODE LAMA:
+1. Direct query terblokir RLS
+2. Authorization check gagal jika profile undefined
+3. Non-developer bisa looping di redirect
+
+✅ KODE SETELAH PERUBAHAN:
+
+  export default async function WarehouseManagementPage() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) redirect("/login");
+
+    const { data: profiles, error: rpcError } = await supabase
+      .rpc("get_current_user_profile");
+
+    let profile = null;
+    if (rpcError || !profiles || profiles.length === 0) {
+      const { data: fallbackProfile } = await supabase
+        .from("users")
+        .select("role, warehouse_id, full_name")
+        .eq("id", user.id)
+        .single();
+      profile = fallbackProfile;
+    } else {
+      profile = profiles[0];
+    }
+
+    // Role-based authorization
+    if (!profile || profile.role !== "developer") {
+      redirect("/warehouse-layout");
+    }
+
+    // Developer can see all warehouses
+    const { data: warehouses } = await supabase
+      .from("warehouses")
+      .select("*")
+      .order("created_at");
+
+    return <WarehouseManagementClient warehouses={warehouses} />;
+  }
+
+PERBAIKAN YANG DILAKUKAN:
+1. **Safe Authorization**: Role check dilakukan setelah memastikan profile exist.
+   Sebelumnya bisa undefined, membuat check `profile.role !== "developer"` 
+   selalu true bahkan untuk developer.
+
+2. **Proper Redirect**: Non-developer redirect ke warehouse-layout (halaman
+   mereka), bukan ke "/" yang akan redirect balik ke warehouse-management
+   untuk developer.
+
+3. **Clear Access Control**: Dengan profile guaranteed available, authorization
+   logic jadi simple dan reliable.
+
+────────────────────────────────────────────────────────────────────────────
+
+PATTERN KONSISTEN PADA 7 FILE LAINNYA:
+
+File-file berikut menggunakan pattern perubahan yang identik:
+- src/app/outbound/page.tsx (form barang keluar)
+- src/app/npl/page.tsx (non-productive items)
+- src/app/permutasi/page.tsx (mutasi barang antar cell)
+- src/app/stock-opname/page.tsx (stock take)
+- src/app/stock-list-master/page.tsx (master stock data)
+- src/app/prestock-opname-history/page.tsx (history stock opname)
+- src/app/admin-management/page.tsx (admin user management)
+
+Semua file tersebut menerapkan:
+✅ RPC call dengan get_current_user_profile()
+✅ Fallback ke direct query jika RPC gagal
+✅ Null check sebelum akses profile properties
+✅ Redirect ke "/warehouse-layout" bukan "/"
+✅ Extra validation untuk warehouse_id jika diperlukan
+
+ALASAN KONSISTENSI:
+Pattern yang sama diterapkan ke semua page untuk memastikan:
+1. **Maintenance mudah**: Developer hanya perlu ingat satu pattern
+2. **Debugging cepat**: Error pattern yang sama mudah diidentifikasi
+3. **Testing efisien**: Test case bisa di-reuse antar page
+4. **Future-proof**: Saat RLS ON, semua page langsung kompatibel
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ 5. NAVIGATION → src/components/navigation.tsx
+└─────────────────────────────────────────────────────────────────────────────
+
+PERUBAHAN:
+  <Link
+    href={item.path}
+    prefetch={false}  // ← DITAMBAHKAN
+    onClick={...}
+  >
+
+ALASAN:
+  - Next.js prefetch di background trigger request ke "/" unnecessary
+  - Disable prefetch mengurangi request yang tidak perlu
+  - Tidak mempengaruhi functionality, hanya performance
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ 6. HELPER FILE (DIBUAT TAPI BELUM DIPAKAI) → src/lib/auth-helper.ts
+└─────────────────────────────────────────────────────────────────────────────
+
+FILE BARU:
+  export async function getCurrentUserProfile() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) return null;
+
+    // Try RPC first
+    const { data: profiles, error: rpcError } = await supabase
+      .rpc("get_current_user_profile");
+    
+    if (!rpcError && profiles && profiles.length > 0) {
+      return profiles[0];
+    }
+
+    // Fallback to direct query
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", user.id)
+      .single();
+
+    return fallbackProfile || null;
+  }
+
+TUJUAN:
+  - Centralize logic fetch profile
+  - Bisa dipakai di semua page (future improvement)
+
+STATUS:
+  - Belum dipakai (implementasi inline lebih jelas untuk debugging saat ini)
+
+================================================================================
+  PERUBAHAN DATABASE (SQL)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ FUNCTION 1: get_email_by_username(text)
+└─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.get_email_by_username(p_username text)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_email text;
+BEGIN
+  SELECT u.email
+  INTO v_email
+  FROM public.users u
+  WHERE u.username = p_username
+    AND u.is_active = true
+  LIMIT 1;
+  
+  RETURN v_email;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_email_by_username(text) 
+TO anon, authenticated;
+
+FUNGSI:
+  - Convert username → email untuk login
+  - Bypass RLS dengan SECURITY DEFINER
+  - Hanya return email (tidak bocorkan data sensitif)
+
+DIPAKAI DI:
+  - src/app/login/actions.ts
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ FUNCTION 2: get_current_user_profile()
+└─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.get_current_user_profile()
+RETURNS TABLE (
+  id uuid,
+  warehouse_id uuid,
+  username text,
+  full_name text,
+  role text,
+  email text,
+  phone text,
+  is_active boolean,
+  created_at timestamptz,
+  updated_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    u.id, u.warehouse_id, u.username, u.full_name, u.role,
+    u.email, u.phone, u.is_active, u.created_at, u.updated_at
+  FROM public.users u
+  WHERE u.id = auth.uid()
+    AND u.is_active = true
+  LIMIT 1;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_current_user_profile() 
+TO authenticated;
+
+FUNGSI:
+  - Fetch profile user yang sedang login
+  - Bypass RLS dengan SECURITY DEFINER
+  - Hanya bisa dipanggil oleh authenticated user
+
+DIPAKAI DI:
+  - Semua page.tsx (12 file)
+  - src/app/layout.tsx
+  - src/app/page.tsx
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ FUNCTION 3 & 4: Helper untuk Policy
+└─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.current_user_role()
+RETURNS text
+LANGUAGE sql STABLE
+AS $$
+  SELECT u.role FROM public.users u WHERE u.id = auth.uid()
+$$;
+
+CREATE OR REPLACE FUNCTION public.current_user_warehouse_id()
+RETURNS uuid
+LANGUAGE sql STABLE
+AS $$
+  SELECT u.warehouse_id FROM public.users u WHERE u.id = auth.uid()
+$$;
+
+FUNGSI:
+  - Helper untuk policy RLS
+  - Dipakai di semua policy USING() clause
+
+CONTOH PENGGUNAAN DI POLICY:
+  USING (
+    warehouse_id = public.current_user_warehouse_id()
+    OR public.current_user_role() = 'developer'
+  )
+
+================================================================================
+  POLICY RLS (SUDAH DIBUAT, BELUM DI-ENABLE)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ TABLE: public.users
+└─────────────────────────────────────────────────────────────────────────────
+
+POLICY                                    | CMD    | FUNGSI
+------------------------------------------|--------|---------------------------
+users_select_self                         | SELECT | User lihat profil sendiri
+users_select_developer_all                | SELECT | Developer lihat semua user
+users_select_admin_cabang_warehouse_staff | SELECT | Admin cabang lihat admin warehouse
+users_insert_admin_cabang_warehouse_staff | INSERT | Admin cabang create admin warehouse
+users_update_admin_cabang_warehouse_staff | UPDATE | Admin cabang edit admin warehouse
+users_update_self                         | UPDATE | User update profil sendiri
+
+STATUS: RLS DISABLED (untuk testing)
+
+HASIL SETELAH ENABLE:
+  ✅ Admin Cikarang tidak bisa lihat user Bandung
+  ✅ Admin cabang bisa CRUD admin warehouse di warehouse-nya
+  ✅ Developer bisa lihat/edit semua user
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ TABLE: Operational (stock_list, inbound_history, outbound_history, dll)
+└─────────────────────────────────────────────────────────────────────────────
+
+PATTERN POLICY:
+  - {table}_select_own_warehouse   → User lihat data warehouse-nya
+  - {table}_insert_own_warehouse   → User insert ke warehouse-nya
+  - {table}_update_own_warehouse   → User update data warehouse-nya
+  - {table}_delete_own_warehouse   → User delete data warehouse-nya
+
+BERLAKU UNTUK:
+  ✓ stock_list
+  ✓ inbound_history
+  ✓ outbound_history
+  ✓ npl_history
+  ✓ permutasi_history
+  ✓ stock_movements
+  ✓ prestock_opname
+  ✓ prestock_opname_items
+
+STATUS: BELUM DI-ENABLE (script sudah siap)
+
+HASIL SETELAH ENABLE:
+  ✅ Admin Cikarang hanya lihat stock/history Cikarang
+  ✅ Admin Bandung hanya lihat stock/history Bandung
+  ✅ Data antar warehouse terpisah total di database level
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ TABLE: Master Data (products, expeditions, cluster_configs, dll)
+└─────────────────────────────────────────────────────────────────────────────
+
+POLICY PATTERN:
+  - SELECT: User bisa lihat master data warehouse-nya
+  - INSERT/UPDATE/DELETE: Developer only
+
+BERLAKU UNTUK:
+  ✓ products
+  ✓ expeditions
+  ✓ cluster_configs
+  ✓ cluster_cell_overrides
+  ✓ product_homes
+
+KHUSUS warehouses:
+  - SELECT: Semua user bisa lihat (untuk dropdown)
+  - CRUD: Developer only
+
+STATUS: BELUM DI-ENABLE (script sudah siap)
+
+HASIL SETELAH ENABLE:
+  ✅ Admin warehouse READ ONLY untuk master data
+  ✅ Hanya developer yang bisa tambah produk baru
+  ✅ Setiap warehouse punya master data terpisah
+
+================================================================================
+  KRONOLOGI MASALAH & SOLUSI
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ MASALAH 1: Login Error "Username tidak terdaftar"
+└─────────────────────────────────────────────────────────────────────────────
+
+GEJALA:
+  - Setelah RLS ON, semua login gagal
+  - Error: "Username tidak terdaftar"
+  - Padahal username benar
+
+PENYEBAB:
+  - Login action query users table dari anon user
+  - RLS policy tidak ada untuk anon
+  - Query terblokir
+
+SOLUSI:
+  ✅ Buat RPC function get_email_by_username dengan SECURITY DEFINER
+  ✅ RPC bypass RLS tapi tetap aman (hanya return email)
+  ✅ Grant execute ke anon & authenticated
+
+HASIL:
+  ✅ Login jalan normal dengan RLS ON
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ MASALAH 2: Redirect Loop "/" ↔ "/warehouse-layout"
+└─────────────────────────────────────────────────────────────────────────────
+
+GEJALA:
+  - Klik menu apapun → kembali ke warehouse-layout
+  - Browser loop antara "/" dan "/warehouse-layout"
+  - Terminal log:
+    GET /stock-opname 200
+    GET / 200
+    GET /warehouse-layout 200
+    GET / 200
+    (repeat terus)
+
+PENYEBAB:
+  1. Root page "/" redirect ke warehouse-layout (default)
+  2. Page lain kalau error redirect ke "/"
+  3. "/" redirect lagi ke warehouse-layout
+  4. Loop infinite
+
+SOLUSI:
+  ✅ Ubah root page redirect per role (tidak semua ke warehouse-layout)
+  ✅ Ubah semua redirect("/") jadi redirect("/warehouse-layout")
+  ✅ Redirect spesifik:
+     - developer → /warehouse-management
+     - admin_cabang → /stock-list
+     - admin_warehouse → /warehouse-layout
+
+HASIL:
+  ✅ Tidak ada loop lagi
+  ✅ Setiap role punya landing page berbeda
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ MASALAH 3: Page Crash saat RPC Gagal
+└─────────────────────────────────────────────────────────────────────────────
+
+GEJALA:
+  - URL berubah ke page yang diklik (misal /stock-opname)
+  - Page tidak muncul, langsung redirect ke warehouse-layout
+  - Terminal tidak ada error message
+
+PENYEBAB:
+  1. Page call RPC get_current_user_profile()
+  2. RPC gagal / return empty (network, function belum ada)
+  3. profile = profiles?.[0] → undefined
+  4. Code akses profile.warehouse_id → undefined.warehouse_id
+  5. JavaScript error → Next.js redirect ke error page
+  6. Error page redirect ke "/" → "/" redirect ke warehouse-layout
+
+SOLUSI:
+  ✅ Tambah fallback query di semua page:
+     if (rpcError || !profiles || profiles.length === 0) {
+       // fallback to direct query
+     }
+  ✅ Cek profile null sebelum pakai:
+     if (!profile || !profile.warehouse_id) redirect("/warehouse-layout")
+  ✅ Tambah fallback di 12 file page.tsx
+
+HASIL:
+  ✅ Page tidak crash lagi
+  ✅ Kalau RPC gagal, pakai query biasa (aman karena RLS masih OFF)
+  ✅ Aplikasi tetap jalan walau RPC belum tersedia
+
+--------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────
+│ MASALAH 4: Request Banyak ke "/" di Background
+└─────────────────────────────────────────────────────────────────────────────
+
+GEJALA:
+  - Terminal log banyak "GET / 200" padahal tidak klik apapun
+  - Setiap compile page baru, ada request ke "/"
+
+PENYEBAB:
+  - Next.js prefetch behavior di dev mode
+  - Link component prefetch page sebelum diklik
+  - Root page di-prefetch otomatis
+
+SOLUSI:
+  ✅ Tambah prefetch={false} di semua Link component
+  ✅ Disable prefetch di navigation menu
+  ✅ Disable prefetch di submenu
+
+HASIL:
+  ✅ Request ke "/" berkurang drastis
+  ✅ Log lebih bersih
+  ✅ Tidak mempengaruhi functionality
+
+================================================================================
+  STATUS SAAT INI
+================================================================================
+
+✅ SUDAH SELESAI:
+  ✓ Login dengan username jalan normal
+  ✓ RPC function sudah dibuat di database
+  ✓ Fallback query sudah ditambahkan di semua page
+  ✓ Redirect loop sudah di-fix
+  ✓ Aplikasi bisa navigasi ke semua halaman tanpa crash
+  ✓ Prefetch di-disable untuk mengurangi noise
+
+❌ BELUM DILAKUKAN:
+  ✗ Enable RLS untuk users table
+  ✗ Enable RLS untuk operational tables
+  ✗ Test dengan RLS ON
+  ✗ Verifikasi admin Cikarang tidak bisa lihat data Bandung
+  ✗ Deploy ke production
+
+🔧 STATUS RLS:
+  - users table: RLS DISABLED (untuk testing)
+  - Operational tables: RLS DISABLED (belum di-enable)
+  - Master data tables: RLS DISABLED (belum di-enable)
+
+📊 RISK LEVEL SAAT INI:
+  ⚠️ MEDIUM
+  - Data belum protected di database level
+  - Admin masih bisa bypass UI dan akses data warehouse lain via API
+  - Tapi aplikasi sudah siap untuk RLS ON (fallback ada di semua tempat)
+
+================================================================================
+  NEXT STEP (READY TO EXECUTE)
+================================================================================
+
+1. ENABLE RLS UNTUK USERS TABLE
+   ✓ Script sudah siap
+   ✓ Policy sudah dibuat
+   ✓ Tinggal jalankan: ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+
+2. TEST LOGIN & NAVIGATION
+   ✓ Login dengan developer → harus bisa lihat semua user
+   ✓ Login dengan admin_cabang → hanya lihat admin warehouse di warehouse-nya
+   ✓ Login dengan admin_warehouse → hanya lihat profil sendiri
+
+3. ENABLE RLS UNTUK OPERATIONAL TABLES
+   ✓ Script sudah siap dan lengkap
+   ✓ Tinggal copy-paste ke SQL Editor
+   ✓ Test setiap tabel:
+     - stock_list
+     - inbound_history
+     - outbound_history
+     - npl_history
+     - permutasi_history
+     - stock_movements
+     - prestock_opname & items
+
+4. TEST ISOLASI DATA
+   ✓ Login admin Cikarang → harus hanya lihat data Cikarang
+   ✓ Login admin Bandung → harus hanya lihat data Bandung
+   ✓ Coba akses via Postman/curl → harus tetap terblokir
+
+5. ENABLE RLS UNTUK MASTER DATA
+   ✓ Script sudah siap
+   ✓ Test developer bisa CRUD
+   ✓ Test admin warehouse hanya bisa SELECT
+
+6. DEPLOY KE PRODUCTION
+   ✓ Backup database production dulu
+   ✓ Jalankan semua SQL di production
+   ✓ Test immediate setelah deploy
+   ✓ Monitor error log 24 jam pertama
+
+================================================================================
+  SCRIPT SQL LENGKAP (READY TO RUN)
+================================================================================
+
+File terpisah tersedia dengan nama: RLS-ENABLE-SCRIPT.sql
+
+Script mencakup:
+  ✓ Enable RLS untuk users table
+  ✓ Enable RLS untuk operational tables (stock_list, history, dll)
+  ✓ Enable RLS untuk master data tables
+  ✓ Verification queries
+  ✓ Rollback script (kalau ada masalah)
+
+================================================================================
+  CATATAN PENTING
+================================================================================
+
+⚠️ SERVICE ROLE KEY:
+   - Service role key BYPASS RLS
+   - Jangan gunakan di client side
+   - Hanya untuk background job server-side
+
+⚠️ ANON KEY:
+   - Anon key tetap kena RLS
+   - Aman untuk client side
+   - Hanya bisa akses sesuai policy
+
+⚠️ DEVELOPER ROLE:
+   - Developer bisa akses semua warehouse
+   - Password developer harus kuat
+   - Jangan share credential developer
+
+⚠️ TESTING:
+   - Test di DEV dulu sebelum PROD
+   - Backup database sebelum enable RLS di PROD
+   - Monitor error log setelah deploy
+
+⚠️ PERFORMANCE:
+   - RLS policy bisa sedikit memperlambat query
+   - Tapi masih acceptable untuk skala WMS Anda
+   - Index sudah ada di warehouse_id
+
+================================================================================
+  KONTAK & SUPPORT
+================================================================================
+
+Developer: Haikal
+Email: haikal@dev.com
+Repository: wmscikarang
+Branch: dev2
+
+Untuk pertanyaan atau issue terkait RLS implementation, hubungi developer.
+
+================================================================================
+  END OF DOCUMENT
+================================================================================

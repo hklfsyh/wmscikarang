@@ -589,12 +589,30 @@ export async function getSmartRecommendationAction(
     // 2. Ambil Data Produk & Aturan Rumah
     const { data: product, error: productError } = await supabase
       .from("products")
-      .select("id, default_cluster, product_homes(*)")
+      .select("id, product_name, default_cluster, product_homes(*)")
       .eq("product_code", productCode)
       .eq("warehouse_id", warehouseId)
       .single();
 
     if (productError || !product) throw new Error("Produk tidak ditemukan.");
+
+    // 2.1. VALIDASI: Cek apakah produk sudah punya Product Home
+    const productHomes = product.product_homes || [];
+    if (productHomes.length === 0) {
+      throw new Error(
+        `Konfigurasi produk belum lengkap. Silakan hubungi Admin Cabang untuk mengatur Product Home produk ini.`
+      );
+    }
+
+    // 2.2. VALIDASI: Cek konsistensi Default Cluster vs Product Home Cluster
+    const homeClusterChars = productHomes.map((h: any) => h.cluster_char);
+    const defaultCluster = product.default_cluster;
+    
+    if (defaultCluster && !homeClusterChars.includes(defaultCluster)) {
+      throw new Error(
+        `Konfigurasi produk tidak konsisten. Silakan hubungi Admin Cabang untuk memperbaiki pengaturan cluster produk ini.`
+      );
+    }
 
     // 3. Optimasi Query: Filter Lokasi Terisi (Saran #2)
     // Alih-alih mengambil semua stok, kita filter hanya di cluster yang relevan (Home & Transit)
@@ -611,9 +629,10 @@ export async function getSmartRecommendationAction(
         .eq("is_active", true),
       supabase
         .from("stock_list")
-        .select("cluster, lorong, baris, level, product_id, status, qty_carton")
+        .select("cluster, lorong, baris, level, product_id, status, qty_carton, bb_produk, expired_date")
         .eq("warehouse_id", warehouseId)
-        .in("cluster", relevantClusters), // Optimasi filter DB
+        .in("cluster", relevantClusters) // Optimasi filter DB
+        .order("expired_date", { ascending: true }), // FEFO: BB lama dulu
       supabase
         .from("cluster_cell_overrides")
         .select("*")
@@ -652,7 +671,7 @@ export async function getSmartRecommendationAction(
     // Helper: Get valid baris count untuk lorong tertentu (memperhitungkan override)
     const getValidBarisCount = (clusterChar: string, lorongNum: number): number => {
       const config = configs.find((c) => c.cluster_char === clusterChar);
-      if (!config) return 9; // Default
+      if (!config) return 7; // Default
 
       // Cek apakah ada override untuk lorong ini
       const override = overrides.find(
@@ -663,13 +682,13 @@ export async function getSmartRecommendationAction(
           o.custom_baris_count !== null
       );
 
-      return override?.custom_baris_count || 9; // Default 9 baris
+      return override?.custom_baris_count || config.default_baris_count || 7;
     };
 
     // Helper: Get valid pallet level untuk cell tertentu (memperhitungkan override)
     const getValidPalletLevel = (clusterChar: string, lorongNum: number, barisNum: number): number => {
       const config = configs.find((c) => c.cluster_char === clusterChar);
-      if (!config) return 3; // Default
+      if (!config) return 2; // Default
 
       // Cek override dengan custom_pallet_level
       const override = overrides.find(
@@ -681,7 +700,7 @@ export async function getSmartRecommendationAction(
           o.custom_pallet_level !== null
       );
 
-      return override?.custom_pallet_level || 3; // Default 3 level
+      return override?.custom_pallet_level || config.default_pallet_level || 2;
     };
 
     const recommendations: any[] = [];
@@ -699,11 +718,12 @@ export async function getSmartRecommendationAction(
         level: `P${recehLoc.level}`,
         phase: "receh_sharing",
         existingQty: recehLoc.qty_carton, // Metadata untuk UI
+        isWarning: false, // Lokasi receh aman (produk sama)
       });
       remaining--;
     }
 
-    // --- PHASE 1: CARI DI PRODUCT HOMES (Saran #3) ---
+    // --- PHASE 1: CARI DI PRODUCT HOMES (PRIMARY) dengan FEFO PRIORITY ---
     // Mengurutkan product_homes agar yang sesuai dengan default_cluster dicek lebih dulu
     const sortedHomes = [...(product.product_homes || [])].sort((a, b) => {
       if (a.cluster_char === product.default_cluster) return -1;
@@ -711,49 +731,89 @@ export async function getSmartRecommendationAction(
       return 0;
     });
 
-    for (const home of sortedHomes) {
-      if (remaining === 0) break;
+    // Collect all empty locations in product homes first
+    const emptyLocationsInHomes: Array<{
+      cluster: string;
+      lorong: number;
+      baris: number;
+      level: number;
+      fefoScore: number; // Lower = better (closer to oldest stock)
+    }> = [];
 
+    for (const home of sortedHomes) {
       for (let l = home.lorong_start; l <= home.lorong_end; l++) {
-        // PERBAIKAN: Gunakan validBarisCount dari override
         const validBarisCount = getValidBarisCount(home.cluster_char, l);
         const effectiveBarisEnd = Math.min(home.baris_end, validBarisCount);
 
         for (let b = home.baris_start; b <= effectiveBarisEnd; b++) {
-          // PERBAIKAN: Gunakan validPalletLevel dari override
           const validPalletLevel = getValidPalletLevel(home.cluster_char, l, b);
           const effectiveMaxLevel = Math.min(home.max_pallet_per_location || 3, validPalletLevel);
 
-          // PERBAIKAN: Cek level pallet secara berurutan (1 → 2 → 3) di lokasi yang sama
           for (let p = 1; p <= effectiveMaxLevel; p++) {
-            if (remaining === 0) break;
-            const currentCluster = home.cluster_char;
             const key = `${home.cluster_char}-${l}-${b}-${p}`;
             if (!occupiedSet.has(key)) {
-              recommendations.push({
-                clusterChar: currentCluster, // Gunakan cluster_char dari database
-                lorong: `L${l}`,
-                baris: `B${b}`,
-                level: `P${p}`,
-                phase: "primary_home",
+              // Calculate FEFO score: prioritize locations near oldest stock
+              // Find nearest occupied location with same product
+              let minDistance = 9999;
+              const sameProductStocks = occupied.filter(s => 
+                s.product_id?.toLowerCase() === product.id?.toLowerCase() &&
+                s.cluster === home.cluster_char
+              );
+
+              for (const stock of sameProductStocks) {
+                const distance = Math.abs(stock.lorong - l) + Math.abs(stock.baris - b) + Math.abs(stock.level - p);
+                if (distance < minDistance) {
+                  minDistance = distance;
+                }
+              }
+
+              emptyLocationsInHomes.push({
+                cluster: home.cluster_char,
+                lorong: l,
+                baris: b,
+                level: p,
+                fefoScore: minDistance, // Lower = closer to existing stock (FEFO priority)
               });
-              remaining--;
-              occupiedSet.add(key);
             }
           }
         }
       }
     }
 
-    // --- PHASE 2: OVERFLOW KE IN TRANSIT ---
+    // Sort by FEFO score (lower = better, prioritize locations near oldest stock)
+    emptyLocationsInHomes.sort((a, b) => {
+      // Primary: FEFO score (prioritas dekat stock lama)
+      if (a.fefoScore !== b.fefoScore) return a.fefoScore - b.fefoScore;
+      // Secondary: lorong, baris, level (sequential)
+      if (a.lorong !== b.lorong) return a.lorong - b.lorong;
+      if (a.baris !== b.baris) return a.baris - b.baris;
+      return a.level - b.level;
+    });
+
+    // Take needed locations from sorted list
+    for (const loc of emptyLocationsInHomes) {
+      if (remaining === 0) break;
+      recommendations.push({
+        clusterChar: loc.cluster,
+        lorong: `L${loc.lorong}`,
+        baris: `B${loc.baris}`,
+        level: `P${loc.level}`,
+        phase: "primary_home",
+        isWarning: false, // Lokasi di rumah = hijau (aman)
+      });
+      remaining--;
+      occupiedSet.add(`${loc.cluster}-${loc.lorong}-${loc.baris}-${loc.level}`);
+    }
+
+    // --- PHASE 2: OVERFLOW KE IN TRANSIT (C-L8 sampai L11) ---
     if (remaining > 0) {
       const transitLorong = [8, 9, 10, 11];
       for (const l of transitLorong) {
-        // PERBAIKAN: Gunakan validBarisCount untuk transit area
+        // Gunakan validBarisCount untuk transit area
         const validBarisCount = getValidBarisCount("C", l);
         
         for (let b = 1; b <= validBarisCount; b++) {
-          // PERBAIKAN: Gunakan validPalletLevel untuk transit area
+          // Gunakan validPalletLevel untuk transit area
           const validPalletLevel = getValidPalletLevel("C", l, b);
           
           for (let p = 1; p <= validPalletLevel; p++) {
@@ -761,11 +821,12 @@ export async function getSmartRecommendationAction(
             const key = `C-${l}-${b}-${p}`;
             if (!occupiedSet.has(key)) {
               recommendations.push({
-                clusterChar: "C", // Gunakan clusterChar secara eksplisit
+                clusterChar: "C",
                 lorong: `L${l}`,
                 baris: `B${b}`,
                 level: `P${p}`,
                 phase: "in_transit",
+                isWarning: true, // Transit = kuning (tidak ideal)
               });
               remaining--;
               occupiedSet.add(key);
@@ -775,7 +836,55 @@ export async function getSmartRecommendationAction(
       }
     }
 
-    // 4. Return Metadata Lengkap (Saran #4)
+    // --- PHASE 3: FALLBACK KE DEFAULT CLUSTER (SEQUENTIAL DARI L1-B1) ---
+    // Hanya jika transit juga penuh, cari di default cluster secara berurutan
+    if (remaining > 0 && product.default_cluster) {
+      const defaultClusterConfig = configs.find((c) => c.cluster_char === product.default_cluster);
+      
+      if (defaultClusterConfig) {
+        const maxLorong = defaultClusterConfig.default_lorong_count || 10;
+        
+        // Sequential scan dari lorong 1, baris 1
+        for (let l = 1; l <= maxLorong; l++) {
+          if (remaining === 0) break;
+          
+          const validBarisCount = getValidBarisCount(product.default_cluster, l);
+          
+          for (let b = 1; b <= validBarisCount; b++) {
+            if (remaining === 0) break;
+            
+            const validPalletLevel = getValidPalletLevel(product.default_cluster, l, b);
+            
+            for (let p = 1; p <= validPalletLevel; p++) {
+              if (remaining === 0) break;
+              
+              const key = `${product.default_cluster}-${l}-${b}-${p}`;
+              if (!occupiedSet.has(key)) {
+                recommendations.push({
+                  clusterChar: product.default_cluster,
+                  lorong: `L${l}`,
+                  baris: `B${b}`,
+                  level: `P${p}`,
+                  phase: "default_cluster_fallback",
+                  isWarning: true, // Bukan di rumah = merah (salah tempat)
+                });
+                remaining--;
+                occupiedSet.add(key);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 4. Validasi Akhir: Jika masih remaining > 0, berarti gudang benar-benar penuh
+    if (remaining > 0) {
+      throw new Error(
+        `Tidak ditemukan cukup lokasi kosong. Hubungi Admin Cabang untuk pengecekan kapasitas gudang.`
+      );
+    }
+
+    // 5. Return Metadata Lengkap (Saran #4)
     return {
       success: true,
       locations: recommendations,

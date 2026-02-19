@@ -18,12 +18,20 @@ export default async function RootLayout({
   // Ambil profil lengkap dari tabel public.users
   let profile = null;
   if (user) {
-    const { data } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", user.id)
-      .single();
-    profile = data;
+    const { data: profiles, error: rpcError } = await supabase
+      .rpc("get_current_user_profile");
+    
+    if (rpcError || !profiles || profiles.length === 0) {
+      // Fallback ke query biasa
+      const { data } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+      profile = data;
+    } else {
+      profile = profiles[0];
+    }
   }
 
   return (

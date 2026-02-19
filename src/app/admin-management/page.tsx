@@ -8,15 +8,25 @@ export default async function AdminManagementPage() {
 
   if (!user) redirect("/login");
 
-  // Ambil profil user login
-  const { data: profile } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
+  // Ambil profil user login dengan RPC + fallback
+  const { data: profiles, error: rpcError } = await supabase
+    .rpc("get_current_user_profile");
+  
+  let profile = null;
+  if (rpcError || !profiles || profiles.length === 0) {
+    // Fallback ke direct query jika RPC gagal
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("role, warehouse_id, full_name, username")
+      .eq("id", user.id)
+      .single();
+    profile = fallbackProfile;
+  } else {
+    profile = profiles[0];
+  }
 
   if (!profile || (profile.role !== "developer" && profile.role !== "admin_cabang")) {
-    redirect("/");
+    redirect("/warehouse-layout");
   }
 
   // AMBIL DATA SEMUA USER DARI DATABASE

@@ -11,11 +11,22 @@ export default async function WarehouseLayoutPage() {
   if (!user) redirect("/login");
 
   // 1. Ambil Profil User
-  const { data: profile } = await supabase
-    .from("users")
-    .select("role, warehouse_id, full_name, username")
-    .eq("id", user.id)
-    .single();
+  let profile = null;
+  
+  const { data: profiles, error: rpcError } = await supabase
+    .rpc("get_current_user_profile");
+  
+  if (rpcError || !profiles || profiles.length === 0) {
+    // Fallback ke query biasa
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("role, warehouse_id, full_name, username")
+      .eq("id", user.id)
+      .single();
+    profile = fallbackProfile;
+  } else {
+    profile = profiles[0];
+  }
 
   if (!profile) redirect("/login");
 

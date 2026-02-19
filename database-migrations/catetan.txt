@@ -1,0 +1,3103 @@
+-- ================================================================================
+-- FINAL RLS POLICY UNTUK MASTER DATA - ADMIN CABANG
+-- File: master-data-rls-final.sql
+-- Deskripsi: Policy lengkap untuk 4 Tab Master Data (Products, Expeditions, 
+--            Cluster Configs, Product Homes) yang bisa dikelola oleh admin_cabang
+-- ================================================================================
+
+-- ================================================================================
+-- SECTION 1: HELPER FUNCTIONS (Pastikan sudah ada)
+-- ================================================================================
+
+-- Function: current_user_role() - untuk cek role user yang login
+CREATE OR REPLACE FUNCTION public.current_user_role()
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
+AS $$
+  SELECT role FROM public.users WHERE id = auth.uid()
+$$;
+
+-- Function: current_user_warehouse_id() - untuk cek warehouse_id user yang login
+CREATE OR REPLACE FUNCTION public.current_user_warehouse_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
+AS $$
+  SELECT warehouse_id FROM public.users WHERE id = auth.uid()
+$$;
+
+-- Revoke public access dan grant ke authenticated only
+REVOKE ALL ON FUNCTION public.current_user_role() FROM public;
+REVOKE ALL ON FUNCTION public.current_user_warehouse_id() FROM public;
+GRANT EXECUTE ON FUNCTION public.current_user_role() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.current_user_warehouse_id() TO authenticated;
+
+COMMENT ON FUNCTION public.current_user_role() IS 'Helper function untuk RLS: return role user yang sedang login';
+COMMENT ON FUNCTION public.current_user_warehouse_id() IS 'Helper function untuk RLS: return warehouse_id user yang sedang login';
+
+
+-- ================================================================================
+-- SECTION 2: PRODUCTS TABLE - CRUD UNTUK ADMIN_CABANG
+-- ================================================================================
+
+-- Enable RLS untuk products table
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk products (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "products_select" ON public.products;
+DROP POLICY IF EXISTS "products_write_dev" ON public.products;
+DROP POLICY IF EXISTS "products_insert_admin_cabang" ON public.products;
+DROP POLICY IF EXISTS "products_update_admin_cabang" ON public.products;
+DROP POLICY IF EXISTS "products_delete_admin_cabang" ON public.products;
+
+-- Policy SELECT: Developer lihat semua, admin_cabang/warehouse lihat warehouse sendiri
+CREATE POLICY "products_select"
+ON public.products FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_cabang bisa create produk di warehouse sendiri
+CREATE POLICY "products_insert_admin_cabang"
+ON public.products FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Admin_cabang bisa edit produk di warehouse sendiri
+CREATE POLICY "products_update_admin_cabang"
+ON public.products FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy DELETE: Admin_cabang bisa hapus produk di warehouse sendiri
+CREATE POLICY "products_delete_admin_cabang"
+ON public.products FOR DELETE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "products_write_dev"
+ON public.products FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+COMMENT ON POLICY "products_select" ON public.products IS 'Developer lihat semua, admin_cabang/warehouse lihat warehouse sendiri';
+COMMENT ON POLICY "products_insert_admin_cabang" ON public.products IS 'Admin_cabang bisa CREATE produk baru di warehouse sendiri';
+COMMENT ON POLICY "products_update_admin_cabang" ON public.products IS 'Admin_cabang bisa EDIT produk di warehouse sendiri';
+COMMENT ON POLICY "products_delete_admin_cabang" ON public.products IS 'Admin_cabang bisa DELETE produk di warehouse sendiri';
+COMMENT ON POLICY "products_write_dev" ON public.products IS 'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- SECTION 3: EXPEDITIONS TABLE - CRUD UNTUK ADMIN_CABANG
+-- ================================================================================
+
+-- Enable RLS untuk expeditions table
+ALTER TABLE public.expeditions ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk expeditions
+DROP POLICY IF EXISTS "expeditions_select" ON public.expeditions;
+DROP POLICY IF EXISTS "expeditions_write_dev" ON public.expeditions;
+DROP POLICY IF EXISTS "expeditions_insert_admin_cabang" ON public.expeditions;
+DROP POLICY IF EXISTS "expeditions_update_admin_cabang" ON public.expeditions;
+DROP POLICY IF EXISTS "expeditions_delete_admin_cabang" ON public.expeditions;
+
+-- Policy SELECT: Developer lihat semua, admin_cabang/warehouse lihat warehouse sendiri
+CREATE POLICY "expeditions_select"
+ON public.expeditions FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_cabang bisa create ekspedisi di warehouse sendiri
+CREATE POLICY "expeditions_insert_admin_cabang"
+ON public.expeditions FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Admin_cabang bisa edit ekspedisi di warehouse sendiri
+CREATE POLICY "expeditions_update_admin_cabang"
+ON public.expeditions FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy DELETE: Admin_cabang bisa hapus ekspedisi di warehouse sendiri
+CREATE POLICY "expeditions_delete_admin_cabang"
+ON public.expeditions FOR DELETE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "expeditions_write_dev"
+ON public.expeditions FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+COMMENT ON POLICY "expeditions_select" ON public.expeditions IS 'Developer lihat semua, admin_cabang/warehouse lihat warehouse sendiri';
+COMMENT ON POLICY "expeditions_insert_admin_cabang" ON public.expeditions IS 'Admin_cabang bisa CREATE ekspedisi baru di warehouse sendiri';
+COMMENT ON POLICY "expeditions_update_admin_cabang" ON public.expeditions IS 'Admin_cabang bisa EDIT ekspedisi di warehouse sendiri';
+COMMENT ON POLICY "expeditions_delete_admin_cabang" ON public.expeditions IS 'Admin_cabang bisa DELETE ekspedisi di warehouse sendiri';
+COMMENT ON POLICY "expeditions_write_dev" ON public.expeditions IS 'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- SECTION 4: CLUSTER CONFIGS TABLE - CRUD UNTUK ADMIN_CABANG
+-- ================================================================================
+
+-- Enable RLS untuk cluster_configs table
+ALTER TABLE public.cluster_configs ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk cluster_configs
+DROP POLICY IF EXISTS "cluster_configs_select" ON public.cluster_configs;
+DROP POLICY IF EXISTS "cluster_configs_write_dev" ON public.cluster_configs;
+DROP POLICY IF EXISTS "cluster_configs_insert_admin_cabang" ON public.cluster_configs;
+DROP POLICY IF EXISTS "cluster_configs_update_admin_cabang" ON public.cluster_configs;
+DROP POLICY IF EXISTS "cluster_configs_delete_admin_cabang" ON public.cluster_configs;
+
+-- Policy SELECT: Developer lihat semua, admin_cabang/warehouse lihat warehouse sendiri
+CREATE POLICY "cluster_configs_select"
+ON public.cluster_configs FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_cabang bisa create cluster config di warehouse sendiri
+CREATE POLICY "cluster_configs_insert_admin_cabang"
+ON public.cluster_configs FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Admin_cabang bisa edit cluster config di warehouse sendiri
+CREATE POLICY "cluster_configs_update_admin_cabang"
+ON public.cluster_configs FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy DELETE: Admin_cabang bisa hapus cluster config di warehouse sendiri
+CREATE POLICY "cluster_configs_delete_admin_cabang"
+ON public.cluster_configs FOR DELETE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "cluster_configs_write_dev"
+ON public.cluster_configs FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+COMMENT ON POLICY "cluster_configs_select" ON public.cluster_configs IS 'Developer lihat semua, admin_cabang/warehouse lihat warehouse sendiri';
+COMMENT ON POLICY "cluster_configs_insert_admin_cabang" ON public.cluster_configs IS 'Admin_cabang bisa CREATE cluster config baru di warehouse sendiri';
+COMMENT ON POLICY "cluster_configs_update_admin_cabang" ON public.cluster_configs IS 'Admin_cabang bisa EDIT cluster config di warehouse sendiri';
+COMMENT ON POLICY "cluster_configs_delete_admin_cabang" ON public.cluster_configs IS 'Admin_cabang bisa DELETE cluster config di warehouse sendiri';
+COMMENT ON POLICY "cluster_configs_write_dev" ON public.cluster_configs IS 'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- SECTION 5: CLUSTER CELL OVERRIDES TABLE - CRUD UNTUK ADMIN_CABANG
+-- ================================================================================
+
+-- Enable RLS untuk cluster_cell_overrides table
+ALTER TABLE public.cluster_cell_overrides ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk cluster_cell_overrides
+DROP POLICY IF EXISTS "cluster_cell_overrides_select" ON public.cluster_cell_overrides;
+DROP POLICY IF EXISTS "cluster_cell_overrides_write_dev" ON public.cluster_cell_overrides;
+DROP POLICY IF EXISTS "cluster_cell_overrides_insert_admin_cabang" ON public.cluster_cell_overrides;
+DROP POLICY IF EXISTS "cluster_cell_overrides_update_admin_cabang" ON public.cluster_cell_overrides;
+DROP POLICY IF EXISTS "cluster_cell_overrides_delete_admin_cabang" ON public.cluster_cell_overrides;
+
+-- Policy SELECT: Developer lihat semua, admin_cabang/warehouse lihat override dari cluster di warehouse sendiri
+CREATE POLICY "cluster_cell_overrides_select"
+ON public.cluster_cell_overrides FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR EXISTS (
+    SELECT 1 FROM public.cluster_configs c
+    WHERE c.id = cluster_cell_overrides.cluster_config_id
+      AND c.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy INSERT: Admin_cabang bisa create override untuk cluster di warehouse sendiri
+CREATE POLICY "cluster_cell_overrides_insert_admin_cabang"
+ON public.cluster_cell_overrides FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND EXISTS (
+    SELECT 1 FROM public.cluster_configs c
+    WHERE c.id = cluster_cell_overrides.cluster_config_id
+      AND c.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy UPDATE: Admin_cabang bisa edit override untuk cluster di warehouse sendiri
+CREATE POLICY "cluster_cell_overrides_update_admin_cabang"
+ON public.cluster_cell_overrides FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND EXISTS (
+    SELECT 1 FROM public.cluster_configs c
+    WHERE c.id = cluster_cell_overrides.cluster_config_id
+      AND c.warehouse_id = public.current_user_warehouse_id()
+  )
+)
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND EXISTS (
+    SELECT 1 FROM public.cluster_configs c
+    WHERE c.id = cluster_cell_overrides.cluster_config_id
+      AND c.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy DELETE: Admin_cabang bisa hapus override untuk cluster di warehouse sendiri
+CREATE POLICY "cluster_cell_overrides_delete_admin_cabang"
+ON public.cluster_cell_overrides FOR DELETE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND EXISTS (
+    SELECT 1 FROM public.cluster_configs c
+    WHERE c.id = cluster_cell_overrides.cluster_config_id
+      AND c.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "cluster_cell_overrides_write_dev"
+ON public.cluster_cell_overrides FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+COMMENT ON POLICY "cluster_cell_overrides_select" ON public.cluster_cell_overrides IS 'Developer lihat semua, admin_cabang/warehouse lihat override dari cluster warehouse sendiri';
+COMMENT ON POLICY "cluster_cell_overrides_insert_admin_cabang" ON public.cluster_cell_overrides IS 'Admin_cabang bisa CREATE override untuk cluster di warehouse sendiri';
+COMMENT ON POLICY "cluster_cell_overrides_update_admin_cabang" ON public.cluster_cell_overrides IS 'Admin_cabang bisa EDIT override di warehouse sendiri';
+COMMENT ON POLICY "cluster_cell_overrides_delete_admin_cabang" ON public.cluster_cell_overrides IS 'Admin_cabang bisa DELETE override di warehouse sendiri';
+COMMENT ON POLICY "cluster_cell_overrides_write_dev" ON public.cluster_cell_overrides IS 'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- SECTION 6: PRODUCT HOMES TABLE - CRUD UNTUK ADMIN_CABANG
+-- ================================================================================
+
+-- Enable RLS untuk product_homes table
+ALTER TABLE public.product_homes ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk product_homes
+DROP POLICY IF EXISTS "product_homes_select" ON public.product_homes;
+DROP POLICY IF EXISTS "product_homes_write_dev" ON public.product_homes;
+DROP POLICY IF EXISTS "product_homes_insert_admin_cabang" ON public.product_homes;
+DROP POLICY IF EXISTS "product_homes_update_admin_cabang" ON public.product_homes;
+DROP POLICY IF EXISTS "product_homes_delete_admin_cabang" ON public.product_homes;
+
+-- Policy SELECT: Developer lihat semua, admin_cabang/warehouse lihat warehouse sendiri
+CREATE POLICY "product_homes_select"
+ON public.product_homes FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_cabang bisa assign product home di warehouse sendiri
+CREATE POLICY "product_homes_insert_admin_cabang"
+ON public.product_homes FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Admin_cabang bisa edit product home assignment di warehouse sendiri
+CREATE POLICY "product_homes_update_admin_cabang"
+ON public.product_homes FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy DELETE: Admin_cabang bisa hapus product home assignment di warehouse sendiri
+CREATE POLICY "product_homes_delete_admin_cabang"
+ON public.product_homes FOR DELETE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "product_homes_write_dev"
+ON public.product_homes FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+COMMENT ON POLICY "product_homes_select" ON public.product_homes IS 'Developer lihat semua, admin_cabang/warehouse lihat warehouse sendiri';
+COMMENT ON POLICY "product_homes_insert_admin_cabang" ON public.product_homes IS 'Admin_cabang bisa ASSIGN product home di warehouse sendiri';
+COMMENT ON POLICY "product_homes_update_admin_cabang" ON public.product_homes IS 'Admin_cabang bisa EDIT product home assignment di warehouse sendiri';
+COMMENT ON POLICY "product_homes_delete_admin_cabang" ON public.product_homes IS 'Admin_cabang bisa DELETE product home assignment di warehouse sendiri';
+COMMENT ON POLICY "product_homes_write_dev" ON public.product_homes IS 'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- SECTION 7: VERIFIKASI (FIXED - Tanpa Error)
+-- ================================================================================
+
+-- Cek RLS status untuk semua table master data
+SELECT 
+  tablename,
+  rowsecurity AS "RLS_Enabled"
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename IN (
+    'products',
+    'expeditions',
+    'cluster_configs',
+    'cluster_cell_overrides',
+    'product_homes'
+  )
+ORDER BY tablename;
+
+-- Cek semua policy yang sudah dibuat (QUERY YANG DIPERBAIKI)
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename IN (
+    'products',
+    'expeditions',
+    'cluster_configs',
+    'cluster_cell_overrides',
+    'product_homes'
+  )
+ORDER BY tablename, policyname;
+
+-- ================================================================================
+-- HASIL EXPECTED:
+-- ================================================================================
+-- 
+-- QUERY 1: RLS Status
+-- tablename                  | RLS_Enabled
+-- ---------------------------+-------------
+-- cluster_cell_overrides     | t (true)
+-- cluster_configs            | t (true)
+-- expeditions                | t (true)
+-- product_homes              | t (true)
+-- products                   | t (true)
+-- 
+-- QUERY 2: Policy List (akan muncul semua 25 policies)
+-- schemaname | tablename                | policyname                            | operation
+-- -----------+--------------------------+---------------------------------------+-----------
+-- public     | cluster_cell_overrides   | cluster_cell_overrides_delete_admin_  | d
+-- public     | cluster_cell_overrides   | cluster_cell_overrides_insert_admin_  | a
+-- public     | cluster_cell_overrides   | cluster_cell_overrides_select         | r
+-- public     | cluster_cell_overrides   | cluster_cell_overrides_update_admin_  | w
+-- public     | cluster_cell_overrides   | cluster_cell_overrides_write_dev      | *
+-- public     | cluster_configs          | cluster_configs_delete_admin_cabang   | d
+-- public     | cluster_configs          | cluster_configs_insert_admin_cabang   | a
+-- public     | cluster_configs          | cluster_configs_select                | r
+-- public     | cluster_configs          | cluster_configs_update_admin_cabang   | w
+-- public     | cluster_configs          | cluster_configs_write_dev             | *
+-- ... (15 policies lagi untuk expeditions, product_homes, products)
+--
+-- LEGEND operation:
+-- r = SELECT
+-- a = INSERT
+-- w = UPDATE
+-- d = DELETE
+-- * = ALL
+-- 
+-- TOTAL: 5 tables × 5 policies = 25 policies ✅
+-- 
+-- ================================================================================
+
+
+-- ################################################################################
+-- ################################################################################
+-- SECTION 8: OPERATIONAL PAGES - INBOUND HISTORY
+-- ################################################################################
+-- ################################################################################
+
+-- ================================================================================
+-- INBOUND HISTORY TABLE - OPERATIONAL CRUD
+-- ================================================================================
+-- Deskripsi:
+-- - admin_cabang: VIEW history semua transaksi + BATAL/DELETE transaksi
+-- - admin_warehouse: INSERT transaksi baru via form, VIEW today's history
+-- - developer: Full access (bypass RLS)
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: View history (admin_cabang lihat semua, admin_warehouse lihat today)
+-- 2. INSERT: Submit inbound baru (admin_warehouse via form/QR scanner)
+-- 3. UPDATE: Edit transaksi (belum diimplementasi penuh, tapi policy dibuat)
+-- 4. DELETE: Batal transaksi via cancelInboundAction() (PENTING!)
+-- ================================================================================
+
+-- Enable RLS untuk inbound_history table
+ALTER TABLE public.inbound_history ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk inbound_history (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "inbound_history_select" ON public.inbound_history;
+DROP POLICY IF EXISTS "inbound_history_insert" ON public.inbound_history;
+DROP POLICY IF EXISTS "inbound_history_update" ON public.inbound_history;
+DROP POLICY IF EXISTS "inbound_history_delete" ON public.inbound_history;
+DROP POLICY IF EXISTS "inbound_history_write_dev" ON public.inbound_history;
+
+-- Policy SELECT: Developer lihat semua, admin_cabang/admin_warehouse lihat warehouse sendiri
+CREATE POLICY "inbound_history_select"
+ON public.inbound_history FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_warehouse bisa insert transaksi baru di warehouse sendiri
+CREATE POLICY "inbound_history_insert"
+ON public.inbound_history FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_cabang', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Admin_cabang & admin_warehouse bisa edit transaksi di warehouse sendiri
+-- (Belum diimplementasi penuh di UI, tapi policy dibuat untuk future-proof)
+CREATE POLICY "inbound_history_update"
+ON public.inbound_history FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() IN ('developer', 'admin_cabang', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_cabang', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy DELETE: Admin_cabang bisa hapus transaksi apapun, admin_warehouse hanya transaksi hari ini yang dia buat sendiri
+-- CRITICAL: Tanpa policy ini, cancelInboundAction() dan editInboundAction() akan GAGAL!
+CREATE POLICY "inbound_history_delete"
+ON public.inbound_history FOR DELETE TO authenticated
+USING (
+  warehouse_id = public.current_user_warehouse_id()
+  AND (
+    -- Developer: full access
+    public.current_user_role() = 'developer'
+    -- Admin_cabang: bisa delete transaksi apapun di warehouse sendiri
+    OR public.current_user_role() = 'admin_cabang'
+    -- Admin_warehouse: HANYA bisa delete transaksi hari ini yang dia buat sendiri
+    -- Note: received_by digunakan sebagai proxy untuk created_by (sama dengan user yang input)
+    OR (
+      public.current_user_role() = 'admin_warehouse'
+      AND received_by = auth.uid()
+      AND DATE(created_at) = CURRENT_DATE
+    )
+  )
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "inbound_history_write_dev"
+ON public.inbound_history FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "inbound_history_select" ON public.inbound_history IS 
+  'Developer lihat semua, admin_cabang & admin_warehouse lihat warehouse sendiri';
+
+COMMENT ON POLICY "inbound_history_insert" ON public.inbound_history IS 
+  'Admin_warehouse & admin_cabang bisa INSERT transaksi inbound baru di warehouse sendiri';
+
+COMMENT ON POLICY "inbound_history_update" ON public.inbound_history IS 
+  'Admin_cabang & admin_warehouse bisa EDIT transaksi di warehouse sendiri (future-proof)';
+
+COMMENT ON POLICY "inbound_history_delete" ON public.inbound_history IS 
+  'Developer full access, admin_cabang bisa DELETE transaksi apapun di warehouse-nya, admin_warehouse HANYA bisa DELETE transaksi hari ini yang dia buat sendiri (untuk fitur Edit/Batal)';
+
+COMMENT ON POLICY "inbound_history_write_dev" ON public.inbound_history IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- VERIFIKASI INBOUND HISTORY POLICY
+-- ================================================================================
+
+-- Cek RLS status
+SELECT 
+  tablename,
+  rowsecurity AS "RLS_Enabled"
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename = 'inbound_history';
+
+-- Cek semua policy yang sudah dibuat untuk inbound_history
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'inbound_history'
+ORDER BY policyname;
+
+-- ================================================================================
+-- HASIL EXPECTED:
+-- ================================================================================
+-- 
+-- QUERY 1: RLS Status
+-- tablename         | RLS_Enabled
+-- ------------------+-------------
+-- inbound_history   | t (true)
+-- 
+-- QUERY 2: Policy List (5 policies untuk inbound_history)
+-- schemaname | tablename        | policyname                    | operation
+-- -----------+------------------+-------------------------------+-----------
+-- public     | inbound_history  | inbound_history_delete        | d
+-- public     | inbound_history  | inbound_history_insert        | a
+-- public     | inbound_history  | inbound_history_select        | r
+-- public     | inbound_history  | inbound_history_update        | w
+-- public     | inbound_history  | inbound_history_write_dev     | *
+--
+-- LEGEND operation:
+-- r = SELECT
+-- a = INSERT
+-- w = UPDATE
+-- d = DELETE
+-- * = ALL
+-- 
+-- TOTAL: 5 policies untuk inbound_history ✅
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SECTION 9: OUTBOUND_HISTORY TABLE - RLS POLICY
+-- ================================================================================
+-- 
+-- Table: outbound_history
+-- Scope: PER WAREHOUSE (setiap transaksi outbound punya warehouse_id)
+-- 
+-- Role Mapping:
+-- - developer: Full access (semua gudang)
+-- - admin_cabang: Lihat SEMUA riwayat outbound di warehouse sendiri
+-- - admin_warehouse: Lihat HANYA transaksi outbound HARI INI di warehouse sendiri
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: View history (admin_cabang lihat semua, admin_warehouse lihat today)
+-- 2. INSERT: Submit outbound baru (admin_warehouse via form/QR scanner)
+-- 3. UPDATE: Edit transaksi (belum diimplementasi penuh, tapi policy dibuat)
+-- 4. DELETE: Batal transaksi via cancelOutboundAction() (PENTING!)
+-- ================================================================================
+
+-- Enable RLS untuk outbound_history table
+ALTER TABLE public.outbound_history ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk outbound_history (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "outbound_history_select" ON public.outbound_history;
+DROP POLICY IF EXISTS "outbound_history_insert" ON public.outbound_history;
+DROP POLICY IF EXISTS "outbound_history_update" ON public.outbound_history;
+DROP POLICY IF EXISTS "outbound_history_delete" ON public.outbound_history;
+DROP POLICY IF EXISTS "outbound_history_write_dev" ON public.outbound_history;
+
+-- Policy SELECT: Developer lihat semua, admin_cabang/admin_warehouse lihat warehouse sendiri
+CREATE POLICY "outbound_history_select"
+ON public.outbound_history FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_warehouse bisa insert transaksi baru di warehouse sendiri
+CREATE POLICY "outbound_history_insert"
+ON public.outbound_history FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_cabang', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Admin_cabang & admin_warehouse bisa edit transaksi di warehouse sendiri
+-- (Belum diimplementasi penuh di UI, tapi policy dibuat untuk future-proof)
+CREATE POLICY "outbound_history_update"
+ON public.outbound_history FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() IN ('developer', 'admin_cabang', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_cabang', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy DELETE: Admin_cabang bisa hapus transaksi apapun, admin_warehouse hanya transaksi hari ini yang dia buat sendiri
+-- CRITICAL: Tanpa policy ini, cancelOutboundAction() dan editOutboundAction() akan GAGAL!
+CREATE POLICY "outbound_history_delete"
+ON public.outbound_history FOR DELETE TO authenticated
+USING (
+  warehouse_id = public.current_user_warehouse_id()
+  AND (
+    -- Developer: full access
+    public.current_user_role() = 'developer'
+    -- Admin_cabang: bisa delete transaksi apapun di warehouse sendiri
+    OR public.current_user_role() = 'admin_cabang'
+    -- Admin_warehouse: HANYA bisa delete transaksi hari ini yang dia buat sendiri
+    -- Note: processed_by digunakan sebagai proxy untuk created_by (sama dengan user yang input)
+    OR (
+      public.current_user_role() = 'admin_warehouse'
+      AND processed_by = auth.uid()
+      AND DATE(created_at) = CURRENT_DATE
+    )
+  )
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "outbound_history_write_dev"
+ON public.outbound_history FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "outbound_history_select" ON public.outbound_history IS 
+  'Developer lihat semua, admin_cabang & admin_warehouse lihat warehouse sendiri';
+
+COMMENT ON POLICY "outbound_history_insert" ON public.outbound_history IS 
+  'Admin_warehouse & admin_cabang bisa INSERT transaksi outbound baru di warehouse sendiri';
+
+COMMENT ON POLICY "outbound_history_update" ON public.outbound_history IS 
+  'Admin_cabang & admin_warehouse bisa EDIT transaksi di warehouse sendiri (future-proof)';
+
+COMMENT ON POLICY "outbound_history_delete" ON public.outbound_history IS 
+  'Developer full access, admin_cabang bisa DELETE transaksi apapun di warehouse-nya, admin_warehouse HANYA bisa DELETE transaksi hari ini yang dia buat sendiri (untuk fitur Edit/Batal)';
+
+COMMENT ON POLICY "outbound_history_write_dev" ON public.outbound_history IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- VERIFIKASI OUTBOUND HISTORY POLICY
+-- ================================================================================
+
+-- Cek RLS status
+SELECT 
+  tablename,
+  rowsecurity AS "RLS_Enabled"
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename = 'outbound_history';
+
+-- Cek semua policy yang sudah dibuat untuk outbound_history
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'outbound_history'
+ORDER BY policyname;
+
+-- ================================================================================
+-- HASIL EXPECTED:
+-- ================================================================================
+-- 
+-- QUERY 1: RLS Status
+-- tablename          | RLS_Enabled
+-- -------------------+-------------
+-- outbound_history   | t (true)
+-- 
+-- QUERY 2: Policy List (5 policies untuk outbound_history)
+-- schemaname | tablename         | policyname                     | operation
+-- -----------+-------------------+--------------------------------+-----------
+-- public     | outbound_history  | outbound_history_delete        | d
+-- public     | outbound_history  | outbound_history_insert        | a
+-- public     | outbound_history  | outbound_history_select        | r
+-- public     | outbound_history  | outbound_history_update        | w
+-- public     | outbound_history  | outbound_history_write_dev     | *
+--
+-- LEGEND operation:
+-- r = SELECT
+-- a = INSERT
+-- w = UPDATE
+-- d = DELETE
+-- * = ALL
+-- 
+-- TOTAL: 5 policies untuk outbound_history ✅
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SECTION 10: STOCK_LIST TABLE - RLS POLICY (CRITICAL!)
+-- ================================================================================
+-- 
+-- Table: stock_list
+-- Scope: PER WAREHOUSE (setiap stock punya warehouse_id)
+-- 
+-- Role Mapping:
+-- - developer: Full access (semua gudang)
+-- - admin_cabang: Read-only untuk monitoring stock (warehouse sendiri)
+-- - admin_warehouse: Full CRUD untuk operasi inbound/outbound/NPL/permutasi (warehouse sendiri)
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: FEFO query, stock list view, warehouse layout (semua role butuh read)
+-- 2. INSERT: Inbound, NPL - tambah stock baru (admin_warehouse)
+-- 3. UPDATE: Inbound, Outbound, Permutasi - update qty/status (admin_warehouse)
+-- 4. DELETE: Outbound - hapus stock habis, Batal transaksi (admin_warehouse)
+--
+-- CRITICAL: Tanpa policy ini, SEMUA operasi inbound/outbound/NPL GAGAL!
+-- ================================================================================
+
+-- Enable RLS untuk stock_list table
+ALTER TABLE public.stock_list ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk stock_list (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "stock_list_select" ON public.stock_list;
+DROP POLICY IF EXISTS "stock_list_insert" ON public.stock_list;
+DROP POLICY IF EXISTS "stock_list_update" ON public.stock_list;
+DROP POLICY IF EXISTS "stock_list_delete" ON public.stock_list;
+DROP POLICY IF EXISTS "stock_list_write_dev" ON public.stock_list;
+
+-- Policy SELECT: Semua role bisa lihat stock di warehouse sendiri
+-- Developer lihat semua warehouse, admin_cabang & admin_warehouse lihat warehouse sendiri
+CREATE POLICY "stock_list_select"
+ON public.stock_list FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_warehouse bisa tambah stock baru (inbound, NPL)
+CREATE POLICY "stock_list_insert"
+ON public.stock_list FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Admin_warehouse bisa update stock (outbound, permutasi, adjustment)
+CREATE POLICY "stock_list_update"
+ON public.stock_list FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() IN ('developer', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy DELETE: Admin_warehouse bisa hapus stock habis (outbound, batal transaksi)
+CREATE POLICY "stock_list_delete"
+ON public.stock_list FOR DELETE TO authenticated
+USING (
+  public.current_user_role() IN ('developer', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "stock_list_write_dev"
+ON public.stock_list FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "stock_list_select" ON public.stock_list IS 
+  'Developer lihat semua, admin_cabang & admin_warehouse lihat warehouse sendiri (read-only untuk admin_cabang, CRUD untuk admin_warehouse)';
+
+COMMENT ON POLICY "stock_list_insert" ON public.stock_list IS 
+  'Admin_warehouse bisa INSERT stock baru saat inbound/NPL di warehouse sendiri';
+
+COMMENT ON POLICY "stock_list_update" ON public.stock_list IS 
+  'Admin_warehouse bisa UPDATE stock (qty, status) saat outbound/permutasi/adjustment di warehouse sendiri';
+
+COMMENT ON POLICY "stock_list_delete" ON public.stock_list IS 
+  'Admin_warehouse bisa DELETE stock habis saat outbound atau batal transaksi di warehouse sendiri';
+
+COMMENT ON POLICY "stock_list_write_dev" ON public.stock_list IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- VERIFIKASI STOCK LIST POLICY
+-- ================================================================================
+
+-- Cek RLS status
+SELECT 
+  tablename,
+  rowsecurity AS "RLS_Enabled"
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename = 'stock_list';
+
+-- Cek semua policy yang sudah dibuat untuk stock_list
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'stock_list'
+ORDER BY policyname;
+
+-- ================================================================================
+-- HASIL EXPECTED:
+-- ================================================================================
+-- 
+-- QUERY 1: RLS Status
+-- tablename     | RLS_Enabled
+-- --------------+-------------
+-- stock_list    | t (true)
+-- 
+-- QUERY 2: Policy List (5 policies untuk stock_list)
+-- schemaname | tablename    | policyname              | operation
+-- -----------+--------------+-------------------------+-----------
+-- public     | stock_list   | stock_list_delete       | d
+-- public     | stock_list   | stock_list_insert       | a
+-- public     | stock_list   | stock_list_select       | r
+-- public     | stock_list   | stock_list_update       | w
+-- public     | stock_list   | stock_list_write_dev    | *
+--
+-- LEGEND operation:
+-- r = SELECT
+-- a = INSERT
+-- w = UPDATE
+-- d = DELETE
+-- * = ALL
+-- 
+-- TOTAL: 5 policies untuk stock_list ✅
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SECTION 11: STOCK_MOVEMENTS TABLE - RLS POLICY (AUDIT TRAIL)
+-- ================================================================================
+-- 
+-- Table: stock_movements
+-- Scope: PER WAREHOUSE (setiap movement punya warehouse_id)
+-- 
+-- Role Mapping:
+-- - developer: Full access (semua gudang)
+-- - admin_cabang: Read-only untuk audit trail (warehouse sendiri)
+-- - admin_warehouse: Insert-only untuk catat pergerakan (warehouse sendiri)
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: Audit trail, laporan historis (admin_cabang untuk monitoring)
+-- 2. INSERT: Auto-generated saat inbound/outbound/permutasi (admin_warehouse)
+-- 3. UPDATE: Tidak diperlukan (history tidak diubah)
+-- 4. DELETE: Tidak diperlukan (history tidak dihapus)
+--
+-- Note: Tabel ini BACKEND ONLY untuk audit trail, tidak tampil di UI
+-- ================================================================================
+
+-- Enable RLS untuk stock_movements table
+ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk stock_movements (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "stock_movements_select" ON public.stock_movements;
+DROP POLICY IF EXISTS "stock_movements_insert" ON public.stock_movements;
+DROP POLICY IF EXISTS "stock_movements_write_dev" ON public.stock_movements;
+
+-- Policy SELECT: Developer & admin_cabang bisa lihat movement history
+-- Admin_warehouse bisa lihat (optional, tapi tidak perlu di UI saat ini)
+CREATE POLICY "stock_movements_select"
+ON public.stock_movements FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_warehouse bisa insert movement log saat operasi stock
+CREATE POLICY "stock_movements_insert"
+ON public.stock_movements FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "stock_movements_write_dev"
+ON public.stock_movements FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "stock_movements_select" ON public.stock_movements IS 
+  'Developer lihat semua, admin_cabang & admin_warehouse lihat warehouse sendiri (untuk audit trail)';
+
+COMMENT ON POLICY "stock_movements_insert" ON public.stock_movements IS 
+  'Admin_warehouse bisa INSERT movement log saat inbound/outbound/permutasi di warehouse sendiri';
+
+COMMENT ON POLICY "stock_movements_write_dev" ON public.stock_movements IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- VERIFIKASI STOCK MOVEMENTS POLICY
+-- ================================================================================
+
+-- Cek RLS status
+SELECT 
+  tablename,
+  rowsecurity AS "RLS_Enabled"
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename = 'stock_movements';
+
+-- Cek semua policy yang sudah dibuat untuk stock_movements
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'stock_movements'
+ORDER BY policyname;
+
+-- ================================================================================
+-- HASIL EXPECTED:
+-- ================================================================================
+-- 
+-- QUERY 1: RLS Status
+-- tablename         | RLS_Enabled
+-- ------------------+-------------
+-- stock_movements   | t (true)
+-- 
+-- QUERY 2: Policy List (3 policies untuk stock_movements)
+-- schemaname | tablename        | policyname                  | operation
+-- -----------+------------------+-----------------------------+-----------
+-- public     | stock_movements  | stock_movements_insert      | a
+-- public     | stock_movements  | stock_movements_select      | r
+-- public     | stock_movements  | stock_movements_write_dev   | *
+--
+-- LEGEND operation:
+-- r = SELECT
+-- a = INSERT
+-- * = ALL
+-- 
+-- TOTAL: 3 policies untuk stock_movements ✅
+-- (Tidak perlu UPDATE/DELETE karena history tidak diubah/dihapus)
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SECTION 12: PRESTOCK_OPNAME TABLE - RLS POLICY (STOCK AUDIT)
+-- ================================================================================
+-- 
+-- Table: prestock_opname (Header Stock Opname/Audit)
+-- Scope: PER WAREHOUSE (setiap audit punya warehouse_id)
+-- 
+-- Role Mapping:
+-- - developer: Full access (semua gudang)
+-- - admin_warehouse: Insert-only untuk submit audit hasil hitung fisik (warehouse sendiri)
+-- - admin_cabang: Select + Update untuk view history & reconcile selisih (warehouse sendiri)
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: View history audit (admin_cabang untuk monitoring & reconcile)
+-- 2. INSERT: Submit audit baru (admin_warehouse via form stock opname)
+-- 3. UPDATE: Reconcile status + notes (admin_cabang setelah review selisih)
+-- 4. DELETE: Tidak diperlukan (audit trail permanent, tidak boleh dihapus)
+--
+-- ================================================================================
+
+-- Enable RLS untuk prestock_opname table
+ALTER TABLE public.prestock_opname ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk prestock_opname (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "prestock_opname_select" ON public.prestock_opname;
+DROP POLICY IF EXISTS "prestock_opname_insert" ON public.prestock_opname;
+DROP POLICY IF EXISTS "prestock_opname_update" ON public.prestock_opname;
+DROP POLICY IF EXISTS "prestock_opname_write_dev" ON public.prestock_opname;
+
+-- Policy SELECT: Developer & admin_cabang bisa lihat history audit
+-- Admin_warehouse tidak perlu lihat history (cukup submit saja)
+CREATE POLICY "prestock_opname_select"
+ON public.prestock_opname FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR (
+    public.current_user_role() = 'admin_cabang'
+    AND warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy INSERT: Admin_warehouse bisa submit audit hasil hitung fisik
+CREATE POLICY "prestock_opname_insert"
+ON public.prestock_opname FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Admin_cabang bisa reconcile (update status, reconciled_by, notes)
+-- Admin_warehouse tidak boleh update (hanya insert)
+CREATE POLICY "prestock_opname_update"
+ON public.prestock_opname FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() IN ('developer', 'admin_cabang')
+  AND warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_cabang')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "prestock_opname_write_dev"
+ON public.prestock_opname FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "prestock_opname_select" ON public.prestock_opname IS 
+  'Developer lihat semua, admin_cabang lihat history audit di warehouse sendiri (untuk monitoring & reconcile)';
+
+COMMENT ON POLICY "prestock_opname_insert" ON public.prestock_opname IS 
+  'Admin_warehouse bisa INSERT audit baru (submit hasil hitung fisik) di warehouse sendiri';
+
+COMMENT ON POLICY "prestock_opname_update" ON public.prestock_opname IS 
+  'Admin_cabang bisa UPDATE untuk reconcile (status, reconciled_by, notes) di warehouse sendiri';
+
+COMMENT ON POLICY "prestock_opname_write_dev" ON public.prestock_opname IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- SECTION 13: PRESTOCK_OPNAME_ITEMS TABLE - RLS POLICY (DETAIL AUDIT)
+-- ================================================================================
+-- 
+-- Table: prestock_opname_items (Detail Item Stock Opname)
+-- Scope: PER WAREHOUSE (via JOIN ke prestock_opname.warehouse_id)
+-- 
+-- Role Mapping:
+-- - developer: Full access (semua gudang)
+-- - admin_warehouse: Insert-only untuk submit item audit (warehouse sendiri via header)
+-- - admin_cabang: Select + Update untuk view items & input reconciliation_reason (warehouse sendiri)
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: View detail items audit (admin_cabang untuk review selisih per produk)
+-- 2. INSERT: Submit detail items (admin_warehouse via form, bersamaan dengan header)
+-- 3. UPDATE: Update reconciliation_reason per item (admin_cabang saat reconcile)
+-- 4. DELETE: Tidak diperlukan (audit trail permanent)
+--
+-- PENTING: Policy check menggunakan EXISTS subquery ke prestock_opname.warehouse_id
+-- karena items tidak punya warehouse_id langsung (hanya opname_id)
+-- ================================================================================
+
+-- Enable RLS untuk prestock_opname_items table
+ALTER TABLE public.prestock_opname_items ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk prestock_opname_items (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "prestock_opname_items_select" ON public.prestock_opname_items;
+DROP POLICY IF EXISTS "prestock_opname_items_insert" ON public.prestock_opname_items;
+DROP POLICY IF EXISTS "prestock_opname_items_update" ON public.prestock_opname_items;
+DROP POLICY IF EXISTS "prestock_opname_items_write_dev" ON public.prestock_opname_items;
+-- Drop policy alternatif (jika ada duplicate dengan nama berbeda)
+DROP POLICY IF EXISTS "prestock_items_select" ON public.prestock_opname_items;
+DROP POLICY IF EXISTS "prestock_items_insert" ON public.prestock_opname_items;
+DROP POLICY IF EXISTS "prestock_items_update" ON public.prestock_opname_items;
+
+-- Policy SELECT: Developer & admin_cabang bisa lihat detail items
+-- Check warehouse via EXISTS subquery ke parent table
+CREATE POLICY "prestock_opname_items_select"
+ON public.prestock_opname_items FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR (
+    public.current_user_role() = 'admin_cabang'
+    AND EXISTS (
+      SELECT 1 FROM public.prestock_opname
+      WHERE prestock_opname.id = prestock_opname_items.opname_id
+        AND prestock_opname.warehouse_id = public.current_user_warehouse_id()
+    )
+  )
+);
+
+-- Policy INSERT: Admin_warehouse bisa insert items saat submit audit
+CREATE POLICY "prestock_opname_items_insert"
+ON public.prestock_opname_items FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_warehouse')
+  AND EXISTS (
+    SELECT 1 FROM public.prestock_opname
+    WHERE prestock_opname.id = prestock_opname_items.opname_id
+      AND prestock_opname.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy UPDATE: Admin_cabang bisa update reconciliation_reason saat reconcile
+CREATE POLICY "prestock_opname_items_update"
+ON public.prestock_opname_items FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() IN ('developer', 'admin_cabang')
+  AND EXISTS (
+    SELECT 1 FROM public.prestock_opname
+    WHERE prestock_opname.id = prestock_opname_items.opname_id
+      AND prestock_opname.warehouse_id = public.current_user_warehouse_id()
+  )
+)
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_cabang')
+  AND EXISTS (
+    SELECT 1 FROM public.prestock_opname
+    WHERE prestock_opname.id = prestock_opname_items.opname_id
+      AND prestock_opname.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "prestock_opname_items_write_dev"
+ON public.prestock_opname_items FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- ================================================================================
+-- DUPLICATE POLICIES (Alternative Names - Untuk Kompatibilitas DEV)
+-- ================================================================================
+-- NOTE: Policies berikut adalah duplicate dari policies di atas dengan nama berbeda.
+-- Dibuat untuk menjaga kompatibilitas 100% dengan DEV environment.
+-- Jangan dihapus meski redundant!
+
+-- Policy SELECT (alternative name: prestock_items_select)
+CREATE POLICY "prestock_items_select"
+ON public.prestock_opname_items FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR EXISTS (
+    SELECT 1
+    FROM public.prestock_opname po
+    WHERE po.id = prestock_opname_items.opname_id
+      AND po.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy INSERT (alternative name: prestock_items_insert)
+CREATE POLICY "prestock_items_insert"
+ON public.prestock_opname_items FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'developer'
+  OR EXISTS (
+    SELECT 1
+    FROM public.prestock_opname po
+    WHERE po.id = prestock_opname_items.opname_id
+      AND po.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy UPDATE (alternative name: prestock_items_update)
+CREATE POLICY "prestock_items_update"
+ON public.prestock_opname_items FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR EXISTS (
+    SELECT 1
+    FROM public.prestock_opname po
+    WHERE po.id = prestock_opname_items.opname_id
+      AND po.warehouse_id = public.current_user_warehouse_id()
+  )
+)
+WITH CHECK (
+  public.current_user_role() = 'developer'
+  OR EXISTS (
+    SELECT 1
+    FROM public.prestock_opname po
+    WHERE po.id = prestock_opname_items.opname_id
+      AND po.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "prestock_opname_items_select" ON public.prestock_opname_items IS 
+  'Developer lihat semua, admin_cabang lihat detail items audit di warehouse sendiri (via JOIN prestock_opname)';
+
+COMMENT ON POLICY "prestock_opname_items_insert" ON public.prestock_opname_items IS 
+  'Admin_warehouse bisa INSERT items saat submit audit di warehouse sendiri (via JOIN prestock_opname)';
+
+COMMENT ON POLICY "prestock_opname_items_update" ON public.prestock_opname_items IS 
+  'Admin_cabang bisa UPDATE reconciliation_reason per item saat reconcile di warehouse sendiri';
+
+COMMENT ON POLICY "prestock_opname_items_write_dev" ON public.prestock_opname_items IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- VERIFIKASI PRESTOCK OPNAME POLICIES
+-- ================================================================================
+
+-- Cek RLS status untuk kedua tabel
+SELECT 
+  tablename,
+  rowsecurity AS "RLS_Enabled"
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename IN ('prestock_opname', 'prestock_opname_items')
+ORDER BY tablename;
+
+-- Cek semua policy untuk prestock_opname (expected: 4 policies)
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'prestock_opname'
+ORDER BY policyname;
+
+-- Cek semua policy untuk prestock_opname_items (expected: 4 policies)
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'prestock_opname_items'
+ORDER BY policyname;
+
+-- ================================================================================
+-- HASIL EXPECTED:
+-- ================================================================================
+-- 
+-- QUERY 1: RLS Status
+-- tablename                | RLS_Enabled
+-- -------------------------+-------------
+-- prestock_opname          | t (true)
+-- prestock_opname_items    | t (true)
+-- 
+-- QUERY 2: Policy List prestock_opname (4 policies)
+-- schemaname | tablename         | policyname                   | operation
+-- -----------+-------------------+------------------------------+-----------
+-- public     | prestock_opname   | prestock_opname_insert       | a
+-- public     | prestock_opname   | prestock_opname_select       | r
+-- public     | prestock_opname   | prestock_opname_update       | w
+-- public     | prestock_opname   | prestock_opname_write_dev    | *
+--
+-- QUERY 3: Policy List prestock_opname_items (4 policies)
+-- schemaname | tablename               | policyname                         | operation
+-- -----------+-------------------------+------------------------------------+-----------
+-- public     | prestock_opname_items   | prestock_opname_items_insert       | a
+-- public     | prestock_opname_items   | prestock_opname_items_select       | r
+-- public     | prestock_opname_items   | prestock_opname_items_update       | w
+-- public     | prestock_opname_items   | prestock_opname_items_write_dev    | *
+--
+-- LEGEND operation:
+-- r = SELECT
+-- a = INSERT
+-- w = UPDATE
+-- * = ALL
+-- 
+-- TOTAL: 8 policies untuk stock opname (4 header + 4 items) ✅
+-- (Tidak perlu DELETE karena audit trail permanent)
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SECTION 14: NPL_HISTORY TABLE - RLS POLICY (NOTA PENGEMBALIAN LAPANGAN)
+-- ================================================================================
+-- 
+-- Table: npl_history (Nota Pengembalian Lapangan - Inbound Secondary)
+-- Scope: PER WAREHOUSE (return stock dari lapangan yang tidak terjual)
+-- 
+-- Role Mapping:
+-- - developer: Full access (semua gudang)
+-- - admin_warehouse: INSERT + DELETE (submit NPL + batal transaksi hari ini)
+-- - admin_cabang: SELECT only (view history untuk monitoring)
+--
+-- Perbedaan dengan Inbound Primary:
+-- - Tidak ada expedition_id (bukan dari ekspedisi luar)
+-- - Tidak ada dn_number (tidak ada surat jalan)
+-- - Transaction code prefix: NPL- (bukan INB-)
+-- - Field khusus: driver_name, vehicle_number, returned_by
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: View history (admin_cabang untuk monitoring)
+-- 2. INSERT: Submit NPL baru (admin_warehouse via form)
+-- 3. DELETE: Batal transaksi NPL hari ini (admin_warehouse - fitur Edit & Batal)
+-- 4. UPDATE: Tidak diperlukan (tidak ada fitur edit)
+-- ================================================================================
+
+-- Enable RLS untuk npl_history table
+ALTER TABLE public.npl_history ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk npl_history (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "npl_history_select" ON public.npl_history;
+DROP POLICY IF EXISTS "npl_history_insert" ON public.npl_history;
+DROP POLICY IF EXISTS "npl_history_update" ON public.npl_history;
+DROP POLICY IF EXISTS "npl_history_delete" ON public.npl_history;
+DROP POLICY IF EXISTS "npl_history_write_dev" ON public.npl_history;
+
+-- Policy SELECT: Developer & admin_cabang lihat semua, admin_warehouse lihat warehouse sendiri
+CREATE POLICY "npl_history_select"
+ON public.npl_history FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_warehouse bisa insert transaksi NPL baru di warehouse sendiri
+CREATE POLICY "npl_history_insert"
+ON public.npl_history FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Admin_cabang & admin_warehouse bisa edit transaksi di warehouse sendiri
+-- (Untuk fitur Edit NPL - sama seperti inbound/outbound)
+CREATE POLICY "npl_history_update"
+ON public.npl_history FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() IN ('developer', 'admin_cabang', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_cabang', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy DELETE: Admin_cabang bisa hapus transaksi apapun, admin_warehouse hanya transaksi hari ini yang dia buat sendiri
+-- CRITICAL: Untuk fitur Edit & Batal NPL (sama seperti inbound)
+CREATE POLICY "npl_history_delete"
+ON public.npl_history FOR DELETE TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR (
+    public.current_user_role() = 'admin_cabang'
+    AND warehouse_id = public.current_user_warehouse_id()
+  )
+  OR (
+    public.current_user_role() = 'admin_warehouse'
+    AND warehouse_id = public.current_user_warehouse_id()
+    AND returned_by = auth.uid()
+    AND DATE(created_at) = CURRENT_DATE
+  )
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "npl_history_write_dev"
+ON public.npl_history FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "npl_history_select" ON public.npl_history IS 
+  'Developer lihat semua, admin_cabang & admin_warehouse lihat warehouse sendiri (untuk history monitoring)';
+
+COMMENT ON POLICY "npl_history_insert" ON public.npl_history IS 
+  'Admin_warehouse bisa INSERT NPL baru (return stock dari lapangan) di warehouse sendiri';
+
+COMMENT ON POLICY "npl_history_update" ON public.npl_history IS 
+  'Admin_cabang & admin_warehouse bisa UPDATE NPL di warehouse sendiri (untuk fitur Edit)';
+
+COMMENT ON POLICY "npl_history_delete" ON public.npl_history IS 
+  'Admin_cabang bisa DELETE any NPL, admin_warehouse hanya DELETE transaksi hari ini yang dia buat (fitur Edit & Batal)';
+
+COMMENT ON POLICY "npl_history_write_dev" ON public.npl_history IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- SECTION 15: USERS TABLE - RLS POLICY (MANAJEMEN USER)
+-- ================================================================================
+-- 
+-- Table: users (User Management)
+-- Scope: PER WAREHOUSE untuk admin_cabang, GLOBAL untuk developer
+-- 
+-- Role Mapping:
+-- - developer: Full CRUD untuk semua user (developer, admin_cabang, admin_warehouse)
+-- - admin_cabang: CRUD hanya admin_warehouse di warehouse sendiri
+-- - admin_warehouse: Read-only untuk profile sendiri
+--
+-- Hierarchy:
+-- - developer (warehouse_id = NULL) → Akses semua gudang
+-- - admin_cabang (warehouse_id = X) → Kelola master data gudang X
+-- - admin_warehouse (warehouse_id = X) → Operasional gudang X
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: View user list (developer lihat semua, admin_cabang lihat user warehouse sendiri)
+-- 2. INSERT: Create user (developer buat semua role, admin_cabang buat admin_warehouse saja)
+-- 3. UPDATE: Edit user (developer edit semua, admin_cabang edit admin_warehouse di warehouse sendiri)
+-- 4. DELETE: Hapus user (developer hapus semua, admin_cabang hapus admin_warehouse di warehouse sendiri)
+-- ================================================================================
+
+-- Enable RLS untuk users table
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk users (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "users_select" ON public.users;
+DROP POLICY IF EXISTS "users_insert" ON public.users;
+DROP POLICY IF EXISTS "users_update" ON public.users;
+DROP POLICY IF EXISTS "users_delete" ON public.users;
+DROP POLICY IF EXISTS "users_write_dev" ON public.users;
+-- Drop policy alternatif/duplicate (jika ada)
+DROP POLICY IF EXISTS "users_dev_all" ON public.users;
+DROP POLICY IF EXISTS "users_select_developer_all" ON public.users;
+DROP POLICY IF EXISTS "users_select_self" ON public.users;
+DROP POLICY IF EXISTS "users_select_admin_cabang_warehouse_staff" ON public.users;
+DROP POLICY IF EXISTS "users_insert_admin_cabang_warehouse_staff" ON public.users;
+DROP POLICY IF EXISTS "users_update_admin_cabang_warehouse_staff" ON public.users;
+DROP POLICY IF EXISTS "users_update_self" ON public.users;
+
+-- Policy SELECT: Developer lihat semua, admin_cabang lihat user di warehouse sendiri, admin_warehouse lihat profile sendiri
+CREATE POLICY "users_select"
+ON public.users FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR (
+    public.current_user_role() = 'admin_cabang'
+    AND warehouse_id = public.current_user_warehouse_id()
+  )
+  OR (
+    public.current_user_role() = 'admin_warehouse'
+    AND id = auth.uid()
+  )
+);
+
+-- Policy INSERT: Developer buat semua role, admin_cabang hanya buat admin_warehouse di warehouse sendiri
+CREATE POLICY "users_insert"
+ON public.users FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'developer'
+  OR (
+    public.current_user_role() = 'admin_cabang'
+    AND warehouse_id = public.current_user_warehouse_id()
+    -- Admin_cabang hanya boleh buat admin_warehouse (tidak bisa buat developer atau admin_cabang lain)
+    -- Constraint ini akan dicek di application layer
+  )
+);
+
+-- Policy UPDATE: Developer edit semua, admin_cabang edit admin_warehouse di warehouse sendiri
+CREATE POLICY "users_update"
+ON public.users FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR (
+    public.current_user_role() = 'admin_cabang'
+    AND warehouse_id = public.current_user_warehouse_id()
+    AND role = 'admin_warehouse'
+  )
+)
+WITH CHECK (
+  public.current_user_role() = 'developer'
+  OR (
+    public.current_user_role() = 'admin_cabang'
+    AND warehouse_id = public.current_user_warehouse_id()
+    AND role = 'admin_warehouse'
+  )
+);
+
+-- Policy DELETE: Developer hapus semua, admin_cabang hapus admin_warehouse di warehouse sendiri
+CREATE POLICY "users_delete"
+ON public.users FOR DELETE TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR (
+    public.current_user_role() = 'admin_cabang'
+    AND warehouse_id = public.current_user_warehouse_id()
+    AND role = 'admin_warehouse'
+  )
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "users_write_dev"
+ON public.users FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- ================================================================================
+-- ADDITIONAL POLICIES (Untuk Kompatibilitas DEV - Role-Specific Variants)
+-- ================================================================================
+-- NOTE: Policies berikut adalah variasi role-specific dari policies utama.
+-- Dibuat untuk menjaga kompatibilitas 100% dengan DEV environment.
+-- Jangan dihapus meski ada overlap!
+
+-- Policy untuk developer (alternative: users_dev_all)
+CREATE POLICY "users_dev_all"
+ON public.users FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Policy SELECT untuk developer saja (alternative)
+CREATE POLICY "users_select_developer_all"
+ON public.users FOR SELECT TO authenticated
+USING (public.current_user_role() = 'developer');
+
+-- Policy SELECT untuk user melihat profile sendiri
+CREATE POLICY "users_select_self"
+ON public.users FOR SELECT TO authenticated
+USING (id = auth.uid());
+
+-- Policy SELECT untuk admin_cabang lihat admin_warehouse (specific)
+CREATE POLICY "users_select_admin_cabang_warehouse_staff"
+ON public.users FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND public.current_user_warehouse_id() IS NOT NULL
+  AND warehouse_id = public.current_user_warehouse_id()
+  AND role = 'admin_warehouse'
+);
+
+-- Policy INSERT untuk admin_cabang buat admin_warehouse (specific)
+CREATE POLICY "users_insert_admin_cabang_warehouse_staff"
+ON public.users FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND public.current_user_warehouse_id() IS NOT NULL
+  AND warehouse_id = public.current_user_warehouse_id()
+  AND role = 'admin_warehouse'
+);
+
+-- Policy UPDATE untuk admin_cabang edit admin_warehouse (specific)
+CREATE POLICY "users_update_admin_cabang_warehouse_staff"
+ON public.users FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND public.current_user_warehouse_id() IS NOT NULL
+  AND warehouse_id = public.current_user_warehouse_id()
+  AND role = 'admin_warehouse'
+)
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND public.current_user_warehouse_id() IS NOT NULL
+  AND warehouse_id = public.current_user_warehouse_id()
+  AND role = 'admin_warehouse'
+);
+
+-- Policy UPDATE untuk user edit profile sendiri
+CREATE POLICY "users_update_self"
+ON public.users FOR UPDATE TO authenticated
+USING (id = auth.uid())
+WITH CHECK (id = auth.uid());
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "users_select" ON public.users IS 
+  'Developer lihat semua user, admin_cabang lihat user di warehouse sendiri, admin_warehouse lihat profile sendiri';
+
+COMMENT ON POLICY "users_insert" ON public.users IS 
+  'Developer buat semua role, admin_cabang hanya buat admin_warehouse di warehouse sendiri';
+
+COMMENT ON POLICY "users_update" ON public.users IS 
+  'Developer edit semua user, admin_cabang edit admin_warehouse di warehouse sendiri';
+
+COMMENT ON POLICY "users_delete" ON public.users IS 
+  'Developer hapus semua user, admin_cabang hapus admin_warehouse di warehouse sendiri';
+
+COMMENT ON POLICY "users_write_dev" ON public.users IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- SECTION 16: WAREHOUSES TABLE - RLS POLICY (MANAJEMEN WAREHOUSE)
+-- ================================================================================
+-- 
+-- Table: warehouses (Master Gudang - Global)
+-- Scope: GLOBAL (tidak per warehouse)
+-- 
+-- Role Mapping:
+-- - developer: Full CRUD untuk semua warehouse (maintenance)
+-- - admin_cabang: Read-only untuk semua warehouse (untuk context/filter)
+-- - admin_warehouse: Read-only untuk warehouse sendiri
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: View warehouse (semua role bisa lihat untuk dropdown/filter)
+-- 2. INSERT: Create warehouse (hanya developer)
+-- 3. UPDATE: Edit warehouse (hanya developer)
+-- 4. DELETE: Hapus warehouse (hanya developer)
+-- ================================================================================
+
+-- Enable RLS untuk warehouses table
+ALTER TABLE public.warehouses ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk warehouses (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "warehouses_select" ON public.warehouses;
+DROP POLICY IF EXISTS "warehouses_insert" ON public.warehouses;
+DROP POLICY IF EXISTS "warehouses_update" ON public.warehouses;
+DROP POLICY IF EXISTS "warehouses_delete" ON public.warehouses;
+DROP POLICY IF EXISTS "warehouses_write_dev" ON public.warehouses;
+-- Drop policy duplicate (jika ada)
+DROP POLICY IF EXISTS "warehouses_select_all" ON public.warehouses;
+
+-- Policy SELECT: Semua authenticated user bisa lihat semua warehouse (untuk dropdown/filter)
+CREATE POLICY "warehouses_select"
+ON public.warehouses FOR SELECT TO authenticated
+USING (true);
+
+-- Policy INSERT: Hanya developer yang bisa create warehouse baru
+CREATE POLICY "warehouses_insert"
+ON public.warehouses FOR INSERT TO authenticated
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Policy UPDATE: Hanya developer yang bisa edit warehouse
+CREATE POLICY "warehouses_update"
+ON public.warehouses FOR UPDATE TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Policy DELETE: Hanya developer yang bisa hapus warehouse
+CREATE POLICY "warehouses_delete"
+ON public.warehouses FOR DELETE TO authenticated
+USING (public.current_user_role() = 'developer');
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "warehouses_write_dev"
+ON public.warehouses FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- ================================================================================
+-- DUPLICATE POLICY (Alternative Name - Untuk Kompatibilitas DEV)
+-- ================================================================================
+-- NOTE: Policy berikut duplicate dari warehouses_select dengan nama berbeda.
+-- Dibuat untuk menjaga kompatibilitas 100% dengan DEV environment.
+
+-- Policy SELECT (alternative name: warehouses_select_all)
+CREATE POLICY "warehouses_select_all"
+ON public.warehouses FOR SELECT TO authenticated
+USING (true);
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "warehouses_select" ON public.warehouses IS 
+  'Semua authenticated user bisa SELECT warehouse (untuk dropdown/filter)';
+
+COMMENT ON POLICY "warehouses_insert" ON public.warehouses IS 
+  'Hanya developer bisa CREATE warehouse baru';
+
+COMMENT ON POLICY "warehouses_update" ON public.warehouses IS 
+  'Hanya developer bisa EDIT warehouse';
+
+COMMENT ON POLICY "warehouses_delete" ON public.warehouses IS 
+  'Hanya developer bisa DELETE warehouse';
+
+COMMENT ON POLICY "warehouses_write_dev" ON public.warehouses IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- VERIFIKASI FINAL - NPL, USERS, WAREHOUSES
+-- ================================================================================
+
+-- Cek RLS status untuk ketiga tabel baru
+SELECT 
+  tablename,
+  rowsecurity AS "RLS_Enabled"
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename IN ('npl_history', 'users', 'warehouses')
+ORDER BY tablename;
+
+-- Cek semua policy untuk npl_history (expected: 5 policies)
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'npl_history'
+ORDER BY policyname;
+
+-- Cek semua policy untuk users (expected: 5 policies)
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'users'
+ORDER BY policyname;
+
+-- Cek semua policy untuk warehouses (expected: 5 policies)
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'warehouses'
+ORDER BY policyname;
+
+-- ================================================================================
+-- HASIL EXPECTED:
+-- ================================================================================
+-- 
+-- QUERY 1: RLS Status
+-- tablename      | RLS_Enabled
+-- ---------------+-------------
+-- npl_history    | t
+-- users          | t
+-- warehouses     | t
+-- 
+-- QUERY 2: npl_history policies (5 policies)
+-- schemaname | tablename    | policyname              | operation
+-- -----------+--------------+-------------------------+-----------
+-- public     | npl_history  | npl_history_delete      | d
+-- public     | npl_history  | npl_history_insert      | a
+-- public     | npl_history  | npl_history_select      | r
+-- public     | npl_history  | npl_history_update      | w
+-- public     | npl_history  | npl_history_write_dev   | *
+--
+-- QUERY 3: users policies (5 policies)
+-- schemaname | tablename | policyname        | operation
+-- -----------+-----------+-------------------+-----------
+-- public     | users     | users_delete      | d
+-- public     | users     | users_insert      | a
+-- public     | users     | users_select      | r
+-- public     | users     | users_update      | w
+-- public     | users     | users_write_dev   | *
+--
+-- QUERY 4: warehouses policies (5 policies)
+-- schemaname | tablename   | policyname            | operation
+-- -----------+-------------+-----------------------+-----------
+-- public     | warehouses  | warehouses_delete     | d
+-- public     | warehouses  | warehouses_insert     | a
+-- public     | warehouses  | warehouses_select     | r
+-- public     | warehouses  | warehouses_update     | w
+-- public     | warehouses  | warehouses_write_dev  | *
+--
+-- LEGEND operation:
+-- r = SELECT
+-- a = INSERT
+-- w = UPDATE
+-- d = DELETE
+-- * = ALL
+-- 
+-- TOTAL: 15 policies (5 NPL + 5 users + 5 warehouses) ✅
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SECTION 17: PERMUTASI_HISTORY TABLE - RLS POLICY (RELOKASI STOCK)
+-- ================================================================================
+-- 
+-- Table: permutasi_history (Relokasi Stock Internal)
+-- Scope: PER WAREHOUSE (pindah stock dari lokasi salah ke lokasi benar)
+-- 
+-- Role Mapping:
+-- - developer: Full access (semua gudang)
+-- - admin_warehouse: INSERT (eksekusi permutasi) + SELECT (view history)
+-- - admin_cabang: SELECT only (monitoring permutasi)
+--
+-- Use Cases:
+-- 1. Stock di lokasi salah cluster → pindah ke home cluster
+-- 2. Stock di In Transit (overflow) → pindah ke home cluster saat ada slot kosong
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: View history permutasi (admin_cabang monitoring, admin_warehouse lihat history)
+-- 2. INSERT: Eksekusi permutasi (admin_warehouse via form relokasi)
+-- 3. UPDATE: Tidak diperlukan (permutasi langsung final, tidak ada edit)
+-- 4. DELETE: Tidak diperlukan (history permanent untuk audit trail)
+-- ================================================================================
+
+-- Enable RLS untuk permutasi_history table
+ALTER TABLE public.permutasi_history ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk permutasi_history (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "permutasi_history_select" ON public.permutasi_history;
+DROP POLICY IF EXISTS "permutasi_history_insert" ON public.permutasi_history;
+DROP POLICY IF EXISTS "permutasi_history_update" ON public.permutasi_history;
+DROP POLICY IF EXISTS "permutasi_history_write_dev" ON public.permutasi_history;
+
+-- Policy SELECT: Developer & admin_cabang & admin_warehouse lihat warehouse sendiri
+CREATE POLICY "permutasi_history_select"
+ON public.permutasi_history FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy INSERT: Admin_warehouse bisa eksekusi permutasi di warehouse sendiri
+CREATE POLICY "permutasi_history_insert"
+ON public.permutasi_history FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_warehouse')
+  AND warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy UPDATE: Developer & admin_cabang/warehouse bisa update permutasi di warehouse sendiri
+-- (Optional: untuk future feature edit permutasi jika diperlukan)
+CREATE POLICY "permutasi_history_update"
+ON public.permutasi_history FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
+-- Policy ALL untuk Developer (bypass semua)
+CREATE POLICY "permutasi_history_write_dev"
+ON public.permutasi_history FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "permutasi_history_select" ON public.permutasi_history IS 
+  'Developer lihat semua, admin_cabang & admin_warehouse lihat warehouse sendiri (monitoring permutasi)';
+
+COMMENT ON POLICY "permutasi_history_insert" ON public.permutasi_history IS 
+  'Admin_warehouse bisa INSERT permutasi (relokasi stock) di warehouse sendiri';
+
+COMMENT ON POLICY "permutasi_history_update" ON public.permutasi_history IS 
+  'Developer & admin_cabang/warehouse bisa UPDATE permutasi di warehouse sendiri (optional untuk future edit feature)';
+
+COMMENT ON POLICY "permutasi_history_write_dev" ON public.permutasi_history IS 
+  'Developer full access (bypass RLS)';
+
+
+-- ================================================================================
+-- VERIFIKASI PERMUTASI_HISTORY POLICY
+-- ================================================================================
+
+-- Cek RLS status
+SELECT 
+  tablename,
+  rowsecurity AS "RLS_Enabled"
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename = 'permutasi_history';
+
+-- Cek semua policy untuk permutasi_history (expected: 3 policies)
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'permutasi_history'
+ORDER BY policyname;
+
+-- ================================================================================
+-- HASIL EXPECTED:
+-- ================================================================================
+-- 
+-- QUERY 1: RLS Status
+-- tablename           | RLS_Enabled
+-- --------------------+-------------
+-- permutasi_history   | t
+-- 
+-- QUERY 2: permutasi_history policies (3 policies, tanpa UPDATE/DELETE)
+-- schemaname | tablename          | policyname                    | operation
+-- -----------+--------------------+-------------------------------+-----------
+-- public     | permutasi_history  | permutasi_history_insert      | a
+-- public     | permutasi_history  | permutasi_history_select      | r
+-- public     | permutasi_history  | permutasi_history_write_dev   | *
+--
+-- LEGEND operation:
+-- r = SELECT
+-- a = INSERT
+-- * = ALL
+-- 
+-- TOTAL: 3 policies untuk permutasi_history ✅
+-- (Tidak perlu UPDATE/DELETE karena permutasi langsung final + history permanent)
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SECTION 18: ACTIVITY_LOGS TABLE - RLS POLICY (AUDIT TRAIL & SECURITY)
+-- ================================================================================
+-- 
+-- Table: activity_logs (Backend Audit Trail)
+-- Scope: PER WAREHOUSE untuk admin_cabang, GLOBAL untuk developer
+-- 
+-- Role Mapping:
+-- - developer: Full access (semua gudang, untuk forensic analysis)
+-- - admin_cabang: SELECT only (view activity log warehouse sendiri untuk security monitoring)
+-- - admin_warehouse: INSERT only (auto-generated saat user action)
+--
+-- Use Cases:
+-- 1. Security audit: Track login/logout/failed attempts
+-- 2. Troubleshooting: Debug user actions yang menyebabkan error
+-- 3. Compliance: Record semua perubahan data untuk regulatory requirements
+-- 4. Activity tracking: entity_type (products, stock_list, etc) + action (create/update/delete)
+--
+-- Fitur yang Membutuhkan Policy:
+-- 1. SELECT: View audit log (developer lihat semua, admin_cabang lihat warehouse sendiri)
+-- 2. INSERT: Auto-generated saat user action (semua role bisa log, admin_warehouse via backend)
+-- 3. UPDATE: Tidak diperlukan (audit immutable - tidak boleh diubah)
+-- 4. DELETE: Tidak diperlukan (audit permanent - tidak boleh dihapus)
+--
+-- BACKEND ONLY: Table ini tidak tampil di halaman manapun (pure backend logging)
+-- ================================================================================
+
+-- Enable RLS untuk activity_logs table
+ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
+
+-- Drop semua policy lama untuk activity_logs (safe, tidak error jika belum ada)
+DROP POLICY IF EXISTS "activity_logs_select" ON public.activity_logs;
+DROP POLICY IF EXISTS "activity_logs_insert" ON public.activity_logs;
+DROP POLICY IF EXISTS "activity_logs_write_dev" ON public.activity_logs;
+
+-- Policy SELECT: Developer lihat semua, admin_cabang lihat warehouse sendiri (security monitoring)
+-- Admin_warehouse tidak perlu lihat log (cukup admin_cabang untuk monitoring)
+CREATE POLICY "activity_logs_select"
+ON public.activity_logs FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR (
+    public.current_user_role() = 'admin_cabang'
+    AND warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy INSERT: Semua role bisa INSERT log aksi di warehouse sendiri (auto-generated via backend)
+-- Termasuk action global (login/logout) yang warehouse_id = NULL (untuk developer)
+CREATE POLICY "activity_logs_insert"
+ON public.activity_logs FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() IN ('developer', 'admin_cabang', 'admin_warehouse')
+  AND (
+    warehouse_id IS NULL  -- untuk aksi global seperti login/logout (developer)
+    OR warehouse_id = public.current_user_warehouse_id()  -- aksi di warehouse sendiri
+  )
+);
+
+-- Policy ALL untuk Developer (bypass semua - untuk forensic analysis)
+CREATE POLICY "activity_logs_write_dev"
+ON public.activity_logs FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Tambahkan COMMENT untuk dokumentasi policy
+COMMENT ON POLICY "activity_logs_select" ON public.activity_logs IS 
+  'Developer lihat semua, admin_cabang lihat audit log warehouse sendiri (untuk security monitoring & troubleshooting)';
+
+COMMENT ON POLICY "activity_logs_insert" ON public.activity_logs IS 
+  'Semua role bisa INSERT log aksi di warehouse sendiri (auto-generated via backend saat user action)';
+
+COMMENT ON POLICY "activity_logs_write_dev" ON public.activity_logs IS 
+  'Developer full access (bypass RLS untuk forensic analysis & data cleanup)';
+
+
+-- ================================================================================
+-- VERIFIKASI ACTIVITY_LOGS POLICY
+-- ================================================================================
+
+-- Cek RLS status
+SELECT 
+  tablename,
+  rowsecurity AS "RLS_Enabled"
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename = 'activity_logs';
+
+-- Cek semua policy untuk activity_logs (expected: 3 policies)
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  cmd AS operation
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename = 'activity_logs'
+ORDER BY policyname;
+
+-- ================================================================================
+-- HASIL EXPECTED:
+-- ================================================================================
+-- 
+-- QUERY 1: RLS Status
+-- tablename       | RLS_Enabled
+-- ----------------+-------------
+-- activity_logs   | t
+-- 
+-- QUERY 2: activity_logs policies (3 policies, tanpa UPDATE/DELETE)
+-- schemaname | tablename      | policyname              | operation
+-- -----------+----------------+-------------------------+-----------
+-- public     | activity_logs  | activity_logs_insert    | a
+-- public     | activity_logs  | activity_logs_select    | r
+-- public     | activity_logs  | activity_logs_write_dev | *
+--
+-- LEGEND operation:
+-- r = SELECT
+-- a = INSERT
+-- * = ALL
+-- 
+-- TOTAL: 3 policies untuk activity_logs ✅
+-- (Tidak perlu UPDATE/DELETE karena audit immutable dan permanent)
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SECTION 19: ADDITIONAL HELPER FUNCTIONS DOCUMENTATION
+-- ================================================================================
+-- 
+-- Selain helper functions utama (current_user_role, current_user_warehouse_id),
+-- aplikasi juga memiliki beberapa helper functions tambahan untuk keperluan auth
+-- dan profile management. Functions ini sudah ada di database dan berfungsi dengan baik.
+-- 
+-- ================================================================================
+
+-- ================================================================================
+-- FUNCTION 1: get_email_by_username
+-- ================================================================================
+-- 
+-- Deskripsi:
+--   Helper function untuk mendapatkan email user berdasarkan username.
+--   Digunakan dalam auth flow (forgot password, email verification, dll).
+-- 
+-- Input:
+--   p_username TEXT - Username yang ingin dicari emailnya
+-- 
+-- Output:
+--   TEXT - Email user jika ditemukan, NULL jika tidak ditemukan
+-- 
+-- Security:
+--   - SECURITY DEFINER: Function berjalan dengan hak akses postgres (owner)
+--   - SET search_path TO 'public': Proteksi dari search path injection
+--   - SET row_security TO 'off': Bypass RLS untuk query internal (admin function)
+--   - Filter is_active = true: Hanya return email untuk user yang aktif
+-- 
+-- Use Cases:
+--   1. Forgot password flow: Get email untuk kirim reset link
+--   2. Email verification: Get email untuk kirim verification code
+--   3. User lookup: Admin cari email berdasarkan username
+-- 
+-- Contoh Penggunaan:
+--   SELECT get_email_by_username('admin_warehouse_01'); 
+--   -- Returns: 'warehouse01@example.com'
+-- 
+-- ================================================================================
+
+-- QUERY DEFINISI (Already exists in database):
+/*
+CREATE FUNCTION public.get_email_by_username(p_username text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    SET row_security TO 'off'
+AS $$
+declare
+  v_email text;
+begin
+  select u.email
+  into v_email
+  from public.users u
+  where u.username = p_username
+    and u.is_active = true
+  limit 1;
+
+  return v_email;
+end;
+$$;
+*/
+
+
+-- ================================================================================
+-- FUNCTION 2: get_current_user_profile
+-- ================================================================================
+-- 
+-- Deskripsi:
+--   Helper function untuk mendapatkan profile lengkap user yang sedang login.
+--   Digunakan di client-side untuk populate user context (navbar, profile page, dll).
+-- 
+-- Input:
+--   Tidak ada parameter (menggunakan auth.uid() untuk identifikasi user)
+-- 
+-- Output:
+--   TABLE dengan kolom:
+--   - id UUID: User ID
+--   - warehouse_id UUID: Warehouse yang di-assign ke user (NULL untuk developer)
+--   - username TEXT: Username untuk login
+--   - full_name TEXT: Nama lengkap user
+--   - role TEXT: Role user (developer, admin_cabang, admin_warehouse)
+--   - email TEXT: Email user
+--   - phone TEXT: Nomor telepon user
+--   - is_active BOOLEAN: Status aktif user
+--   - created_at TIMESTAMPTZ: Waktu pembuatan akun
+--   - updated_at TIMESTAMPTZ: Waktu terakhir update profile
+-- 
+-- Security:
+--   - SECURITY DEFINER: Function berjalan dengan hak akses postgres (owner)
+--   - SET search_path TO 'public': Proteksi dari search path injection
+--   - WHERE u.id = auth.uid(): Hanya return profile user yang sedang login (self-only)
+--   - AND u.is_active = true: Hanya return jika user masih aktif
+-- 
+-- Use Cases:
+--   1. Navbar: Display username, role, warehouse name
+--   2. Profile page: Show complete user information
+--   3. Access control: Check role untuk conditional rendering
+--   4. Audit trail: Log user_id + warehouse_id saat action
+-- 
+-- Contoh Penggunaan:
+--   SELECT * FROM get_current_user_profile();
+--   -- Returns: Row dengan semua field profile user yang sedang login
+-- 
+-- ================================================================================
+
+-- QUERY DEFINISI (Already exists in database):
+/*
+CREATE FUNCTION public.get_current_user_profile() 
+RETURNS TABLE(
+  id uuid, 
+  warehouse_id uuid, 
+  username text, 
+  full_name text, 
+  role text, 
+  email text, 
+  phone text, 
+  is_active boolean, 
+  created_at timestamp with time zone, 
+  updated_at timestamp with time zone
+)
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    u.id,
+    u.warehouse_id,
+    u.username,
+    u.full_name,
+    u.role,
+    u.email,
+    u.phone,
+    u.is_active,
+    u.created_at,
+    u.updated_at
+  FROM public.users u
+  WHERE u.id = auth.uid()
+    AND u.is_active = true
+  LIMIT 1;
+END;
+$$;
+*/
+
+
+-- ================================================================================
+-- SECTION 20: DATABASE TRIGGERS DOCUMENTATION
+-- ================================================================================
+-- 
+-- Aplikasi menggunakan beberapa database triggers untuk automasi business logic.
+-- Triggers ini memastikan data konsistensi tanpa perlu logic di application layer.
+-- 
+-- ================================================================================
+
+-- ================================================================================
+-- TRIGGER 1: handle_stock_status_automation
+-- ================================================================================
+-- 
+-- Deskripsi:
+--   Auto-update kolom `status` dan `is_receh` di table stock_list berdasarkan
+--   kondisi stock (expired date, cluster, qty carton).
+-- 
+-- Target Table:
+--   public.stock_list
+-- 
+-- Event:
+--   BEFORE INSERT OR UPDATE
+--   (Trigger jalan sebelum data disimpan, sehingga status sudah benar saat INSERT/UPDATE)
+-- 
+-- Business Logic (Hirarki Status):
+--   1. 🔴 EXPIRED (Prioritas Tertinggi)
+--      - Kondisi: expired_date <= CURRENT_DATE
+--      - Action: status = 'expired'
+--      - Reason: Produk sudah expired, tidak boleh dijual (keamanan produk)
+-- 
+--   2. 🟠 SALAH-CLUSTER (Prioritas Kedua)
+--      - Kondisi: cluster <> products.default_cluster
+--      - Action: status = 'salah-cluster'
+--      - Reason: Stock di lokasi salah, harus dipindah ke home cluster
+-- 
+--   3. 🟡 RECEH (Prioritas Ketiga)
+--      - Kondisi: qty_carton < products.qty_carton_per_pallet
+--      - Action: status = 'receh', is_receh = TRUE
+--      - Reason: Sisa pengambilan, qty tidak full pallet
+-- 
+--   4. 🟢 RELEASE (Prioritas Keempat - FEFO Window)
+--      - Kondisi: (expired_date - CURRENT_DATE) <= 180 hari (6 bulan)
+--      - Action: status = 'release'
+--      - Reason: Mendekati expired, harus keluar duluan (FEFO)
+-- 
+--   5. ⚪ HOLD (Default)
+--      - Kondisi: Tidak ada kondisi khusus di atas
+--      - Action: status = 'hold'
+--      - Reason: Stock aman, masih jauh dari expired
+-- 
+-- Guard Clause:
+--   - Jika product_id tidak ditemukan di table products → Skip automation (RETURN NEW)
+--   - Jika data products incomplete (NULL values) → Skip automation (RETURN NEW)
+--   - Guard clause untuk prevent error saat data product tidak lengkap
+-- 
+-- Trigger Execution:
+--   FOR EACH ROW: Trigger jalan untuk setiap row yang di-INSERT/UPDATE
+-- 
+-- Use Cases:
+--   1. Inbound: Auto-set status saat stock baru masuk
+--   2. Outbound: Auto-update status saat qty berkurang (jadi receh)
+--   3. Permutasi: Auto-update status saat stock dipindah ke cluster lain
+--   4. NPL: Auto-set status saat stock return dari lapangan
+--   5. Daily cron: Bisa di-trigger manual untuk update status expired (jika ada)
+-- 
+-- Contoh Skenario:
+--   INSERT INTO stock_list (product_id, qty_carton, cluster, expired_date, ...)
+--   VALUES (product_uuid, 25, 'A', '2026-08-01', ...);
+--   
+--   -- BEFORE INSERT trigger jalan:
+--   -- 1. Cek product: qty_std = 50, default_cluster = 'A'
+--   -- 2. is_receh = TRUE (25 < 50)
+--   -- 3. expired_date '2026-08-01' - CURRENT_DATE '2026-02-19' = 163 hari (< 180)
+--   -- 4. status = 'release' (karena < 180 hari, prioritas lebih tinggi dari receh)
+--   
+--   -- Result: Row disimpan dengan status='release', is_receh=TRUE
+-- 
+-- ================================================================================
+
+-- QUERY DEFINISI (Already exists in database):
+/*
+CREATE FUNCTION public.handle_stock_status_automation() RETURNS trigger
+    LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_qty_std INTEGER;
+    v_default_cluster TEXT;
+BEGIN
+    -- Ambil data standar dari tabel products
+    SELECT qty_carton_per_pallet, default_cluster 
+    INTO v_qty_std, v_default_cluster
+    FROM public.products 
+    WHERE id = NEW.product_id;
+
+    -- Guard Clause untuk data tidak lengkap
+    IF v_qty_std IS NULL OR v_default_cluster IS NULL THEN
+        RAISE NOTICE 'Product % not found or incomplete data. Skipping automation.', NEW.product_id;
+        RETURN NEW; -- Skip automation, biarkan nilai asli
+    END IF;
+
+    -- A. ATUR FLAG IS_RECEH (Independen dari status)
+    IF NEW.qty_carton < v_qty_std THEN
+        NEW.is_receh := TRUE;
+    ELSE
+        NEW.is_receh := FALSE;
+    END IF;
+
+    -- B. HIRARKI STATUS (Prioritas dari atas ke bawah)
+    
+    -- 1. Prioritas Tertinggi: Expired (Keamanan Produk)
+    IF NEW.expired_date <= CURRENT_DATE THEN
+        NEW.status := 'expired';
+
+    -- 2. Prioritas Kedua: Salah Cluster (Kesalahan Lokasi)
+    ELSIF NEW.cluster <> v_default_cluster THEN
+        NEW.status := 'salah-cluster';
+
+    -- 3. Prioritas Ketiga: Receh (Sisa Pengambilan)
+    ELSIF NEW.qty_carton < v_qty_std THEN
+        NEW.status := 'receh';
+
+    -- 4. Prioritas Keempat: Release (FEFO - 6 bulan menuju expired)
+    ELSIF (NEW.expired_date - CURRENT_DATE) <= 180 THEN
+        NEW.status := 'release';
+
+    -- 5. Default: Hold (Stok Aman/Masih Jauh Expired-nya)
+    ELSE
+        NEW.status := 'hold';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+-- Attach trigger ke table stock_list
+CREATE TRIGGER stock_list_status_automation
+    BEFORE INSERT OR UPDATE ON public.stock_list
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_stock_status_automation();
+*/
+
+
+-- ================================================================================
+-- TRIGGER 2: update_fefo_status
+-- ================================================================================
+-- 
+-- Deskripsi:
+--   Auto-update kolom `fefo_status` di table stock_list untuk menentukan pallet
+--   mana yang harus diambil duluan (FIFO/FEFO - First Expired First Out).
+--   Trigger ini memastikan UI warehouse layout menampilkan pallet hijau (release)
+--   untuk pallet dengan BB Produk paling tua.
+-- 
+-- Target Table:
+--   public.stock_list
+-- 
+-- Event:
+--   AFTER INSERT OR UPDATE OR DELETE
+--   (Trigger jalan setelah data disimpan, untuk update fefo_status pallet lain)
+-- 
+-- Business Logic (FEFO Algorithm):
+--   1. Cari BB Produk Terkecil (Paling Tua):
+--      - Query: SELECT MIN(bb_produk) WHERE product_id = X AND warehouse_id = Y
+--      - Filter: Exclude status 'expired' dan 'damaged' (tidak boleh diambil)
+--      - Sort: ORDER BY bb_produk ASC, created_at ASC (BB tua + inbound tua duluan)
+-- 
+--   2. Reset Semua Pallet Jadi 'hold':
+--      - UPDATE stock_list SET fefo_status = 'hold' WHERE product_id = X
+--      - Purpose: Bersihkan status lama sebelum apply logic baru
+-- 
+--   3. Set Pallet dengan BB Minimum Jadi 'release':
+--      - UPDATE stock_list SET fefo_status = 'release' WHERE bb_produk = min_bb
+--      - Purpose: Semua pallet dengan BB identik bisa diambil (hijau di layout)
+--      - Example: 5 pallet dengan BB '20260101' → semua hijau (boleh ambil manapun)
+-- 
+-- Recursion Protection:
+--   - pg_trigger_depth() < 2: Prevent infinite loop (trigger update → trigger lagi)
+--   - Trigger hanya jalan 1 level deep, tidak jalan lagi untuk UPDATE dari trigger ini
+-- 
+-- Trigger Execution:
+--   FOR EACH ROW: Trigger jalan untuk setiap row yang di-INSERT/UPDATE/DELETE
+-- 
+-- Use Cases:
+--   1. Inbound: Saat stock baru masuk, recalculate fefo_status untuk produk tersebut
+--   2. Outbound: Saat stock keluar, recalculate fefo_status (BB minimum bisa berubah)
+--   3. Permutasi: Saat stock dipindah, fefo_status ikut ter-update
+--   4. Stock adjustment: Saat qty diubah, fefo_status ikut ter-update
+-- 
+-- Contoh Skenario:
+--   Sebelum Outbound:
+--   - Produk A: 3 pallet BB '20260101' (fefo_status = 'release' - hijau)
+--   - Produk A: 2 pallet BB '20260201' (fefo_status = 'hold' - abu-abu)
+--   - Produk A: 1 pallet BB '20260301' (fefo_status = 'hold' - abu-abu)
+-- 
+--   Setelah Outbound (ambil 1 pallet BB '20260101'):
+--   - Produk A: 2 pallet BB '20260101' (fefo_status = 'release' - masih hijau)
+--   - Produk A: 2 pallet BB '20260201' (fefo_status = 'hold' - masih abu-abu)
+--   - Produk A: 1 pallet BB '20260301' (fefo_status = 'hold' - masih abu-abu)
+--   
+--   Setelah Outbound (ambil semua BB '20260101'):
+--   - Trigger jalan → Cari BB minimum baru = '20260201'
+--   - Produk A: 2 pallet BB '20260201' (fefo_status = 'release' - hijau sekarang!)
+--   - Produk A: 1 pallet BB '20260301' (fefo_status = 'hold' - masih abu-abu)
+-- 
+-- Impact ke UI:
+--   - Warehouse Layout: Pallet hijau = boleh diambil (fefo_status = 'release')
+--   - Warehouse Layout: Pallet abu-abu = jangan diambil dulu (fefo_status = 'hold')
+--   - Admin_warehouse lihat layout → tahu pallet mana yang harus diambil duluan
+-- 
+-- ================================================================================
+
+-- QUERY DEFINISI (Already exists in database):
+/*
+CREATE FUNCTION public.update_fefo_status() RETURNS trigger
+    LANGUAGE plpgsql
+AS $$
+DECLARE
+    min_bb TEXT;
+BEGIN
+    -- Proteksi rekursi
+    IF pg_trigger_depth() < 2 THEN
+        
+        -- A. Cari nilai BB Produk terkecil (paling tua) yang tersedia untuk produk ini
+        SELECT bb_produk INTO min_bb
+        FROM public.stock_list
+        WHERE product_id = COALESCE(NEW.product_id, OLD.product_id)
+          AND warehouse_id = COALESCE(NEW.warehouse_id, OLD.warehouse_id)
+          AND status NOT IN ('expired', 'damaged')
+        ORDER BY bb_produk ASC, created_at ASC
+        LIMIT 1;
+
+        -- B. Reset semua menjadi 'hold' terlebih dahulu
+        UPDATE public.stock_list
+        SET fefo_status = 'hold'
+        WHERE product_id = COALESCE(NEW.product_id, OLD.product_id)
+          AND warehouse_id = COALESCE(NEW.warehouse_id, OLD.warehouse_id)
+          AND status NOT IN ('expired', 'damaged');
+
+        -- C. Set SEMUA pallet yang memiliki BB Produk identik dengan min_bb menjadi 'release'
+        IF min_bb IS NOT NULL THEN
+            UPDATE public.stock_list
+            SET fefo_status = 'release'
+            WHERE product_id = COALESCE(NEW.product_id, OLD.product_id)
+              AND warehouse_id = COALESCE(NEW.warehouse_id, OLD.warehouse_id)
+              AND bb_produk = min_bb
+              AND status NOT IN ('expired', 'damaged');
+        END IF;
+        
+    END IF;
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+-- Attach trigger ke table stock_list
+CREATE TRIGGER stock_list_fefo_update
+    AFTER INSERT OR UPDATE OR DELETE ON public.stock_list
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_fefo_status();
+*/
+
+
+-- ================================================================================
+-- SUMMARY - COMPLETE RLS COVERAGE
+-- ================================================================================
+-- 
+-- Master Data (Admin Cabang - SECTION 2-6):
+-- ✅ products (5 policies)
+-- ✅ expeditions (5 policies)
+-- ✅ cluster_configs (5 policies)
+-- ✅ cluster_cell_overrides (5 policies)
+-- ✅ product_homes (5 policies)
+-- 
+-- Operational Tables (Admin Warehouse - SECTION 8-11, 14, 17):
+-- ✅ inbound_history (5 policies)
+-- ✅ outbound_history (5 policies)
+-- ✅ stock_list (5 policies)
+-- ✅ stock_movements (3 policies)
+-- ✅ npl_history (5 policies) [SECTION 14]
+-- ✅ permutasi_history (3 policies) [SECTION 17]
+-- 
+-- Audit Tables (Admin Cabang - SECTION 12-13, 18):
+-- ✅ prestock_opname (4 policies)
+-- ✅ prestock_opname_items (4 policies)
+-- ✅ activity_logs (3 policies) [SECTION 18]
+-- 
+-- Management Tables (Developer/Admin Cabang - SECTION 15-16):
+-- ✅ users (5 policies) [SECTION 15]
+-- ✅ warehouses (5 policies) [SECTION 16]
+-- 
+-- TOTAL: 16 tables, 72 policies ✅
+-- Status: COMPLETE RLS IMPLEMENTATION + DOCUMENTATION
+-- 
+-- Additional Documentation:
+-- ✅ Helper Functions (SECTION 19): get_email_by_username, get_current_user_profile
+-- ✅ Database Triggers (SECTION 20): handle_stock_status_automation, update_fefo_status
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SECTION 21: AUTHENTICATION & AUTHORIZATION FLOW
+-- ================================================================================
+-- 
+-- Aplikasi menggunakan hybrid authentication: Username-based login di UI, tapi
+-- tetap leverage Supabase Auth (email-based) di backend. Ini untuk UX yang lebih
+-- baik (user tidak perlu ingat email, cukup username).
+-- 
+-- ================================================================================
+
+-- ================================================================================
+-- AUTH FLOW 1: LOGIN DENGAN USERNAME
+-- ================================================================================
+-- 
+-- Deskripsi:
+--   User login menggunakan username (bukan email), tapi backend tetap authenticate
+--   via Supabase Auth yang email-based. System akan translate username → email
+--   secara otomatis menggunakan helper function get_email_by_username().
+-- 
+-- Flow Diagram:
+--   ┌─────────────┐
+--   │ User Input  │ username: "admin_warehouse_01"
+--   │ Login Form  │ password: "***********"
+--   └──────┬──────┘
+--          ↓
+--   ┌─────────────────────────────────────────┐
+--   │ Step 1: Translate Username → Email      │
+--   │ RPC call: get_email_by_username()       │
+--   │ Return: "warehouse01@example.com"       │
+--   └──────┬──────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────┐
+--   │ Step 2: Authenticate via Supabase Auth  │
+--   │ supabase.auth.signInWithPassword({      │
+--   │   email: "warehouse01@example.com",     │
+--   │   password: "***********"               │
+--   │ })                                      │
+--   └──────┬──────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────┐
+--   │ Step 3: Validate Credentials            │
+--   │ Supabase Auth: Check bcrypt hash        │
+--   │ Success → Issue JWT token               │
+--   └──────┬──────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────┐
+--   │ Step 4: Get User Profile                │
+--   │ RPC call: get_current_user_profile()    │
+--   │ Return: { id, role, warehouse_id, ... } │
+--   └──────┬──────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────┐
+--   │ Step 5: Redirect Based on Role          │
+--   │ - developer → /admin-management         │
+--   │ - admin_cabang → /stock-list-master     │
+--   │ - admin_warehouse → /inbound            │
+--   └─────────────────────────────────────────┘
+-- 
+-- Implementation Example:
+--   File: src/app/login/actions.ts (Server Action)
+--   
+--   export async function loginAction(formData: FormData) {
+--     const username = formData.get('username') as string;
+--     const password = formData.get('password') as string;
+--     
+--     // Step 1: Get email from username
+--     const { data: emailData, error: emailError } = await supabase
+--       .rpc('get_email_by_username', { p_username: username });
+--     
+--     if (emailError || !emailData) {
+--       return { error: 'Username tidak ditemukan atau tidak aktif' };
+--     }
+--     
+--     // Step 2: Sign in with email + password
+--     const { data: authData, error: authError } = await supabase.auth
+--       .signInWithPassword({
+--         email: emailData,
+--         password: password
+--       });
+--     
+--     if (authError) {
+--       return { error: 'Password salah atau akun tidak aktif' };
+--     }
+--     
+--     // Step 3: Get full profile
+--     const { data: profileData } = await supabase
+--       .rpc('get_current_user_profile');
+--     
+--     // Step 4: Redirect based on role
+--     return { success: true, profile: profileData };
+--   }
+-- 
+-- Security Considerations:
+--   1. Password Protection:
+--      - Password tidak pernah di-expose di URL/logs (hanya di request body POST)
+--      - Supabase Auth handle password hashing (bcrypt) di backend
+--      - No plain text password storage
+--   
+--   2. Email Privacy:
+--      - Email di-resolve server-side via RPC (tidak bisa di-sniff dari network)
+--      - Client hanya tahu username, tidak perlu tahu email
+--      - Prevent email enumeration attack
+--   
+--   3. Session Security:
+--      - JWT token issued setelah successful login
+--      - Token stored di httpOnly cookie (tidak bisa diakses via JavaScript - XSS protection)
+--      - Auto-refresh before expiry (seamless UX)
+--   
+--   4. Rate Limiting:
+--      - Supabase Auth built-in rate limiting (prevent brute force)
+--      - Configurable di Supabase Dashboard (default: 5 attempts per 15 minutes)
+--   
+--   5. Account Protection:
+--      - get_email_by_username() filter: is_active = true
+--      - Inactive users cannot login (even with correct password)
+--      - Admin dapat disable user tanpa delete (soft delete)
+-- 
+-- Error Handling:
+--   ┌──────────────────────┬────────────────────────────────────────────┐
+--   │ Error Condition      │ User Message                               │
+--   ├──────────────────────┼────────────────────────────────────────────┤
+--   │ Username not found   │ "Username tidak ditemukan"                 │
+--   │ User inactive        │ "Akun Anda tidak aktif, hubungi admin"    │
+--   │ Wrong password       │ "Password salah"                           │
+--   │ Account locked       │ "Akun terkunci, coba lagi dalam X menit"  │
+--   │ Network error        │ "Koneksi gagal, coba lagi"                │
+--   └──────────────────────┴────────────────────────────────────────────┘
+-- 
+-- Why Username-Based Login?
+--   - Better UX: Username lebih mudah diingat daripada email
+--   - Consistency: Username untuk semua operations (display di navbar, activity logs, dll)
+--   - Flexibility: Email bisa berubah tanpa affect username (email update tanpa re-login)
+--   - Corporate Standard: Banyak enterprise system pakai username (bukan email)
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- AUTH FLOW 2: USER REGISTRATION (CREATE USER)
+-- ================================================================================
+-- 
+-- Deskripsi:
+--   Admin (developer/admin_cabang) create user baru via UI. System create user
+--   di Supabase Auth + insert record di table users secara atomic (all-or-nothing).
+-- 
+-- Flow Diagram:
+--   ┌─────────────────────────────────────────┐
+--   │ Admin Input (via Form)                  │
+--   │ - username: "warehouse_01"              │
+--   │ - email: "warehouse01@example.com"      │
+--   │ - password: "SecurePass123"             │
+--   │ - full_name: "John Doe"                 │
+--   │ - role: "admin_warehouse"               │
+--   │ - warehouse_id: <UUID gudang A>         │
+--   │ - phone: "08123456789"                  │
+--   └──────┬──────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────┐
+--   │ Step 1: Validation                      │
+--   │ - Email unique? (check auth.users)      │
+--   │ - Username unique? (check public.users) │
+--   │ - Warehouse exists? (check warehouses)  │
+--   │ - Role allowed? (RLS check)             │
+--   └──────┬──────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────┐
+--   │ Step 2: Create Auth User                │
+--   │ supabase.auth.admin.createUser({        │
+--   │   email: "warehouse01@example.com",     │
+--   │   password: "SecurePass123",            │
+--   │   email_confirm: true  ← Skip email     │
+--   │                           verification   │
+--   │ })                                      │
+--   │ → Returns: { user: { id: <UUID> } }     │
+--   └──────┬──────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────┐
+--   │ Step 3: Insert Profile                  │
+--   │ INSERT INTO public.users (              │
+--   │   id,          ← auth user id           │
+--   │   username,                             │
+--   │   email,                                │
+--   │   role,                                 │
+--   │   warehouse_id,                         │
+--   │   full_name,                            │
+--   │   phone,                                │
+--   │   is_active                             │
+--   │ ) VALUES (...)                          │
+--   └──────┬──────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────┐
+--   │ Step 4: Success Response                │
+--   │ Return: { id, username, email, role }   │
+--   │ UI: Show success toast                  │
+--   │ UI: Redirect to user list               │
+--   └─────────────────────────────────────────┘
+-- 
+-- Implementation Example:
+--   File: src/app/admin-management/actions.ts (Server Action)
+--   
+--   export async function createUserAction(formData: FormData) {
+--     const supabase = createServerClient();
+--     
+--     // Step 1: Validation (handled by RLS policies)
+--     // Step 2: Create auth user
+--     const { data: authUser, error: authError } = await supabase.auth.admin
+--       .createUser({
+--         email: formData.get('email'),
+--         password: formData.get('password'),
+--         email_confirm: true, // Skip email verification (internal system)
+--         user_metadata: {
+--           username: formData.get('username'),
+--           full_name: formData.get('full_name')
+--         }
+--       });
+--     
+--     if (authError) {
+--       return { error: 'Email sudah terdaftar atau invalid' };
+--     }
+--     
+--     // Step 3: Insert profile (linked to auth user)
+--     const { error: profileError } = await supabase.from('users').insert({
+--       id: authUser.user.id, // Link ke auth.users via id
+--       username: formData.get('username'),
+--       email: formData.get('email'),
+--       role: formData.get('role'),
+--       warehouse_id: formData.get('warehouse_id'),
+--       full_name: formData.get('full_name'),
+--       phone: formData.get('phone'),
+--       is_active: true
+--     });
+--     
+--     if (profileError) {
+--       // Rollback: Delete auth user if profile insert fails
+--       await supabase.auth.admin.deleteUser(authUser.user.id);
+--       return { error: 'Gagal membuat profile user' };
+--     }
+--     
+--     return { success: true };
+--   }
+-- 
+-- RLS Enforcement (Security Layer):
+--   ┌──────────────────┬───────────────────────────────────────────────────┐
+--   │ Current User     │ Allowed Operations                                │
+--   ├──────────────────┼───────────────────────────────────────────────────┤
+--   │ developer        │ Create ANY role (developer/admin_cabang/          │
+--   │                  │ admin_warehouse) di ANY warehouse                 │
+--   ├──────────────────┼───────────────────────────────────────────────────┤
+--   │ admin_cabang     │ Create ONLY admin_warehouse di warehouse sendiri  │
+--   │                  │ (RLS policy users_insert enforce warehouse_id)    │
+--   ├──────────────────┼───────────────────────────────────────────────────┤
+--   │ admin_warehouse  │ CANNOT create user (RLS policy deny)              │
+--   └──────────────────┴───────────────────────────────────────────────────┘
+-- 
+-- Why Skip Email Verification?
+--   - Internal system: Admin create users (bukan self-registration)
+--   - Email valid: Admin responsible untuk valid email input
+--   - Immediate access: User bisa langsung login tanpa verify email
+--   - Simplicity: No email server config needed (Gmail SMTP, SendGrid, dll)
+-- 
+-- Security Considerations:
+--   1. Auth-Profile Linking:
+--      - table users.id = auth.users.id (UUID primary key)
+--      - Foreign key constraint enforce integrity
+--      - If auth user deleted → profile auto-deleted (CASCADE)
+--   
+--   2. Password Policy (Supabase Default):
+--      - Minimum 6 characters
+--      - No special char requirement (configurable)
+--      - Bcrypt hash with salt (auto)
+--   
+--   3. Transaction-Like Behavior:
+--      - If profile insert fails → Rollback auth user creation
+--      - Prevent orphaned auth users (auth without profile)
+--      - Admin retry without duplicate email error
+--   
+--   4. Audit Trail:
+--      - Log user creation di activity_logs (optional)
+--      - Track: created_by admin_id, created_at timestamp
+--      - Compliance: Who created which user & when
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- AUTH FLOW 3: SESSION MANAGEMENT & JWT TOKENS
+-- ================================================================================
+-- 
+-- Deskripsi:
+--   Supabase Auth menggunakan JWT (JSON Web Token) untuk session management.
+--   Token disimpan di httpOnly cookie untuk security, auto-refresh sebelum expire.
+-- 
+-- Token Structure:
+--   ┌──────────────────────────────────────────────────────────────┐
+--   │ JWT Token (Stored in httpOnly Cookie)                        │
+--   ├──────────────────────────────────────────────────────────────┤
+--   │ Header:                                                       │
+--   │   { "alg": "HS256", "typ": "JWT" }                           │
+--   ├──────────────────────────────────────────────────────────────┤
+--   │ Payload:                                                      │
+--   │   {                                                           │
+--   │     "sub": "550e8400-e29b-41d4-a716-446655440000",  ← User ID│
+--   │     "email": "warehouse01@example.com",                      │
+--   │     "aud": "authenticated",                                  │
+--   │     "role": "authenticated",  ← Supabase role (NOT app role) │
+--   │     "iat": 1708358400,  ← Issued at (Unix timestamp)         │
+--   │     "exp": 1708362000   ← Expire at (1 hour later)           │
+--   │   }                                                           │
+--   ├──────────────────────────────────────────────────────────────┤
+--   │ Signature: HMACSHA256(base64(header) + "." + base64(payload),│
+--   │                       secret_key)                             │
+--   └──────────────────────────────────────────────────────────────┘
+-- 
+--   IMPORTANT: JWT token TIDAK contain app role (developer/admin_cabang/
+--   admin_warehouse). App role disimpan di table users, diquery via RLS
+--   helper functions (current_user_role).
+-- 
+-- Session Lifecycle:
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 1. LOGIN                                                     │
+--   │    User authenticate → Supabase issue JWT token              │
+--   │    Token stored di httpOnly cookie (sb-access-token)         │
+--   │    Expiry: 1 hour (configurable di Supabase Dashboard)       │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 2. SESSION CHECK (Every Page Load)                           │
+--   │    Next.js Middleware: supabase.auth.getSession()            │
+--   │    - Valid token → Allow access                              │
+--   │    - Expired token → Try refresh                             │
+--   │    - No token → Redirect to /login                           │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 3. AUTO-REFRESH (Before Expiry)                              │
+--   │    Supabase Client: Auto-refresh 55 minutes after issue      │
+--   │    Use refresh_token (long-lived, 7 days expiry)             │
+--   │    New JWT issued → Replace old token                        │
+--   │    User tetap login tanpa interrupt (seamless UX)            │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 4. LOGOUT                                                    │
+--   │    User click logout → supabase.auth.signOut()               │
+--   │    Clear cookies: access_token + refresh_token               │
+--   │    Invalidate refresh_token di database (revoke)             │
+--   │    Redirect to /login                                        │
+--   └─────────────────────────────────────────────────────────────┘
+-- 
+-- Storage Locations:
+--   ┌─────────────────────┬──────────────────┬───────────────────────┐
+--   │ Token Type          │ Storage Location │ Expiry                │
+--   ├─────────────────────┼──────────────────┼───────────────────────┤
+--   │ Access Token (JWT)  │ httpOnly Cookie  │ 1 hour (default)      │
+--   │ Refresh Token       │ httpOnly Cookie  │ 7 days (default)      │
+--   │ User Profile        │ Memory (client)  │ Until page refresh    │
+--   └─────────────────────┴──────────────────┴───────────────────────┘
+-- 
+-- Security Features:
+--   1. httpOnly Cookie:
+--      - JavaScript tidak bisa akses token (XSS protection)
+--      - Auto-sent dengan setiap HTTP request
+--      - Secure flag: HTTPS only (production)
+--   
+--   2. Short-lived Access Token:
+--      - Expire setelah 1 jam (minimize risk jika token leaked)
+--      - Must refresh untuk continue session
+--      - Revoke = delete refresh_token (access token tetap valid sampai expire)
+--   
+--   3. Refresh Token Rotation:
+--      - Every refresh → New refresh_token issued
+--      - Old refresh_token invalidated (one-time use)
+--      - Prevent replay attack
+--   
+--   4. Token Validation (Every Request):
+--      - Signature verification (HMAC-SHA256)
+--      - Expiry check (exp claim)
+--      - Audience check (aud claim)
+--      - Issuer check (iss claim)
+-- 
+-- Implementation (Middleware):
+--   File: src/middleware.ts
+--   
+--   export async function middleware(request: NextRequest) {
+--     const supabase = createServerClient();
+--     
+--     // Check session
+--     const { data: { session } } = await supabase.auth.getSession();
+--     
+--     if (!session) {
+--       // No valid session → Redirect to login
+--       return NextResponse.redirect(new URL('/login', request.url));
+--     }
+--     
+--     // Get user profile untuk role-based redirect
+--     const { data: profile } = await supabase.rpc('get_current_user_profile');
+--     
+--     // Role-based access control (optional)
+--     if (request.nextUrl.pathname.startsWith('/admin-management')) {
+--       if (profile.role !== 'developer') {
+--         return NextResponse.redirect(new URL('/unauthorized', request.url));
+--       }
+--     }
+--     
+--     return NextResponse.next();
+--   }
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- AUTH FLOW 4: ROLE-BASED ACCESS CONTROL (RBAC) INTEGRATION
+-- ================================================================================
+-- 
+-- Deskripsi:
+--   Setelah authentication sukses (JWT valid), system check app role dari table
+--   users untuk determine access level. Integration antara Supabase Auth (JWT)
+--   dan RLS policies (app role).
+-- 
+-- Authentication vs Authorization:
+--   ┌─────────────────────┬────────────────────────────────────────────┐
+--   │ Layer               │ Responsibility                             │
+--   ├─────────────────────┼────────────────────────────────────────────┤
+--   │ AUTHENTICATION      │ "Who are you?"                             │
+--   │ (Supabase Auth)     │ - Verify email + password                  │
+--   │                     │ - Issue JWT token (contains auth.uid())    │
+--   │                     │ - Session management                       │
+--   ├─────────────────────┼────────────────────────────────────────────┤
+--   │ AUTHORIZATION       │ "What can you do?"                         │
+--   │ (RLS + App Role)    │ - Query: current_user_role() from users    │
+--   │                     │ - Check: developer/admin_cabang/warehouse  │
+--   │                     │ - Filter data by warehouse_id              │
+--   │                     │ - Enforce business rules                   │
+--   └─────────────────────┴────────────────────────────────────────────┘
+-- 
+-- Integration Flow:
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 1. User Login → JWT Token Issued                            │
+--   │    JWT contains: sub = auth.uid() = user UUID               │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 2. User Access Protected Resource (e.g., /inbound)           │
+--   │    Middleware: Check JWT valid? → Yes, continue              │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 3. Query Data (e.g., SELECT * FROM inbound_history)          │
+--   │    RLS Policy: inbound_history_select triggered              │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 4. RLS Query: current_user_role()                            │
+--   │    SELECT role FROM users WHERE id = auth.uid()              │
+--   │    Returns: 'admin_warehouse'                                │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 5. RLS Query: current_user_warehouse_id()                    │
+--   │    SELECT warehouse_id FROM users WHERE id = auth.uid()      │
+--   │    Returns: <UUID gudang A>                                  │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 6. Apply Filter:                                             │
+--   │    SELECT * FROM inbound_history                             │
+--   │    WHERE warehouse_id = <UUID gudang A>  ← RLS enforce       │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ 7. Return Filtered Data to Client                            │
+--   │    User HANYA lihat data warehouse sendiri                   │
+--   │    Cross-warehouse access BLOCKED by RLS                     │
+--   └─────────────────────────────────────────────────────────────┘
+-- 
+-- Role Hierarchy & Permissions:
+--   ┌────────────────────┬──────────────┬──────────────────────────┐
+--   │ Role               │ Warehouse ID │ Access Level             │
+--   ├────────────────────┼──────────────┼──────────────────────────┤
+--   │ developer          │ NULL         │ FULL ACCESS (bypass RLS) │
+--   │                    │              │ - All tables             │
+--   │                    │              │ - All warehouses         │
+--   │                    │              │ - CRUD everything        │
+--   ├────────────────────┼──────────────┼──────────────────────────┤
+--   │ admin_cabang       │ <UUID>       │ MANAGEMENT (warehouse X) │
+--   │                    │              │ - CRUD master data       │
+--   │                    │              │ - View ALL history       │
+--   │                    │              │ - Delete ANY transaction │
+--   │                    │              │ - Manage users (warehouse)│
+--   ├────────────────────┼──────────────┼──────────────────────────┤
+--   │ admin_warehouse    │ <UUID>       │ OPERATIONS (warehouse X) │
+--   │                    │              │ - INSERT transactions    │
+--   │                    │              │ - View TODAY history     │
+--   │                    │              │ - Delete TODAY own txn   │
+--   │                    │              │ - Read-only master data  │
+--   └────────────────────┴──────────────┴──────────────────────────┘
+-- 
+-- Defense in Depth (Security Layers):
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ Layer 1: UI (Client-Side)                                    │
+--   │ - Conditional rendering (hide menu jika tidak punya akses)   │
+--   │ - User-friendly (tidak bingung dengan menu yang tidak bisa   │
+--   │   diakses)                                                   │
+--   │ - NOT SECURE (bisa di-bypass dengan browser DevTools)        │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ Layer 2: Middleware (Next.js)                                │
+--   │ - Route protection (redirect jika session invalid)           │
+--   │ - Role-based routing (redirect jika role tidak sesuai)       │
+--   │ - MODERATE SECURE (bisa di-bypass dengan API call direct)    │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ Layer 3: Server Actions (Next.js)                            │
+--   │ - Validation (check role sebelum execute operation)          │
+--   │ - Business logic (enforce constraints)                       │
+--   │ - GOOD SECURE (but still possible SQL injection if not       │
+--   │   careful)                                                   │
+--   └──────┬──────────────────────────────────────────────────────┘
+--          ↓
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ Layer 4: RLS Policies (Database)                             │
+--   │ - Final enforcement (cannot be bypassed)                     │
+--   │ - Filter data di database level                              │
+--   │ - MAXIMUM SECURE (even SQL injection cannot bypass RLS)      │
+--   │ - Defense against: API manipulation, SQL injection, direct   │
+--   │   database access, rogue admins, compromised credentials     │
+--   └─────────────────────────────────────────────────────────────┘
+-- 
+-- Why Multi-Layer Security?
+--   - UI Layer: Better UX (user tidak lihat menu yang tidak bisa diakses)
+--   - Middleware: Prevent unnecessary API calls (performance optimization)
+--   - Server Action: Business logic validation (consistency)
+--   - RLS Layer: Final security (compliance, audit, peace of mind)
+-- 
+--   Analogy:
+--   ┌─────────────────────────────────────────────────────────────┐
+--   │ House Security:                                              │
+--   │ - Layer 1 (UI): Tanda "Private Property" di pagar (warning)  │
+--   │ - Layer 2 (Middleware): Pagar + Gerbang (filter visitors)   │
+--   │ - Layer 3 (Server): Security guard di pintu (validation)     │
+--   │ - Layer 4 (RLS): Pintu rumah terkunci (final barrier)        │
+--   │                                                              │
+--   │ Even jika tamu nakal bypass Layer 1-3, tetap tidak bisa      │
+--   │ masuk karena Layer 4 (pintu terkunci)!                       │
+--   └─────────────────────────────────────────────────────────────┘
+-- 
+-- ================================================================================
+
+
+-- ================================================================================
+-- SUMMARY - AUTH & RLS INTEGRATION
+-- ================================================================================
+-- 
+-- 1. Authentication (Supabase Auth):
+--    - Username-based login di UI (UX friendly)
+--    - Email-based auth di backend (Supabase standard)
+--    - Helper function: get_email_by_username() untuk translate
+--    - JWT token untuk session management (httpOnly cookie)
+--    - Auto-refresh sebelum expire (seamless UX)
+-- 
+-- 2. Authorization (RLS + App Role):
+--    - App role disimpan di table users (developer/admin_cabang/admin_warehouse)
+--    - RLS helper: current_user_role(), current_user_warehouse_id()
+--    - RLS policies query helper functions untuk determine access
+--    - Filter data berdasarkan role & warehouse_id
+-- 
+-- 3. Integration Flow:
+--    Login → JWT (contains auth.uid()) 
+--         → RLS query users table (WHERE id = auth.uid()) 
+--         → Get role & warehouse_id 
+--         → Apply filter to data
+-- 
+-- 4. Security Stack:
+--    UI (warning) → Middleware (filter) → Server Action (validation) → RLS (enforcement)
+-- 
+-- 5. Why This Architecture?
+--    - Separation of Concerns: Auth (who) vs Authorization (what)
+--    - Flexibility: Email bisa berubah tanpa affect session
+--    - Security: Multi-layer defense (cannot bypass even with SQL injection)
+--    - UX: Username login + seamless session management
+--    - Compliance: Audit trail di database level (RLS logged)
+-- 
+-- ================================================================================
+

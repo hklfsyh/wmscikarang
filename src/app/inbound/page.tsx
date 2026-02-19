@@ -8,13 +8,22 @@ export default async function InboundPage() {
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("users")
-    .select("*, warehouses(city_name, warehouse_code)")
-    .eq("id", user.id)
-    .single();
+  const { data: profiles, error: rpcError } = await supabase
+    .rpc("get_current_user_profile");
+  
+  let profile = null;
+  if (rpcError || !profiles || profiles.length === 0) {
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", user.id)
+      .single();
+    profile = fallbackProfile;
+  } else {
+    profile = profiles[0];
+  }
 
-  if (!profile) redirect("/login");
+  if (!profile) redirect("/warehouse-layout");
 
   // 1. Ambil data pendukung dasar
   const { data: expeditions } = await supabase
