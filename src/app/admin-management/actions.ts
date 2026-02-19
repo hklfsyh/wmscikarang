@@ -17,7 +17,10 @@ export async function registerUser(formData: any) {
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: formData.email,
       password: formData.password,
-      email_confirm: true
+      email_confirm: true,
+      user_metadata: {
+        username: formData.username  // ✅ Set username di metadata untuk login
+      }
     })
     if (authError) throw new Error(authError.message)
 
@@ -46,7 +49,13 @@ export async function registerUser(formData: any) {
 
 export async function updateUser(userId: string, formData: any) {
   try {
-    const authUpdate: any = { email: formData.email, email_confirm: true }
+    const authUpdate: any = { 
+      email: formData.email, 
+      email_confirm: true,
+      user_metadata: {
+        username: formData.username  // ✅ Update username di metadata juga
+      }
+    }
     const dbUpdate: any = {
       username: formData.username,
       full_name: formData.fullName,
