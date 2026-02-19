@@ -9,7 +9,19 @@ export default async function StockListMasterPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase.from("users").select("*").eq("id", user.id).single();
+  const { data: profiles, error: rpcError } = await supabase.rpc("get_current_user_profile");
+  
+  let profile = null;
+  if (rpcError || !profiles || profiles.length === 0) {
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", user.id)
+      .single();
+    profile = fallbackProfile;
+  } else {
+    profile = profiles[0];
+  }
   if (profile.role !== "admin_cabang") redirect("/stock-list");
 
   // Fetch semua data master secara paralel

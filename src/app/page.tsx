@@ -10,16 +10,31 @@ export default async function Page() {
   }
 
   // Cari role user untuk menentukan halaman awal
-  const { data: profile } = await supabase
-    .from("users")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (profile?.role === "developer") {
-    redirect("/warehouse-management");
+  let profile = null;
+  
+  const { data: profiles, error: rpcError } = await supabase
+    .rpc("get_current_user_profile");
+  
+  if (rpcError || !profiles || profiles.length === 0) {
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    profile = fallbackProfile;
+  } else {
+    profile = profiles[0];
   }
 
-  // Default untuk admin
-  redirect("/warehouse-layout");
+  // Redirect based on role - IMMEDIATE, no fallback page render
+  if (profile?.role === "developer") {
+    redirect("/warehouse-management");
+  } else if (profile?.role === "admin_cabang") {
+    redirect("/stock-list");
+  } else if (profile?.role === "admin_warehouse") {
+    redirect("/warehouse-layout");
+  } else {
+    // Unknown role - redirect to login
+    redirect("/login");
+  }
 }

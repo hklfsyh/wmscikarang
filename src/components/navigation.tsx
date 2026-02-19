@@ -130,6 +130,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
           <Link
             key={item.path}
             href={item.path}
+            prefetch={false}
             onClick={() => {
               handleMobileMenuClose();
             }}
@@ -178,6 +179,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
                   <Link
                     key={subItem.path}
                     href={subItem.path}
+                    prefetch={false}
                     onClick={() => {
                       handleMobileMenuClose();
                     }}
@@ -232,6 +234,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
                   <Link
                     key={subItem.path}
                     href={subItem.path}
+                    prefetch={false}
                     onClick={() => {
                       handleMobileMenuClose();
                     }}

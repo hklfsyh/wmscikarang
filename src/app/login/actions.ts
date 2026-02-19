@@ -9,22 +9,19 @@ export async function login(formData: FormData) {
   const username = formData.get("username") as string;
   const password = formData.get("password") as string;
 
-  // 1. Cari email di public.users berdasarkan username yang diinput
-  const { data: userData, error: userError } = await supabase
-    .from("users")
-    .select("email")
-    .eq("username", username)
-    .single();
+  // 1. Panggil RPC function untuk lookup email (aman dengan RLS)
+  const { data: email, error: userError } = await supabase
+    .rpc("get_email_by_username", { p_username: username });
 
   // Jika username tidak ditemukan atau email kosong
-  if (userError || !userData?.email) {
+  if (userError || !email) {
     return redirect("/login?error=Username tidak terdaftar");
   }
 
   // 2. Lakukan login resmi ke Supabase Auth menggunakan email yang ditemukan
   const { error } = await supabase.auth.signInWithPassword({
-    email: userData.email,
-    password: password,
+    email,
+    password,
   });
 
   if (error) {
@@ -32,8 +29,8 @@ export async function login(formData: FormData) {
   }
 
   // 3. Jika berhasil, kirim ke halaman utama
-  // Middleware akan mendeteksi session baru ini melalui Cookies
-  redirect("/");
+  // Redirect ke warehouse-layout sebagai default (root page akan redirect based on role)
+  redirect("/warehouse-layout");
 }
 
 export async function logout() {

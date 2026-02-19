@@ -108,7 +108,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-blue-100 text-xs sm:text-sm mt-4 sm:mt-6">
-          © 2024 WMS Lite. All rights reserved.
+          © 2026 WMS Lite. All rights reserved.
         </p>
       </div>
     </div>

@@ -12,13 +12,22 @@ export default async function PermutasiPage() {
   if (!user) redirect("/login");
 
   // 1. Ambil Profil User
-  const { data: profile } = await supabase
-    .from("users")
-    .select("username, role, full_name, warehouse_id")
-    .eq("id", user.id)
-    .single();
+  const { data: profiles, error: rpcError } = await supabase
+    .rpc("get_current_user_profile");
+  
+  let profile = null;
+  if (rpcError || !profiles || profiles.length === 0) {
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("username, role, full_name, warehouse_id")
+      .eq("id", user.id)
+      .single();
+    profile = fallbackProfile;
+  } else {
+    profile = profiles[0];
+  }
 
-  if (!profile) redirect("/login");
+  if (!profile) redirect("/warehouse-layout");
 
   // 2. Ambil Data yang dibutuhkan Form secara Paralel
   const [stocksRes, configsRes, homesRes, overridesRes, historyRes] = await Promise.all([

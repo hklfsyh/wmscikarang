@@ -8,15 +8,25 @@ export default async function WarehouseManagementPage() {
 
   if (!user) redirect("/login");
 
-  // Ambil profil user untuk proteksi role
-  const { data: profile } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
+  // Ambil profil user untuk proteksi role dengan RPC + fallback
+  const { data: profiles, error: rpcError } = await supabase
+    .rpc("get_current_user_profile");
+  
+  let profile = null;
+  if (rpcError || !profiles || profiles.length === 0) {
+    // Fallback ke direct query jika RPC gagal
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("role, warehouse_id, full_name, username")
+      .eq("id", user.id)
+      .single();
+    profile = fallbackProfile;
+  } else {
+    profile = profiles[0];
+  }
 
   if (!profile || profile.role !== "developer") {
-    redirect("/");
+    redirect("/warehouse-layout");
   }
 
   // AMBIL DATA REAL DARI DATABASE

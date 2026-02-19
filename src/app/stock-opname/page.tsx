@@ -10,14 +10,25 @@ export default async function StockOpnamePage() {
 
   if (!user) redirect("/login");
 
-  // Ambil Profile User
-  const { data: profile } = await supabase
-    .from("users")
-    .select("role, warehouse_id")
-    .eq("id", user.id)
-    .single();
+  // Ambil Profile User dengan fallback
+  let profile = null;
+  
+  const { data: profiles, error: rpcError } = await supabase
+    .rpc("get_current_user_profile");
+  
+  if (rpcError || !profiles || profiles.length === 0) {
+    // Fallback ke query biasa
+    const { data: fallbackProfile } = await supabase
+      .from("users")
+      .select("role, warehouse_id")
+      .eq("id", user.id)
+      .single();
+    profile = fallbackProfile;
+  } else {
+    profile = profiles[0];
+  }
 
-  if (!profile) redirect("/login");
+  if (!profile || !profile.warehouse_id) redirect("/warehouse-layout");
 
   // Ambil data produk aktif untuk di-audit (filter by warehouse_id)
   const { data: products } = await supabase
