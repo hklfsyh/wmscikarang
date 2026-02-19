@@ -1135,6 +1135,10 @@ DROP POLICY IF EXISTS "prestock_opname_items_select" ON public.prestock_opname_i
 DROP POLICY IF EXISTS "prestock_opname_items_insert" ON public.prestock_opname_items;
 DROP POLICY IF EXISTS "prestock_opname_items_update" ON public.prestock_opname_items;
 DROP POLICY IF EXISTS "prestock_opname_items_write_dev" ON public.prestock_opname_items;
+-- Drop policy alternatif (jika ada duplicate dengan nama berbeda)
+DROP POLICY IF EXISTS "prestock_items_select" ON public.prestock_opname_items;
+DROP POLICY IF EXISTS "prestock_items_insert" ON public.prestock_opname_items;
+DROP POLICY IF EXISTS "prestock_items_update" ON public.prestock_opname_items;
 
 -- Policy SELECT: Developer & admin_cabang bisa lihat detail items
 -- Check warehouse via EXISTS subquery ke parent table
@@ -1189,6 +1193,61 @@ CREATE POLICY "prestock_opname_items_write_dev"
 ON public.prestock_opname_items FOR ALL TO authenticated
 USING (public.current_user_role() = 'developer')
 WITH CHECK (public.current_user_role() = 'developer');
+
+-- ================================================================================
+-- DUPLICATE POLICIES (Alternative Names - Untuk Kompatibilitas DEV)
+-- ================================================================================
+-- NOTE: Policies berikut adalah duplicate dari policies di atas dengan nama berbeda.
+-- Dibuat untuk menjaga kompatibilitas 100% dengan DEV environment.
+-- Jangan dihapus meski redundant!
+
+-- Policy SELECT (alternative name: prestock_items_select)
+CREATE POLICY "prestock_items_select"
+ON public.prestock_opname_items FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR EXISTS (
+    SELECT 1
+    FROM public.prestock_opname po
+    WHERE po.id = prestock_opname_items.opname_id
+      AND po.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy INSERT (alternative name: prestock_items_insert)
+CREATE POLICY "prestock_items_insert"
+ON public.prestock_opname_items FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'developer'
+  OR EXISTS (
+    SELECT 1
+    FROM public.prestock_opname po
+    WHERE po.id = prestock_opname_items.opname_id
+      AND po.warehouse_id = public.current_user_warehouse_id()
+  )
+);
+
+-- Policy UPDATE (alternative name: prestock_items_update)
+CREATE POLICY "prestock_items_update"
+ON public.prestock_opname_items FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR EXISTS (
+    SELECT 1
+    FROM public.prestock_opname po
+    WHERE po.id = prestock_opname_items.opname_id
+      AND po.warehouse_id = public.current_user_warehouse_id()
+  )
+)
+WITH CHECK (
+  public.current_user_role() = 'developer'
+  OR EXISTS (
+    SELECT 1
+    FROM public.prestock_opname po
+    WHERE po.id = prestock_opname_items.opname_id
+      AND po.warehouse_id = public.current_user_warehouse_id()
+  )
+);
 
 -- Tambahkan COMMENT untuk dokumentasi policy
 COMMENT ON POLICY "prestock_opname_items_select" ON public.prestock_opname_items IS 
@@ -1415,6 +1474,14 @@ DROP POLICY IF EXISTS "users_insert" ON public.users;
 DROP POLICY IF EXISTS "users_update" ON public.users;
 DROP POLICY IF EXISTS "users_delete" ON public.users;
 DROP POLICY IF EXISTS "users_write_dev" ON public.users;
+-- Drop policy alternatif/duplicate (jika ada)
+DROP POLICY IF EXISTS "users_dev_all" ON public.users;
+DROP POLICY IF EXISTS "users_select_developer_all" ON public.users;
+DROP POLICY IF EXISTS "users_select_self" ON public.users;
+DROP POLICY IF EXISTS "users_select_admin_cabang_warehouse_staff" ON public.users;
+DROP POLICY IF EXISTS "users_insert_admin_cabang_warehouse_staff" ON public.users;
+DROP POLICY IF EXISTS "users_update_admin_cabang_warehouse_staff" ON public.users;
+DROP POLICY IF EXISTS "users_update_self" ON public.users;
 
 -- Policy SELECT: Developer lihat semua, admin_cabang lihat user di warehouse sendiri, admin_warehouse lihat profile sendiri
 CREATE POLICY "users_select"
@@ -1482,6 +1549,71 @@ ON public.users FOR ALL TO authenticated
 USING (public.current_user_role() = 'developer')
 WITH CHECK (public.current_user_role() = 'developer');
 
+-- ================================================================================
+-- ADDITIONAL POLICIES (Untuk Kompatibilitas DEV - Role-Specific Variants)
+-- ================================================================================
+-- NOTE: Policies berikut adalah variasi role-specific dari policies utama.
+-- Dibuat untuk menjaga kompatibilitas 100% dengan DEV environment.
+-- Jangan dihapus meski ada overlap!
+
+-- Policy untuk developer (alternative: users_dev_all)
+CREATE POLICY "users_dev_all"
+ON public.users FOR ALL TO authenticated
+USING (public.current_user_role() = 'developer')
+WITH CHECK (public.current_user_role() = 'developer');
+
+-- Policy SELECT untuk developer saja (alternative)
+CREATE POLICY "users_select_developer_all"
+ON public.users FOR SELECT TO authenticated
+USING (public.current_user_role() = 'developer');
+
+-- Policy SELECT untuk user melihat profile sendiri
+CREATE POLICY "users_select_self"
+ON public.users FOR SELECT TO authenticated
+USING (id = auth.uid());
+
+-- Policy SELECT untuk admin_cabang lihat admin_warehouse (specific)
+CREATE POLICY "users_select_admin_cabang_warehouse_staff"
+ON public.users FOR SELECT TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND public.current_user_warehouse_id() IS NOT NULL
+  AND warehouse_id = public.current_user_warehouse_id()
+  AND role = 'admin_warehouse'
+);
+
+-- Policy INSERT untuk admin_cabang buat admin_warehouse (specific)
+CREATE POLICY "users_insert_admin_cabang_warehouse_staff"
+ON public.users FOR INSERT TO authenticated
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND public.current_user_warehouse_id() IS NOT NULL
+  AND warehouse_id = public.current_user_warehouse_id()
+  AND role = 'admin_warehouse'
+);
+
+-- Policy UPDATE untuk admin_cabang edit admin_warehouse (specific)
+CREATE POLICY "users_update_admin_cabang_warehouse_staff"
+ON public.users FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'admin_cabang'
+  AND public.current_user_warehouse_id() IS NOT NULL
+  AND warehouse_id = public.current_user_warehouse_id()
+  AND role = 'admin_warehouse'
+)
+WITH CHECK (
+  public.current_user_role() = 'admin_cabang'
+  AND public.current_user_warehouse_id() IS NOT NULL
+  AND warehouse_id = public.current_user_warehouse_id()
+  AND role = 'admin_warehouse'
+);
+
+-- Policy UPDATE untuk user edit profile sendiri
+CREATE POLICY "users_update_self"
+ON public.users FOR UPDATE TO authenticated
+USING (id = auth.uid())
+WITH CHECK (id = auth.uid());
+
 -- Tambahkan COMMENT untuk dokumentasi policy
 COMMENT ON POLICY "users_select" ON public.users IS 
   'Developer lihat semua user, admin_cabang lihat user di warehouse sendiri, admin_warehouse lihat profile sendiri';
@@ -1527,6 +1659,8 @@ DROP POLICY IF EXISTS "warehouses_insert" ON public.warehouses;
 DROP POLICY IF EXISTS "warehouses_update" ON public.warehouses;
 DROP POLICY IF EXISTS "warehouses_delete" ON public.warehouses;
 DROP POLICY IF EXISTS "warehouses_write_dev" ON public.warehouses;
+-- Drop policy duplicate (jika ada)
+DROP POLICY IF EXISTS "warehouses_select_all" ON public.warehouses;
 
 -- Policy SELECT: Semua authenticated user bisa lihat semua warehouse (untuk dropdown/filter)
 CREATE POLICY "warehouses_select"
@@ -1554,6 +1688,17 @@ CREATE POLICY "warehouses_write_dev"
 ON public.warehouses FOR ALL TO authenticated
 USING (public.current_user_role() = 'developer')
 WITH CHECK (public.current_user_role() = 'developer');
+
+-- ================================================================================
+-- DUPLICATE POLICY (Alternative Name - Untuk Kompatibilitas DEV)
+-- ================================================================================
+-- NOTE: Policy berikut duplicate dari warehouses_select dengan nama berbeda.
+-- Dibuat untuk menjaga kompatibilitas 100% dengan DEV environment.
+
+-- Policy SELECT (alternative name: warehouses_select_all)
+CREATE POLICY "warehouses_select_all"
+ON public.warehouses FOR SELECT TO authenticated
+USING (true);
 
 -- Tambahkan COMMENT untuk dokumentasi policy
 COMMENT ON POLICY "warehouses_select" ON public.warehouses IS 
@@ -1697,6 +1842,7 @@ ALTER TABLE public.permutasi_history ENABLE ROW LEVEL SECURITY;
 -- Drop semua policy lama untuk permutasi_history (safe, tidak error jika belum ada)
 DROP POLICY IF EXISTS "permutasi_history_select" ON public.permutasi_history;
 DROP POLICY IF EXISTS "permutasi_history_insert" ON public.permutasi_history;
+DROP POLICY IF EXISTS "permutasi_history_update" ON public.permutasi_history;
 DROP POLICY IF EXISTS "permutasi_history_write_dev" ON public.permutasi_history;
 
 -- Policy SELECT: Developer & admin_cabang & admin_warehouse lihat warehouse sendiri
@@ -1715,6 +1861,19 @@ WITH CHECK (
   AND warehouse_id = public.current_user_warehouse_id()
 );
 
+-- Policy UPDATE: Developer & admin_cabang/warehouse bisa update permutasi di warehouse sendiri
+-- (Optional: untuk future feature edit permutasi jika diperlukan)
+CREATE POLICY "permutasi_history_update"
+ON public.permutasi_history FOR UPDATE TO authenticated
+USING (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+)
+WITH CHECK (
+  public.current_user_role() = 'developer'
+  OR warehouse_id = public.current_user_warehouse_id()
+);
+
 -- Policy ALL untuk Developer (bypass semua)
 CREATE POLICY "permutasi_history_write_dev"
 ON public.permutasi_history FOR ALL TO authenticated
@@ -1727,6 +1886,9 @@ COMMENT ON POLICY "permutasi_history_select" ON public.permutasi_history IS
 
 COMMENT ON POLICY "permutasi_history_insert" ON public.permutasi_history IS 
   'Admin_warehouse bisa INSERT permutasi (relokasi stock) di warehouse sendiri';
+
+COMMENT ON POLICY "permutasi_history_update" ON public.permutasi_history IS 
+  'Developer & admin_cabang/warehouse bisa UPDATE permutasi di warehouse sendiri (optional untuk future edit feature)';
 
 COMMENT ON POLICY "permutasi_history_write_dev" ON public.permutasi_history IS 
   'Developer full access (bypass RLS)';
