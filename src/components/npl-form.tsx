@@ -49,6 +49,12 @@ interface LocationAvailability {
   occupiedBy?: string;
 }
 
+interface User {
+  id: string;
+  full_name: string;
+  username: string;
+}
+
 // --- BB PRODUK PARSING ---
 // Format: YYMMDDXXXX (6 digit angka untuk tanggal + 4 karakter alphanumeric untuk kode plant)
 const parseBBProduk = (bb: string): { expiredDate: string; kdPlant: string; isValid: boolean } => {
@@ -93,6 +99,7 @@ interface NplFormProps {
   productHomes: any[];
   initialHistory: any[];
   clusterCellOverrides: any[];
+  users: User[];
 }
 
 export function NplForm({ 
@@ -102,7 +109,8 @@ export function NplForm({
   clusterConfigs, 
   productHomes, 
   initialHistory,
-  clusterCellOverrides
+  clusterCellOverrides,
+  users
 }: NplFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1912,6 +1920,15 @@ export function NplForm({
                     <span className="text-gray-600">Nama Pengemudi:</span>
                     <p className="font-semibold text-gray-900">
                       {selectedNplDetail.driver_name}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Diterima Oleh:</span>
+                    <p className="font-semibold text-gray-900">
+                      {(() => {
+                        const returnedByUser = users.find(u => u.id === selectedNplDetail.returned_by);
+                        return returnedByUser?.full_name || '-';
+                      })()}
                     </p>
                   </div>
                   <div>

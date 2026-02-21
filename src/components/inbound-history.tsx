@@ -452,6 +452,10 @@ export function InboundHistoryPage({
                     <div><p className="text-xs text-gray-600">Tanggal</p><p className="font-semibold">{formatDate(selectedItem.arrivalTime)}</p></div>
                     <div><p className="text-xs text-gray-600">Ekspedisi</p><p className="font-semibold">{expeditions.find(e => e.id === selectedItem.expeditionId)?.expedition_name || selectedItem.expeditionId || '-'}</p></div>
                     <div><p className="text-xs text-gray-600">Pengemudi</p><p className="font-semibold">{selectedItem.driverName}</p></div>
+                    <div><p className="text-xs text-gray-600">Diterima Oleh</p><p className="font-semibold">{(() => {
+                      const receivedByUser = users.find(u => u.id === selectedItem.receivedBy);
+                      return receivedByUser?.full_name || '-';
+                    })()}</p></div>
                     <div><p className="text-xs text-gray-600">No. Polisi</p><p className="font-mono font-semibold">{selectedItem.vehicleNumber}</p></div>
                     <div><p className="text-xs text-gray-600">No. DN</p><p className="font-mono font-semibold">{selectedItem.dnNumber}</p></div>
                   </div>

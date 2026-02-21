@@ -41,8 +41,9 @@ export async function deleteStockItems(stockIds: string[]) {
       return { success: false, error: "Gagal menghapus data stock" };
     }
 
-    // Revalidate halaman stock list
+    // Revalidate halaman stock list dan warehouse layout
     revalidatePath("/stock-list");
+    revalidatePath("/warehouse-layout");
 
     return { success: true, deletedCount: stockIds.length };
   } catch (error) {

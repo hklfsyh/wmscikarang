@@ -674,7 +674,7 @@ export default function WarehouseLayoutClient({
                       </span>
                       <div className="text-left">
                         <h2 className="text-sm sm:text-base font-bold text-slate-900">
-                          Cluster {cluster}
+                          {cluster}{clusterConfig.cluster_name ? ` - ${clusterConfig.cluster_name}` : ''}
                         </h2>
                         <p className="text-[10px] sm:text-xs text-slate-500">
                           {filledCount} dari {totalCount} slot di L1-L{clusterConfig.default_lorong_count} terisi

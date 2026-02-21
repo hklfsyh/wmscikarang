@@ -103,9 +103,9 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
 
   // Memoize NavContent untuk menghindari re-render berlebihan
   const NavContent = useMemo(() => (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Logo & Jam */}
-      <div className="p-4 border-b border-slate-700">
+      <div className="flex-shrink-0 p-4 border-b border-slate-700">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-white text-xl">📦</div>
           <div>
@@ -125,7 +125,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
       </div>
 
       {/* Menu */}
-      <div className="flex-1 overflow-y-auto py-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden py-4">
         {filteredMenuItems.map((item) => (
           <Link
             key={item.path}
@@ -255,7 +255,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
       </div>
 
       {/* Profile & Logout */}
-      <div className="p-4 border-t border-slate-700 bg-slate-900/50">
+      <div className="flex-shrink-0 p-4 border-t border-slate-700 bg-slate-900/50">
         <div className="mb-4 px-2">
           <p className="text-sm font-bold text-white truncate">{userProfile.full_name}</p>
           <p className="text-xs text-slate-400">@{userProfile.username}</p>

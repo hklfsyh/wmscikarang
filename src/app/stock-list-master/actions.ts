@@ -157,6 +157,22 @@ export async function createClusterConfigAction(data: {
   is_active: boolean;
 }) {
   const supabase = await createClient();
+  
+  // Check if cluster already exists
+  const { data: existingCluster } = await supabase
+    .from("cluster_configs")
+    .select("cluster_char, cluster_name")
+    .eq("warehouse_id", data.warehouse_id)
+    .eq("cluster_char", data.cluster_char)
+    .single();
+  
+  if (existingCluster) {
+    return { 
+      success: false, 
+      message: `Cluster "${data.cluster_char}" sudah ada dengan nama "${existingCluster.cluster_name}". Gunakan huruf cluster yang berbeda atau edit cluster yang sudah ada.` 
+    };
+  }
+  
   const { data: newCluster, error } = await supabase
     .from("cluster_configs")
     .insert({
@@ -172,7 +188,14 @@ export async function createClusterConfigAction(data: {
     .select()
     .single();
 
-  if (error) return { success: false, message: error.message };
+  if (error) {
+    // Provide more helpful error messages
+    if (error.code === '23505') {
+      return { success: false, message: `Cluster "${data.cluster_char}" sudah terdaftar. Silakan gunakan huruf cluster yang berbeda.` };
+    }
+    return { success: false, message: `Gagal membuat cluster: ${error.message}` };
+  }
+  
   revalidatePath("/stock-list-master");
   revalidatePath("/warehouse-layout");
   return { success: true, data: newCluster };
@@ -181,6 +204,7 @@ export async function createClusterConfigAction(data: {
 export async function updateClusterConfigAction(
   id: string,
   data: {
+    cluster_char?: string;                    // ✅ TAMBAHKAN INI!
     cluster_name?: string;
     default_lorong_count?: number;
     default_baris_count?: number;
@@ -189,9 +213,28 @@ export async function updateClusterConfigAction(
   }
 ) {
   const supabase = await createClient();
+  
+  // Check if cluster_char is being changed and if new value already exists
+  if (data.cluster_char) {
+    const { data: existingCluster } = await supabase
+      .from("cluster_configs")
+      .select("id, cluster_char, cluster_name")
+      .eq("cluster_char", data.cluster_char)
+      .neq("id", id)  // Exclude current cluster
+      .single();
+    
+    if (existingCluster) {
+      return { 
+        success: false, 
+        message: `Cluster "${data.cluster_char}" sudah digunakan oleh "${existingCluster.cluster_name}". Gunakan huruf/kode cluster yang berbeda.` 
+      };
+    }
+  }
+  
   const { error } = await supabase
     .from("cluster_configs")
     .update({
+      cluster_char: data.cluster_char,        // ✅ TAMBAHKAN INI!
       cluster_name: data.cluster_name,
       default_lorong_count: data.default_lorong_count,
       default_baris_count: data.default_baris_count,
@@ -201,7 +244,9 @@ export async function updateClusterConfigAction(
     })
     .eq("id", id);
 
-  if (error) return { success: false, message: error.message };
+  if (error) {
+    return { success: false, message: `Gagal mengupdate cluster: ${error.message}. Periksa kembali data yang diinput.` };
+  }
   revalidatePath("/stock-list-master");
   revalidatePath("/warehouse-layout");
   return { success: true };
@@ -210,13 +255,29 @@ export async function updateClusterConfigAction(
 export async function deleteClusterConfigAction(id: string) {
   const supabase = await createClient();
   
+  // Check if cluster is being used in stock_list
+  const { data: stockUsage, error: stockCheckError } = await supabase
+    .from("stock_list")
+    .select("id")
+    .eq("cluster", (await supabase.from("cluster_configs").select("cluster_char").eq("id", id).single()).data?.cluster_char)
+    .limit(1);
+  
+  if (stockUsage && stockUsage.length > 0) {
+    return { 
+      success: false, 
+      message: "Cluster tidak bisa dihapus karena masih digunakan di stock list. Hapus stok terkait terlebih dahulu atau nonaktifkan cluster." 
+    };
+  }
+  
   // First delete all cell overrides associated with this cluster
   const { error: overrideError } = await supabase
     .from("cluster_cell_overrides")
     .delete()
     .eq("cluster_config_id", id);
   
-  if (overrideError) return { success: false, message: overrideError.message };
+  if (overrideError) {
+    return { success: false, message: `Gagal menghapus override cluster: ${overrideError.message}` };
+  }
   
   // Then delete the cluster config
   const { error } = await supabase
@@ -224,7 +285,10 @@ export async function deleteClusterConfigAction(id: string) {
     .delete()
     .eq("id", id);
 
-  if (error) return { success: false, message: error.message };
+  if (error) {
+    return { success: false, message: `Gagal menghapus cluster: ${error.message}. Cluster mungkin masih digunakan oleh data lain.` };
+  }
+  
   revalidatePath("/stock-list-master");
   revalidatePath("/warehouse-layout");
   return { success: true };

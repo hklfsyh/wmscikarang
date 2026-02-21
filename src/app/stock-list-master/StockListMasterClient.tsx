@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import ClusterConfigEditor from "@/components/cluster-config-editor";
 import ProductHomeEditor from "@/components/product-home-editor";
 import { ToastContainer, useToast } from "@/components/toast";
@@ -253,8 +253,23 @@ export default function StockListMasterClient({
     onConfirm: () => {},
   });
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState<"produk" | "ekspedisi" | "cluster" | "product-home">("produk");
+  // Tab state - persist to sessionStorage to maintain tab after refresh
+  const [activeTab, setActiveTab] = useState<"produk" | "ekspedisi" | "cluster" | "product-home">(() => {
+    if (typeof window !== "undefined") {
+      const savedTab = sessionStorage.getItem("stock-list-master-active-tab");
+      if (savedTab && ["produk", "ekspedisi", "cluster", "product-home"].includes(savedTab)) {
+        return savedTab as "produk" | "ekspedisi" | "cluster" | "product-home";
+      }
+    }
+    return "produk";
+  });
+
+  // Save activeTab to sessionStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("stock-list-master-active-tab", activeTab);
+    }
+  }, [activeTab]);
 
   // Product states
   const [products, setProducts] = useState<Product[]>(initialProducts);
@@ -751,7 +766,7 @@ export default function StockListMasterClient({
                       if (originalCluster) {
                         const result = await deleteClusterConfigAction(originalCluster.id);
                         if (!result.success) {
-                          showToast(`Gagal menghapus cluster ${oldMockCluster.clusterChar}. Silakan coba lagi.`, "error");
+                          showToast(result.message || `Gagal menghapus cluster ${oldMockCluster.clusterChar}. Silakan coba lagi.`, "error");
                           return;
                         }
                       }
@@ -775,7 +790,7 @@ export default function StockListMasterClient({
                         is_active: dbData.is_active!,
                       });
                       if (!result.success) {
-                        showToast(`Gagal membuat cluster ${mockCluster.clusterChar}. Silakan coba lagi.`, "error");
+                        showToast(result.message || `Gagal membuat cluster ${mockCluster.clusterChar}. Silakan coba lagi.`, "error");
                         return;
                       }
                     } else {
@@ -785,7 +800,7 @@ export default function StockListMasterClient({
                         const dbData = mockClusterToDb(mockCluster);
                         const result = await updateClusterConfigAction(originalCluster.id, dbData);
                         if (!result.success) {
-                          showToast(`Gagal memperbarui cluster ${mockCluster.clusterChar}. Silakan coba lagi.`, "error");
+                          showToast(result.message || `Gagal memperbarui cluster ${mockCluster.clusterChar}. Silakan coba lagi.`, "error");
                           return;
                         }
                       }
