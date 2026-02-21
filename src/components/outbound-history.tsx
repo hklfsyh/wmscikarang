@@ -538,6 +538,17 @@ export function OutboundHistoryPage({
                         {selectedItem.driver_name}
                       </p>
                     </div>
+                    <div>
+                      <span className="text-gray-600">Dikeluarkan Oleh:</span>
+                      <p className="font-semibold text-gray-900">
+                        {(() => {
+                          const processedByUser = users.find(
+                            (u) => u.id === selectedItem.processed_by
+                          );
+                          return processedByUser?.full_name || "-";
+                        })()}
+                      </p>
+                    </div>
                     <div className="col-span-2">
                       <span className="text-gray-600">No. Polisi:</span>
                       <p className="font-semibold text-gray-900">

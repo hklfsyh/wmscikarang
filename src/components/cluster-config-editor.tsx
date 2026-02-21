@@ -70,7 +70,9 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
 
     try {
       // Update cluster config in database
+      // Database trigger akan otomatis handle stock_list update dan status re-evaluation
       const result = await updateClusterConfigAction(editData.id, {
+        cluster_char: editData.clusterChar,
         cluster_name: editData.clusterName,
         default_lorong_count: editData.defaultLorongCount,
         default_baris_count: editData.defaultBarisCount,
@@ -126,8 +128,16 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
       error("Cluster dan nama harus diisi!");
       return;
     }
+    if (formData.clusterChar.length < 1 || formData.clusterChar.length > 5) {
+      error("Cluster harus 1-5 karakter!");
+      return;
+    }
+    if (!/^[A-Z0-9]+$/.test(formData.clusterChar)) {
+      error("Cluster hanya boleh huruf besar dan angka (A-Z, 0-9)!");
+      return;
+    }
     onUpdate([...clusters, formData]);
-    success("Cluster baru berhasil ditambahkan!");
+    // Toast success akan ditampilkan oleh parent setelah database operation berhasil
     setShowAddModal(false);
   };
 
@@ -329,19 +339,27 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
               {/* Content */}
               <div className="p-6 space-y-6 max-h-[calc(100vh-300px)] overflow-y-auto">
                 {/* Basic Info */}
-                <div className="grid grid-cols-2 gap-4">
+                <div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Cluster (Huruf)
+                      Cluster (A, B1, B2, dll.)
                     </label>
                     {editMode ? (
-                      <input
-                        type="text"
-                        maxLength={1}
-                        value={editData?.clusterChar || ""}
-                        onChange={(e) => setEditData({ ...editData!, clusterChar: e.target.value.toUpperCase() })}
-                        className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
-                      />
+                      <div>
+                        <input
+                          type="text"
+                          maxLength={5}
+                          value={editData?.clusterChar || ""}
+                          onChange={(e) => {
+                            // Only allow uppercase alphanumeric
+                            const sanitized = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                            setEditData({ ...editData!, clusterChar: sanitized });
+                          }}
+                          className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">1-5 karakter, huruf & angka</p>
+                        <p className="text-xs text-amber-600 mt-1">⚠️ Hati-hati! Mengubah kode cluster akan mempengaruhi stock yang ada.</p>
+                      </div>
                     ) : (
                       <div className="text-2xl font-bold text-slate-800">{displayCluster.clusterChar}</div>
                     )}
@@ -603,16 +621,21 @@ export default function ClusterConfigEditor({ clusters, onUpdate, cellOverrides,
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Cluster (A, B, C, dll.) *
+                    Cluster (A, B1, B2, C1, dll.) *
                   </label>
                   <input
                     type="text"
-                    maxLength={1}
+                    maxLength={5}
                     value={formData.clusterChar}
-                    onChange={(e) => setFormData({ ...formData, clusterChar: e.target.value.toUpperCase() })}
+                    onChange={(e) => {
+                      // Only allow uppercase alphanumeric
+                      const sanitized = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                      setFormData({ ...formData, clusterChar: sanitized });
+                    }}
                     className="w-full px-4 py-3 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500"
-                    placeholder="A"
+                    placeholder="B1"
                   />
+                  <p className="text-xs text-slate-500 mt-1">1-5 karakter, huruf & angka (B1, C2, F1)</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">

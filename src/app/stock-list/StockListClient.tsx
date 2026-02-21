@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Navigation } from "@/components/navigation";
 import { deleteStockItems } from "./actions";
+import { fixStockStatus } from "./fix-status-action";
 import { useToast, ToastContainer } from "@/components/toast";
 
 // Interface sesuai data dari database
@@ -145,7 +146,7 @@ export default function StockListClient({
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
       filtered = filtered.filter((item) => {
-        const productName = item.productName || '';
+          const productName = item.productName || '';
         const productCode = item.productCode || '';
         const bbProdukString = item.bbProduk.toLowerCase();
         const locationString = `${item.cluster}-L${item.lorong}-B${item.baris}-${item.level}`.toLowerCase();
@@ -595,21 +596,26 @@ export default function StockListClient({
               <span className="font-bold text-gray-800">{filteredAndSortedData.length}</span> item
             </div>
 
-            {/* Delete Button - Only for admin-cabang */}
-            {isAdminCabang && selectedStockIds.length > 0 && (
-              <div className="mt-3 flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
-                <span className="text-xs sm:text-sm text-red-700 font-semibold">
-                  {selectedStockIds.length} item terpilih
-                </span>
-                <button
-                  onClick={handleDeleteClick}
-                  disabled={isDeleting}
-                  className="ml-auto px-3 py-1.5 bg-red-600 text-white text-xs sm:text-sm font-semibold rounded-lg hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isDeleting ? "Menghapus..." : "🗑️ Hapus Data"}
-                </button>
-              </div>
-            )}
+            {/* Action Buttons Row */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {/* Delete Button - Only for admin-cabang */}
+              {isAdminCabang && selectedStockIds.length > 0 && (
+                <>
+                  <div className="flex-1 px-2 py-1.5 bg-red-50 border border-red-200 rounded-lg">
+                    <span className="text-xs sm:text-sm text-red-700 font-semibold">
+                      {selectedStockIds.length} item terpilih
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleDeleteClick}
+                    disabled={isDeleting}
+                    className="px-3 py-1.5 bg-red-600 text-white text-xs sm:text-sm font-semibold rounded-lg hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isDeleting ? "Menghapus..." : "🗑️ Hapus Data"}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Stock Table */}
