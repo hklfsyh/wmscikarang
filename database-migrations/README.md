@@ -1,4 +1,4 @@
-# Database Migrations - Complete Guide
+# Database Migrations - Complete Guides
 
 ## 📁 Files (7 SQL + 1 README)
 
