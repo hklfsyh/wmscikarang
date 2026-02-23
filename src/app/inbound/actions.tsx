@@ -108,6 +108,34 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
     } = await supabase.auth.getUser();
     if (!user) throw new Error("Sesi berakhir, silakan login kembali.");
 
+    // 1.5. VALIDASI CLUSTER: Pastikan semua cluster sudah dikonfigurasi
+    const uniqueClusters = [...new Set(submissions.map(s => s.location.split('-')[0]))];
+    const { data: existingClusters, error: clusterError } = await supabaseService
+      .from('cluster_configs')
+      .select('cluster_char')
+      .eq('warehouse_id', formData.warehouse_id)
+      .in('cluster_char', uniqueClusters);
+
+    if (clusterError) {
+      throw new Error(`Gagal validasi cluster: ${clusterError.message}`);
+    }
+
+    const configuredClusters = new Set(existingClusters?.map(c => c.cluster_char) || []);
+    const missingClusters = uniqueClusters.filter(c => !configuredClusters.has(c));
+
+    if (missingClusters.length > 0) {
+      throw new Error(
+        `❌ CLUSTER BELUM DIKONFIGURASI!\n\n` +
+        `Cluster yang belum ada: ${missingClusters.join(', ')}\n\n` +
+        `📝 SOLUSI:\n` +
+        `1. Buka menu "Warehouse Management"\n` +
+        `2. Pilih tab "Cluster Configuration"\n` +
+        `3. Tambahkan cluster: ${missingClusters.join(', ')}\n` +
+        `4. Kembali ke halaman Inbound dan coba lagi\n\n` +
+        `Catatan: Setiap warehouse harus setup cluster yang digunakan terlebih dahulu.`
+      );
+    }
+
     // 2. VALIDASI AKHIR DENGAN SMART FLEXIBLE RANGE
     // Cek ketersediaan lokasi dan otomatis skip yang terisi, ambil yang kosong
     const locationCheck = await checkLocationAvailabilityAction(
@@ -314,7 +342,19 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
             .single();
 
           if (errStock) {
-            const errorDetail = `Location: ${locationKey}, Error: ${errStock.message}, Code: ${errStock.code}`;
+            // FRIENDLY ERROR: Check if FK violation for cluster
+            let friendlyError = errStock.message;
+            if (errStock.code === '23503' && errStock.message.includes('stock_list_cluster_fkey')) {
+              friendlyError = `❌ Cluster '${cluster}' belum dikonfigurasi untuk warehouse ini!\n\n` +
+                `📝 SOLUSI:\n` +
+                `1. Buka menu "Warehouse Management"\n` +
+                `2. Pilih tab "Cluster Configuration"\n` +
+                `3. Tambahkan cluster '${cluster}' untuk warehouse ini\n` +
+                `4. Coba inbound lagi\n\n` +
+                `(Error Code: ${errStock.code} - Foreign Key Constraint)`;
+            }
+            
+            const errorDetail = `${locationKey}: ${friendlyError}`;
             console.error("❌ Gagal insert stock_list:", errStock);
             insertErrors.push(errorDetail);
             continue;
@@ -895,5 +935,32 @@ export async function getSmartRecommendationAction(
     };
   } catch (err: any) {
     return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Get configured clusters for a warehouse
+ * Used to validate and display available clusters to users
+ */
+export async function getConfiguredClustersAction(warehouseId: string) {
+  try {
+    const supabase = await createClient();
+
+    const { data: clusters, error } = await supabase
+      .from("cluster_configs")
+      .select("cluster_char, cluster_name, is_active")
+      .eq("warehouse_id", warehouseId)
+      .eq("is_active", true)
+      .order("cluster_char");
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      clusters: clusters || [],
+      clusterChars: clusters?.map(c => c.cluster_char) || [],
+    };
+  } catch (err: any) {
+    return { success: false, error: "Gagal mengambil konfigurasi cluster: " + err.message };
   }
 }
