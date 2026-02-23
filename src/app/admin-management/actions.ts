@@ -19,7 +19,8 @@ export async function registerUser(formData: any) {
       password: formData.password,
       email_confirm: true,
       user_metadata: {
-        username: formData.username  // ✅ Set username di metadata untuk login
+        username: formData.username,
+        email_verified: true
       }
     })
     if (authError) throw new Error(authError.message)
@@ -53,7 +54,8 @@ export async function updateUser(userId: string, formData: any) {
       email: formData.email, 
       email_confirm: true,
       user_metadata: {
-        username: formData.username  // ✅ Update username di metadata juga
+        username: formData.username,
+        email_verified: true
       }
     }
     const dbUpdate: any = {
