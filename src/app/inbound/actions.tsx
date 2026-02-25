@@ -638,7 +638,7 @@ export async function getSmartRecommendationAction(
     // 2. Ambil Data Produk & Aturan Rumah
     const { data: product, error: productError } = await supabase
       .from("products")
-      .select("id, product_name, default_cluster, product_homes(*)")
+      .select("id, product_name, default_cluster, qty_carton_per_pallet, product_homes(*)")
       .eq("product_code", productCode)
       .eq("warehouse_id", warehouseId)
       .single();
