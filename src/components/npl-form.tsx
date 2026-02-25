@@ -646,8 +646,13 @@ export function NplForm({
     if (isReceh) {
       // Input is RECEH - prioritize existing RECEH locations for sharing
       if (selectedProduct) {
+        // Filter RECEH locations: same product, same BB, and has capacity for more
         const recehLocations = realtimeStock.filter(
-          (s) => s.product_id === selectedProduct.id && s.status === "receh"
+          (s) => 
+            s.product_id === selectedProduct.id && 
+            s.bb_produk === bbProduk &&  // IMPORTANT: Same BB only
+            s.status === "receh" &&
+            (s.qty_carton + totalCartons) <= qtyPerPalletStd  // IMPORTANT: Check capacity
         );
         
         // Add existing RECEH locations first (for sharing)
@@ -657,7 +662,7 @@ export function NplForm({
             lorong: `L${receh.lorong}`,
             baris: `B${receh.baris}`,
             level: `P${receh.level}`,
-            qtyCarton: 0, // Will be calculated later
+            qtyCarton: totalCartons, // Qty yang akan ditambahkan
             isReceh: true,
           });
         });
@@ -675,7 +680,18 @@ export function NplForm({
         
         // Show special message for RECEH sharing
         if (recehLocations.length > 0 && recommendations.length > 0) {
-          success(`✅ Merekomendasikan RECEH sharing di ${recommendations[0].clusterChar}-${recommendations[0].lorong}-${recommendations[0].baris}-${recommendations[0].level} (existing: ${recehLocations[0].qty_carton} carton)`);
+          const firstReceh = recehLocations[0];
+          const totalAfterMerge = firstReceh.qty_carton + totalCartons;
+          success(
+            `✅ Merekomendasikan RECEH sharing!\n\n` +
+            `Lokasi: ${recommendations[0].clusterChar}-${recommendations[0].lorong}-${recommendations[0].baris}-${recommendations[0].level}\n` +
+            `Qty saat ini: ${firstReceh.qty_carton} carton\n` +
+            `Qty akan ditambah: ${totalCartons} carton\n` +
+            `Total setelah gabung: ${totalAfterMerge} carton (maks: ${qtyPerPalletStd})\n\n` +
+            `Produk dan BB cocok, kapasitas aman!`
+          );
+        } else if (recommendations.length > 0) {
+          success(`✅ Ditemukan ${recommendations.length} lokasi kosong yang sesuai!`);
         }
       }
     } else {
@@ -734,7 +750,7 @@ export function NplForm({
   };
 
   // Validate form
-  const validateForm = (): boolean => {
+  const validateForm = async (): Promise<boolean> => {
     if (!namaPengemudi.trim()) {
       error("Nama pengemudi wajib diisi.");
       return false;
@@ -792,17 +808,77 @@ export function NplForm({
           error("Lengkapi lokasi manual.");
           return false;
         }
-        // Check if manual location is occupied
-        const isOccupied = initialStocks.some(
+        
+        // CRITICAL: Fetch real-time stock data untuk validasi RECEH sharing
+        const stockResult = await getCurrentStockAction(warehouseId);
+        if (!stockResult.success || !stockResult.stock) {
+          error("Gagal mengambil data stok terkini: " + (stockResult.error || "Unknown error"));
+          return false;
+        }
+        
+        const realtimeStock: any[] = stockResult.stock;
+        
+        // Check if manual location is occupied (using real-time data)
+        const existingStockAtLocation = realtimeStock.find(
           (s: any) =>
             s.cluster === manualCluster &&
             s.lorong === parseInt(manualLorong.replace('L', '')) &&
             s.baris === parseInt(manualBaris.replace('B', '')) &&
             s.level === parseInt(manualPallet.replace('P', ''))
         );
-        if (isOccupied) {
-          error("Lokasi tujuan sudah terisi!");
-          return false;
+        
+        if (existingStockAtLocation) {
+          // Location occupied - check if RECEH sharing is allowed
+          const isSameProduct = existingStockAtLocation.product_id === selectedProduct?.id;
+          const isSameBB = existingStockAtLocation.bb_produk === bbProduk;
+          
+          // DEBUG: Log untuk troubleshooting
+          console.log('🔍 RECEH Sharing Check (Real-time):', {
+            existingProductId: existingStockAtLocation.product_id,
+            currentProductId: selectedProduct?.id,
+            existingBB: existingStockAtLocation.bb_produk,
+            currentBB: bbProduk,
+            isSameProduct,
+            isSameBB
+          });
+          
+          if (!isSameProduct || !isSameBB) {
+            // Different product or BB - reject
+            const existingProduct = products.find(p => p.id === existingStockAtLocation.product_id);
+            const existingBBDisplay = existingStockAtLocation.bb_produk || 'undefined';
+            const currentBBDisplay = bbProduk || 'undefined';
+            
+            error(
+              `Lokasi sudah terisi dengan produk ${existingProduct?.product_name || 'lain'} (BB: ${existingBBDisplay}).\n\n` +
+              `Input Anda: ${selectedProduct?.product_name || 'undefined'} (BB: ${currentBBDisplay})\n\n` +
+              `Tidak bisa menggabungkan produk atau BB yang berbeda!`
+            );
+            return false;
+          }
+          
+          // Same product and BB - check if total qty would exceed pallet capacity
+          if (selectedProduct && qtyPerPalletStd > 0) {
+            const totalQtyAfterMerge = existingStockAtLocation.qty_carton + totalCartons;
+            if (totalQtyAfterMerge > qtyPerPalletStd) {
+              error(
+                `Total qty setelah digabung (${totalQtyAfterMerge} carton) akan melebihi kapasitas pallet standar (${qtyPerPalletStd} carton).\n\n` +
+                `Qty saat ini di lokasi: ${existingStockAtLocation.qty_carton} carton\n` +
+                `Qty yang akan ditambah: ${totalCartons} carton\n\n` +
+                `Silakan pilih lokasi lain atau kurangi qty.`
+              );
+              return false;
+            }
+            
+            // Valid RECEH sharing - show confirmation message
+            success(
+              `✅ RECEH Sharing diizinkan!\n\n` +
+              `Lokasi: ${manualCluster}-${manualLorong}-${manualBaris}-${manualPallet}\n` +
+              `Qty saat ini: ${existingStockAtLocation.qty_carton} carton\n` +
+              `Qty tambahan: ${totalCartons} carton\n` +
+              `Total setelah gabung: ${totalQtyAfterMerge} carton (maks: ${qtyPerPalletStd})\n\n` +
+              `Produk dan BB cocok, qty masih dalam batas aman.`
+            );
+          }
         }
       }
     }
@@ -810,13 +886,14 @@ export function NplForm({
   };
 
   // Open confirm modal
-  const handleSubmitClick = () => {
+  const handleSubmitClick = async () => {
     // Proteksi: Jika sedang submit, tampilkan notifikasi dan return
     if (isSubmitting) {
       showNotification("Proses Sedang Berjalan", "Mohon tunggu, proses sebelumnya masih belum selesai.", "warning");
       return;
     }
-    if (!validateForm()) return;
+    const isValid = await validateForm();
+    if (!isValid) return;
     setShowConfirmModal(true);
   };
 

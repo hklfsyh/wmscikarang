@@ -4,6 +4,9 @@ import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 import { getIndonesianDateTime, getIndonesianDateString, getIndonesianDate } from "@/lib/utils/datetime";
 
+// RECEH threshold - sama dengan di client untuk konsistensi
+const RECEH_THRESHOLD = 5;
+
 /**
  * Fetch current real-time stock data from database
  * Used by client to get fresh data before FEFO recommendation
@@ -79,38 +82,84 @@ export async function submitNplAction(formData: any, placements: any[]) {
       // Tentukan status fisik (receh atau normal) - bukan fefo_status
       const physicalStatus = loc.isReceh ? "receh" : "normal";
 
-      // PENTING: Jika ada original_created_at (dari edit), gunakan itu
-      // Jika tidak, biarkan database menggunakan default now()
-      const stockData: any = {
-        warehouse_id: formData.warehouseId,
-        product_id: formData.productId,
-        bb_produk: formData.bbProduk,
-        cluster: loc.cluster,
-        lorong: loc.lorong,
-        baris: loc.baris,
-        level: loc.level,
-        qty_pallet: 1,
-        qty_carton: loc.qtyCarton,
-        expired_date: formData.expiredDate,
-        inbound_date: getIndonesianDate(),
-        status: physicalStatus,
-        fefo_status: "hold",  // Selalu 'hold' awal, biarkan trigger database menentukan
-        is_receh: loc.isReceh,
-        created_by: user.id,
-      };
-
-      // Restore original_created_at untuk menjaga urutan FEFO saat edit
-      if (loc.original_created_at) {
-        stockData.created_at = loc.original_created_at;
-      }
-
-      const { data: newStock, error: errStock } = await supabase
+      // RECEH SHARING LOGIC: Check if location already has same product with same BB
+      const { data: existingStock, error: checkError } = await supabase
         .from("stock_list")
-        .insert(stockData)
-        .select()
-        .single();
+        .select("*")
+        .eq("warehouse_id", formData.warehouseId)
+        .eq("cluster", loc.cluster)
+        .eq("lorong", loc.lorong)
+        .eq("baris", loc.baris)
+        .eq("level", loc.level)
+        .maybeSingle();
 
-      if (errStock) throw errStock;
+      if (checkError) throw checkError;
+
+      let newStock: any;
+      let qtyBefore = 0;
+
+      if (existingStock) {
+        // Location occupied - check if same product and BB (RECEH sharing)
+        if (existingStock.product_id !== formData.productId || existingStock.bb_produk !== formData.bbProduk) {
+          throw new Error(
+            `Lokasi ${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level} sudah terisi dengan produk atau BB yang berbeda!`
+          );
+        }
+
+        // Same product and BB - UPDATE qty (RECEH sharing)
+        qtyBefore = existingStock.qty_carton;
+        const newQty = existingStock.qty_carton + loc.qtyCarton;
+        const { data: updatedStock, error: updateError } = await supabase
+          .from("stock_list")
+          .update({
+            qty_carton: newQty,
+            updated_at: getIndonesianDateTime(),
+            // Update status jika qty sudah tidak receh lagi
+            status: newQty >= RECEH_THRESHOLD ? "normal" : "receh",
+            is_receh: newQty < RECEH_THRESHOLD,
+          })
+          .eq("id", existingStock.id)
+          .select()
+          .single();
+
+        if (updateError) throw updateError;
+        newStock = updatedStock;
+
+        console.log(`✅ NPL RECEH sharing: ${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level} updated from ${qtyBefore} to ${newQty} carton`);
+      } else {
+        // Location empty - INSERT new stock
+        const stockData: any = {
+          warehouse_id: formData.warehouseId,
+          product_id: formData.productId,
+          bb_produk: formData.bbProduk,
+          cluster: loc.cluster,
+          lorong: loc.lorong,
+          baris: loc.baris,
+          level: loc.level,
+          qty_pallet: 1,
+          qty_carton: loc.qtyCarton,
+          expired_date: formData.expiredDate,
+          inbound_date: getIndonesianDate(),
+          status: physicalStatus,
+          fefo_status: "hold",  // Selalu 'hold' awal, biarkan trigger database menentukan
+          is_receh: loc.isReceh,
+          created_by: user.id,
+        };
+
+        // Restore original_created_at untuk menjaga urutan FEFO saat edit
+        if (loc.original_created_at) {
+          stockData.created_at = loc.original_created_at;
+        }
+
+        const { data: insertedStock, error: errStock } = await supabase
+          .from("stock_list")
+          .insert(stockData)
+          .select()
+          .single();
+
+        if (errStock) throw errStock;
+        newStock = insertedStock;
+      }
 
       // Simpan stock_id ke array untuk update npl_history.locations
       updatedLocations.push({
@@ -128,12 +177,14 @@ export async function submitNplAction(formData: any, placements: any[]) {
         movement_type: "npl",
         reference_type: "npl_history",
         reference_id: nplEntry.id,
-        qty_before: 0,
+        qty_before: qtyBefore,
         qty_change: loc.qtyCarton,
-        qty_after: loc.qtyCarton,
+        qty_after: newStock.qty_carton,
         to_location: `${loc.cluster}-L${loc.lorong}-B${loc.baris}-P${loc.level}`,
         performed_by: user.id,
-        notes: "Nota Pengembalian Lapangan",
+        notes: qtyBefore > 0 
+          ? `Nota Pengembalian Lapangan (RECEH Sharing: ${qtyBefore} + ${loc.qtyCarton} = ${newStock.qty_carton})`
+          : "Nota Pengembalian Lapangan",
       });
     }
 

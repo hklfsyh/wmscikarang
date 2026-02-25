@@ -1299,10 +1299,13 @@ export function InboundForm({
 
     try {
       // Call server action untuk smart recommendation (sudah include validasi)
+      // Pass bbProduk and totalQtyCarton for RECEH sharing validation
       const result = await getSmartRecommendationAction(
         warehouseId,
         form.productCode,
-        totalPalletsNeeded
+        totalPalletsNeeded,
+        form.bbProduk,  // For BB matching
+        totalCartons    // For capacity check
       );
 
       if (!result.success) {
@@ -1332,7 +1335,25 @@ export function InboundForm({
       } else if (phases.includes('default_cluster_fallback')) {
         warning(`🔴 Ditemukan ${recommendations.length} lokasi di cluster default (emergency fallback).`);
       } else if (phases.includes('receh_sharing')) {
-        success(`✅ Merekomendasikan RECEH sharing (${recommendations.length} lokasi).`);
+        // Enhanced message for RECEH sharing with details
+        const recehRecs = recommendations.filter(r => r.phase === 'receh_sharing');
+        if (recehRecs.length > 0 && recehRecs[0].existingQty !== undefined) {
+          const firstReceh = recehRecs[0];
+          const totalAfterMerge = (firstReceh.existingQty || 0) + totalCartons;
+          const selectedProd = products.find(p => p.product_code === form.productCode);
+          const maxCapacity = selectedProd?.qty_carton_per_pallet || 0;
+          
+          success(
+            `✅ Merekomendasikan RECEH sharing!\n\n` +
+            `Lokasi: ${firstReceh.clusterChar}-${firstReceh.lorong}-${firstReceh.baris}-${firstReceh.level}\n` +
+            `Qty saat ini: ${firstReceh.existingQty} carton\n` +
+            `Qty akan ditambah: ${totalCartons} carton\n` +
+            `Total setelah gabung: ${totalAfterMerge} carton (maks: ${maxCapacity})\n\n` +
+            `Produk dan BB cocok, kapasitas aman!`
+          );
+        } else {
+          success(`✅ Merekomendasikan RECEH sharing (${recommendations.length} lokasi).`);
+        }
       }
 
       // Set recommendations

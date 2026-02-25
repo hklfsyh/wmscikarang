@@ -290,14 +290,21 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
         let newStock: any;
 
         if (existingStock) {
-          // Location occupied - check if same product (RECEH sharing allowed)
+          // Location occupied - check if same product AND same BB (RECEH sharing allowed)
           if (existingStock.product_id !== formData.product_id) {
             throw new Error(
               `Lokasi ${locationKey} sudah terisi produk lain (${existingStock.product_id}). Tidak bisa menambahkan produk berbeda!`
             );
           }
+          
+          // CRITICAL: Check BB sama - prevent mixing different batches
+          if (existingStock.bb_produk !== formData.bb_produk) {
+            throw new Error(
+              `Lokasi ${locationKey} sudah terisi dengan BB ${existingStock.bb_produk}. Tidak bisa menggabungkan BB yang berbeda (input: ${formData.bb_produk})!`
+            );
+          }
 
-          // Same product - UPDATE qty (RECEH sharing)
+          // Same product and BB - UPDATE qty (RECEH sharing)
           const newQty = existingStock.qty_carton + sub.qtyCarton;
           const { data: updatedStock, error: updateError } = await supabaseService
             .from("stock_list")
@@ -614,7 +621,9 @@ export async function validateBBAction(bbProduk: string) {
 export async function getSmartRecommendationAction(
   warehouseId: string,
   productCode: string,
-  palletsNeeded: number
+  palletsNeeded: number,
+  bbProduk?: string,  // Optional: BB Produk untuk RECEH sharing validation
+  totalQtyCarton?: number  // Optional: Total qty carton untuk capacity check
 ) {
   try {
     const supabase = await createClient();
@@ -687,11 +696,20 @@ export async function getSmartRecommendationAction(
       occupied.map((s) => `${s.cluster}-${s.lorong}-${s.baris}-${s.level}`)
     );
 
-    // RECEH PRIORITY: Detect receh locations with same product for prioritization
+    // RECEH PRIORITY: Detect receh locations with same product, same BB, and has capacity
+    // IMPORTANT: Must check BB and capacity to prevent mixing different batches or overfilling
     // UUID comparison must be case-insensitive
+    
     const recehLocationsForProduct = occupied.filter((s) => {
       const isSameProduct = s.product_id?.toLowerCase() === product.id?.toLowerCase();
       const isReceh = s.status === "receh";
+      
+      // CRITICAL: If bbProduk provided, must match (same batch)
+      const isSameBB = !bbProduk || s.bb_produk === bbProduk;
+      
+      // CRITICAL: If totalQtyCarton provided, check capacity
+      const hasCapacity = !totalQtyCarton || !product.qty_carton_per_pallet || 
+        (s.qty_carton + totalQtyCarton) <= product.qty_carton_per_pallet;
       
       // DEBUG LOG
       if (isReceh) {
@@ -699,14 +717,20 @@ export async function getSmartRecommendationAction(
           stockProductId: s.product_id,
           targetProductId: product.id,
           isSameProduct,
-          qtyCarton: s.qty_carton
+          stockBB: s.bb_produk,
+          targetBB: bbProduk,
+          isSameBB,
+          currentQty: s.qty_carton,
+          addQty: totalQtyCarton,
+          maxCapacity: product.qty_carton_per_pallet,
+          hasCapacity
         });
       }
       
-      return isSameProduct && isReceh;
+      return isSameProduct && isReceh && isSameBB && hasCapacity;
     });
 
-    console.log(`✅ Found ${recehLocationsForProduct.length} RECEH locations for product ${product.id}`);
+    console.log(`✅ Found ${recehLocationsForProduct.length} RECEH locations for product ${product.id} (BB: ${bbProduk || 'any'}, capacity check: ${totalQtyCarton ? 'yes' : 'no'})`);
 
     // Helper: Get valid baris count untuk lorong tertentu (memperhitungkan override)
     const getValidBarisCount = (clusterChar: string, lorongNum: number): number => {
