@@ -25,9 +25,10 @@ type StatusColor =
   | "yellow" // HOLD (produk yang expired date lebih lama)
   | "blue"   // RECEH (produk sisa/sebagian diambil)
   | "red"    // WRONG_CLUSTER (produk lain yang tidak sesuai clusternya)
+  | "pink"   // PRODUCT_HOLD (produk di-hold sengaja via Stock Hold Management)
   | "empty";
 
-type WarehouseCellStatus = "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER";
+type WarehouseCellStatus = "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER" | "PRODUCT_HOLD";
 
 export type WarehouseCell = {
   id: string;
@@ -51,7 +52,8 @@ const colorMap: Record<StatusColor, string> = {
   green: "bg-green-500",    
   yellow: "bg-yellow-400",  
   blue: "bg-blue-500",      
-  red: "bg-red-500",        
+  red: "bg-red-500",
+  pink: "bg-pink-500",      // Product Hold sengaja
   empty: "bg-white border border-slate-300",
 };
 
@@ -104,8 +106,13 @@ function generateWarehouseCells(): WarehouseCell[] {
             const product = productMasterData.find(p => p.id === stock.productId);
             const productCode = product?.productCode || "UNKNOWN";
             
+            // --- PRIORITY 0: PRODUCT HOLD (Hold sengaja via Stock Hold Management) - PINK ---
+            if ((stock as any).isHold) {
+              colorCode = "pink";
+              status = "PRODUCT_HOLD";
+            }
             // --- IN TRANSIT: Always RED (buffer/overflow products) ---
-            if (inTransit) {
+            else if (inTransit) {
               colorCode = "red";
               status = "WRONG_CLUSTER"; // Reuse status for visual consistency
             } else {
@@ -317,11 +324,13 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
               cell.status === "RELEASE" ? "text-green-600" :
               cell.status === "HOLD" ? "text-yellow-600" :
               cell.status === "RECEH" ? "text-blue-600" :
+              cell.status === "PRODUCT_HOLD" ? "text-pink-700" :
               "text-red-600"
             }`}>
               {cell.status === "RELEASE" ? "✓ RELEASE (Expired dekat, prioritas keluar)" :
-               cell.status === "HOLD" ? "⏸ HOLD (Expired jauh, belum perlu keluar)" :
+               cell.status === "HOLD" ? "⏸ HOLD FEFO (Expired jauh, belum perlu keluar)" :
                cell.status === "RECEH" ? "📦 RECEH (Ada sisa, tidak full)" :
+               cell.status === "PRODUCT_HOLD" ? "🔒 PRODUCT HOLD (Di-hold sengaja oleh admin)" :
                "⚠️ SALAH CLUSTER (Perlu relokasi)"}
             </p>
             
@@ -360,7 +369,7 @@ function PalletInfoModal({ cell, open, onClose }: PalletInfoModalProps) {
 export function WarehouseLayout() {
   const [selectedCell, setSelectedCell] = useState<WarehouseCell | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER">("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER" | "PRODUCT_HOLD">("ALL");
   const [clusterFilter, setClusterFilter] = useState<"ALL" | "A" | "B" | "C" | "D" | "E">("ALL");
   const [productFilter, setProductFilter] = useState<string>("ALL");
   const [lorongFilter, setLorongFilter] = useState<string>("ALL");
@@ -713,12 +722,13 @@ export function WarehouseLayout() {
                 </label>
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as "ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER")}
+                  onChange={(e) => setStatusFilter(e.target.value as "ALL" | "RELEASE" | "HOLD" | "RECEH" | "WRONG_CLUSTER" | "PRODUCT_HOLD")}
                   className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white"
                 >
                   <option value="ALL">Semua</option>
-                  <option value="RELEASE">Release</option>
-                  <option value="HOLD">HOLD (Yellow)</option>
+                  <option value="RELEASE">Release (Green)</option>
+                  <option value="HOLD">HOLD FEFO (Yellow)</option>
+                  <option value="PRODUCT_HOLD">Product Hold (Pink)</option>
                   <option value="RECEH">RECEH (Blue)</option>
                   <option value="WRONG_CLUSTER">WRONG CLUSTER (Red)</option>
                 </select>
@@ -914,7 +924,11 @@ export function WarehouseLayout() {
                         </div>
                         <div className="flex items-center gap-1">
                           <div className="w-2.5 h-2.5 rounded bg-yellow-400" />
-                          <span>Hold</span>
+                          <span>Hold FEFO</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <div className="w-2.5 h-2.5 rounded bg-pink-500" />
+                          <span>Product Hold</span>
                         </div>
                         <div className="flex items-center gap-1">
                           <div className="w-2.5 h-2.5 rounded bg-blue-500" />

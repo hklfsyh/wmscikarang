@@ -19,7 +19,7 @@ export async function getFEFOAllocationAction(
   try {
     const supabase = await createClient();
 
-    // 1. Ambil stok yang TIDAK expired/damaged
+    // 1. Ambil stok yang TIDAK expired/damaged dan TIDAK di-hold
     // 2. Urutkan berdasarkan fefo_status (release > hold), lalu bb_produk (terlama), lalu created_at (FIFO)
     // CATATAN: Status fisik (receh, salah-cluster, normal) TIDAK memblokir pengambilan
     const { data: stocks, error } = await supabase
@@ -27,6 +27,7 @@ export async function getFEFOAllocationAction(
       .select("*")
       .eq("warehouse_id", warehouseId)
       .eq("product_id", productId)
+      .eq("is_hold", false) // PENTING: Exclude stock yang di-hold
       // PERBAIKAN: Cara yang lebih aman untuk filter NOT IN di Supabase SDK
       .not("status", "eq", "expired")
       .not("status", "eq", "damaged")

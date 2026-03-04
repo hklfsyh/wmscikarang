@@ -71,3 +71,32 @@ export interface Expedition {
   created_at: string;
   updated_at: string;
 }
+
+// Stock list dengan field hold
+export interface StockListDB {
+  id: string;
+  warehouse_id: string;
+  product_id: string;
+  bb_produk: string;
+  cluster: string;
+  lorong: string;
+  baris: string;
+  level: string;
+  qty_pallet: number;
+  qty_carton: number;
+  expired_date: string;
+  inbound_date: string;
+  status: string;
+  is_receh: boolean;
+  parent_stock_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  fefo_status: string;
+  // Hold fields
+  is_hold: boolean;
+  hold_reason: string | null;
+  hold_by: string | null;
+  hold_at: string | null;
+  hold_note: string | null;
+}

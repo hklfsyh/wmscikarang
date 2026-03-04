@@ -34,7 +34,7 @@ export default async function WarehouseLayoutPage() {
   const [stocksRes, configsRes, overridesRes, homesRes] = await Promise.all([
     supabase
       .from("stock_list")
-      .select("*, products(id, product_code, product_name, default_cluster)")
+      .select("*, products(id, product_code, product_name, default_cluster), is_hold, hold_reason")
       .eq("warehouse_id", profile.warehouse_id)
       .order("fefo_status", { ascending: false }) // Release first
       .order("bb_produk", { ascending: true }), // Then by BB Produk

@@ -87,6 +87,8 @@ export default async function StockListPage() {
     status: item.status,
     fefoStatus: item.fefo_status, // TAMBAHAN: Status FEFO dari trigger database
     isReceh: item.is_receh,
+    isHold: item.is_hold || false, // TAMBAHAN: Product Hold sengaja
+    holdReason: item.hold_reason, // Alasan hold
     parentStockId: item.parent_stock_id,
     productInfo: {
       qtyPerCarton: item.products?.qty_per_carton,

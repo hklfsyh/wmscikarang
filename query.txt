@@ -1,0 +1,488 @@
+query 1:
+[
+  {
+    "schemaname": "public",
+    "tablename": "stock_list",
+    "rls_enabled": true
+  }
+]
+
+query 2:
+[
+  {
+    "schemaname": "public",
+    "tablename": "stock_list",
+    "policyname": "stock_list_delete",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "command_type": "DELETE",
+    "using_expression": "((current_user_role() = ANY (ARRAY['developer'::text, 'admin_warehouse'::text, 'admin_cabang'::text])) AND (warehouse_id = current_user_warehouse_id()))",
+    "with_check_expression": null
+  },
+  {
+    "schemaname": "public",
+    "tablename": "stock_list",
+    "policyname": "stock_list_insert",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "command_type": "INSERT",
+    "using_expression": null,
+    "with_check_expression": "((current_user_role() = ANY (ARRAY['developer'::text, 'admin_warehouse'::text, 'admin_cabang'::text])) AND (warehouse_id = current_user_warehouse_id()))"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "stock_list",
+    "policyname": "stock_list_select",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "command_type": "SELECT",
+    "using_expression": "((current_user_role() = 'developer'::text) OR (warehouse_id = current_user_warehouse_id()))",
+    "with_check_expression": null
+  },
+  {
+    "schemaname": "public",
+    "tablename": "stock_list",
+    "policyname": "stock_list_update",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "command_type": "UPDATE",
+    "using_expression": "((current_user_role() = ANY (ARRAY['developer'::text, 'admin_warehouse'::text, 'admin_cabang'::text])) AND (warehouse_id = current_user_warehouse_id()))",
+    "with_check_expression": "((current_user_role() = ANY (ARRAY['developer'::text, 'admin_warehouse'::text, 'admin_cabang'::text])) AND (warehouse_id = current_user_warehouse_id()))"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "stock_list",
+    "policyname": "stock_list_write_dev",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "command_type": "ALL",
+    "using_expression": "(current_user_role() = 'developer'::text)",
+    "with_check_expression": "(current_user_role() = 'developer'::text)"
+  }
+]
+
+query 3:
+[
+  {
+    "schemaname": "public",
+    "tablename": "activity_logs",
+    "rls_enabled": true,
+    "policy_count": 3
+  },
+  {
+    "schemaname": "public",
+    "tablename": "cluster_cell_overrides",
+    "rls_enabled": true,
+    "policy_count": 5
+  },
+  {
+    "schemaname": "public",
+    "tablename": "cluster_configs",
+    "rls_enabled": true,
+    "policy_count": 5
+  },
+  {
+    "schemaname": "public",
+    "tablename": "expeditions",
+    "rls_enabled": true,
+    "policy_count": 5
+  },
+  {
+    "schemaname": "public",
+    "tablename": "inbound_history",
+    "rls_enabled": true,
+    "policy_count": 5
+  },
+  {
+    "schemaname": "public",
+    "tablename": "npl_history",
+    "rls_enabled": true,
+    "policy_count": 5
+  },
+  {
+    "schemaname": "public",
+    "tablename": "outbound_history",
+    "rls_enabled": true,
+    "policy_count": 5
+  },
+  {
+    "schemaname": "public",
+    "tablename": "permutasi_history",
+    "rls_enabled": true,
+    "policy_count": 4
+  },
+  {
+    "schemaname": "public",
+    "tablename": "prestock_opname",
+    "rls_enabled": true,
+    "policy_count": 4
+  },
+  {
+    "schemaname": "public",
+    "tablename": "prestock_opname_items",
+    "rls_enabled": true,
+    "policy_count": 7
+  },
+  {
+    "schemaname": "public",
+    "tablename": "product_homes",
+    "rls_enabled": true,
+    "policy_count": 5
+  },
+  {
+    "schemaname": "public",
+    "tablename": "products",
+    "rls_enabled": true,
+    "policy_count": 5
+  },
+  {
+    "schemaname": "public",
+    "tablename": "stock_list",
+    "rls_enabled": true,
+    "policy_count": 5
+  },
+  {
+    "schemaname": "public",
+    "tablename": "stock_movements",
+    "rls_enabled": true,
+    "policy_count": 3
+  },
+  {
+    "schemaname": "public",
+    "tablename": "users",
+    "rls_enabled": true,
+    "policy_count": 12
+  },
+  {
+    "schemaname": "public",
+    "tablename": "warehouses",
+    "rls_enabled": true,
+    "policy_count": 6
+  }
+]
+
+query 4:
+[
+  {
+    "tablename": "inbound_history",
+    "policyname": "inbound_history_write_dev",
+    "command": "ALL",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "inbound_history",
+    "policyname": "inbound_history_delete",
+    "command": "DELETE",
+    "roles": "{authenticated}",
+    "using_clause": "((warehouse_id = current_user_warehouse_id()) AND ((current_user_role() = 'developer'::text) OR (cur"
+  },
+  {
+    "tablename": "inbound_history",
+    "policyname": "inbound_history_insert",
+    "command": "INSERT",
+    "roles": "{authenticated}",
+    "using_clause": "No restriction"
+  },
+  {
+    "tablename": "inbound_history",
+    "policyname": "inbound_history_select",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR (warehouse_id = current_user_warehouse_id()))"
+  },
+  {
+    "tablename": "inbound_history",
+    "policyname": "inbound_history_update",
+    "command": "UPDATE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = ANY (ARRAY['developer'::text, 'admin_cabang'::text, 'admin_warehouse'::text]"
+  },
+  {
+    "tablename": "npl_history",
+    "policyname": "npl_history_write_dev",
+    "command": "ALL",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "npl_history",
+    "policyname": "npl_history_delete",
+    "command": "DELETE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR ((current_user_role() = 'admin_cabang'::text) AND (war"
+  },
+  {
+    "tablename": "npl_history",
+    "policyname": "npl_history_insert",
+    "command": "INSERT",
+    "roles": "{authenticated}",
+    "using_clause": "No restriction"
+  },
+  {
+    "tablename": "npl_history",
+    "policyname": "npl_history_select",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR (warehouse_id = current_user_warehouse_id()))"
+  },
+  {
+    "tablename": "npl_history",
+    "policyname": "npl_history_update",
+    "command": "UPDATE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = ANY (ARRAY['developer'::text, 'admin_cabang'::text, 'admin_warehouse'::text]"
+  },
+  {
+    "tablename": "outbound_history",
+    "policyname": "outbound_history_write_dev",
+    "command": "ALL",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "outbound_history",
+    "policyname": "outbound_history_delete",
+    "command": "DELETE",
+    "roles": "{authenticated}",
+    "using_clause": "((warehouse_id = current_user_warehouse_id()) AND ((current_user_role() = 'developer'::text) OR (cur"
+  },
+  {
+    "tablename": "outbound_history",
+    "policyname": "outbound_history_insert",
+    "command": "INSERT",
+    "roles": "{authenticated}",
+    "using_clause": "No restriction"
+  },
+  {
+    "tablename": "outbound_history",
+    "policyname": "outbound_history_select",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR (warehouse_id = current_user_warehouse_id()))"
+  },
+  {
+    "tablename": "outbound_history",
+    "policyname": "outbound_history_update",
+    "command": "UPDATE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = ANY (ARRAY['developer'::text, 'admin_cabang'::text, 'admin_warehouse'::text]"
+  },
+  {
+    "tablename": "permutasi_history",
+    "policyname": "permutasi_history_write_dev",
+    "command": "ALL",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "permutasi_history",
+    "policyname": "permutasi_history_insert",
+    "command": "INSERT",
+    "roles": "{authenticated}",
+    "using_clause": "No restriction"
+  },
+  {
+    "tablename": "permutasi_history",
+    "policyname": "permutasi_history_select",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR (warehouse_id = current_user_warehouse_id()))"
+  },
+  {
+    "tablename": "permutasi_history",
+    "policyname": "permutasi_history_update",
+    "command": "UPDATE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR (warehouse_id = current_user_warehouse_id()))"
+  },
+  {
+    "tablename": "stock_list",
+    "policyname": "stock_list_write_dev",
+    "command": "ALL",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "stock_list",
+    "policyname": "stock_list_delete",
+    "command": "DELETE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = ANY (ARRAY['developer'::text, 'admin_warehouse'::text, 'admin_cabang'::text]"
+  },
+  {
+    "tablename": "stock_list",
+    "policyname": "stock_list_insert",
+    "command": "INSERT",
+    "roles": "{authenticated}",
+    "using_clause": "No restriction"
+  },
+  {
+    "tablename": "stock_list",
+    "policyname": "stock_list_select",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR (warehouse_id = current_user_warehouse_id()))"
+  },
+  {
+    "tablename": "stock_list",
+    "policyname": "stock_list_update",
+    "command": "UPDATE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = ANY (ARRAY['developer'::text, 'admin_warehouse'::text, 'admin_cabang'::text]"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_dev_all",
+    "command": "ALL",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_write_dev",
+    "command": "ALL",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_delete",
+    "command": "DELETE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR ((current_user_role() = 'admin_cabang'::text) AND (war"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_insert",
+    "command": "INSERT",
+    "roles": "{authenticated}",
+    "using_clause": "No restriction"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_insert_admin_cabang_warehouse_staff",
+    "command": "INSERT",
+    "roles": "{authenticated}",
+    "using_clause": "No restriction"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_select",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR ((current_user_role() = 'admin_cabang'::text) AND (war"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_select_admin_cabang_warehouse_staff",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'admin_cabang'::text) AND (current_user_warehouse_id() IS NOT NULL) AND (war"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_select_developer_all",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_select_self",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "(id = auth.uid())"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_update",
+    "command": "UPDATE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'developer'::text) OR ((current_user_role() = 'admin_cabang'::text) AND (war"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_update_admin_cabang_warehouse_staff",
+    "command": "UPDATE",
+    "roles": "{authenticated}",
+    "using_clause": "((current_user_role() = 'admin_cabang'::text) AND (current_user_warehouse_id() IS NOT NULL) AND (war"
+  },
+  {
+    "tablename": "users",
+    "policyname": "users_update_self",
+    "command": "UPDATE",
+    "roles": "{authenticated}",
+    "using_clause": "(id = auth.uid())"
+  },
+  {
+    "tablename": "warehouses",
+    "policyname": "warehouses_write_dev",
+    "command": "ALL",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "warehouses",
+    "policyname": "warehouses_delete",
+    "command": "DELETE",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  },
+  {
+    "tablename": "warehouses",
+    "policyname": "warehouses_insert",
+    "command": "INSERT",
+    "roles": "{authenticated}",
+    "using_clause": "No restriction"
+  },
+  {
+    "tablename": "warehouses",
+    "policyname": "warehouses_select",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "true"
+  },
+  {
+    "tablename": "warehouses",
+    "policyname": "warehouses_select_all",
+    "command": "SELECT",
+    "roles": "{authenticated}",
+    "using_clause": "true"
+  },
+  {
+    "tablename": "warehouses",
+    "policyname": "warehouses_update",
+    "command": "UPDATE",
+    "roles": "{authenticated}",
+    "using_clause": "(current_user_role() = 'developer'::text)"
+  }
+]
+
+query 5:
+[
+  {
+    "schema_name": "public",
+    "function_name": "current_user_role",
+    "arguments": "",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.current_user_role()\n RETURNS text\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\n SET row_security TO 'off'\nAS $function$\r\n  SELECT role FROM public.users WHERE id = auth.uid()\r\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "current_user_warehouse_id",
+    "arguments": "",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.current_user_warehouse_id()\n RETURNS uuid\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\n SET row_security TO 'off'\nAS $function$\r\n  SELECT warehouse_id FROM public.users WHERE id = auth.uid()\r\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_current_user_profile",
+    "arguments": "",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.get_current_user_profile()\n RETURNS TABLE(id uuid, username text, full_name text, role text, warehouse_id uuid, email text, created_at timestamp with time zone)\n LANGUAGE plpgsql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\r\nBEGIN\r\n  RETURN QUERY\r\n  SELECT \r\n    u.id,\r\n    u.username,\r\n    u.full_name,\r\n    u.role,\r\n    u.warehouse_id,\r\n    u.email,\r\n    u.created_at\r\n  FROM public.users u\r\n  WHERE u.id = auth.uid();\r\nEND;\r\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_email_by_username",
+    "arguments": "p_username text",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.get_email_by_username(p_username text)\n RETURNS text\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'auth'\nAS $function$\r\nDECLARE\r\n  user_email text;\r\nBEGIN\r\n  -- Query ke auth.users untuk ambil email berdasarkan username di metadata\r\n  SELECT email INTO user_email\r\n  FROM auth.users\r\n  WHERE raw_user_meta_data->>'username' = p_username;\r\n  \r\n  RETURN user_email;\r\nEND;\r\n$function$\n"
+  }
+]

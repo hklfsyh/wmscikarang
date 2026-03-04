@@ -16,6 +16,8 @@ interface StockItem {
   expired_date: string;
   status: string;
   is_receh: boolean;
+  is_hold: boolean; // Product Hold sengaja
+  hold_reason: string | null; // Alasan hold
   bb_produk: string;
   fefo_status: string;
   products: {
@@ -40,7 +42,9 @@ export type WarehouseCell = {
   status?: string;
   fefoStatus?: string;
   isReceh?: boolean;
-  colorCode: "green" | "yellow" | "blue" | "red" | "empty";
+  isHold?: boolean; // Product Hold sengaja
+  holdReason?: string | null; // Alasan hold
+  colorCode: "green" | "yellow" | "blue" | "red" | "pink" | "empty";
   isInTransit?: boolean;
 };
 
@@ -49,6 +53,7 @@ const colorMap = {
   yellow: "bg-yellow-400",
   blue: "bg-blue-500",
   red: "bg-red-500",
+  pink: "bg-pink-500",
   empty: "bg-white border border-slate-300",
 };
 
@@ -125,7 +130,7 @@ export default function WarehouseLayoutClient({
     return badges;
   };
 
-  const getFefoBadge = (fefoStatus: string) => {
+  const getFefoBadge = (fefoStatus: string, isHold?: boolean, holdReason?: string | null) => {
     if (fefoStatus === "release") {
       return (
         <span className="px-2 py-1 rounded-md text-xs font-medium bg-green-100 text-green-600">
@@ -133,9 +138,17 @@ export default function WarehouseLayoutClient({
         </span>
       );
     } else if (fefoStatus === "hold") {
+      // Bedakan Product Hold (sengaja) vs FEFO Hold (otomatis)
+      if (isHold) {
+        return (
+          <span className="px-2 py-1 rounded-md text-xs font-medium bg-pink-100 text-pink-600">
+            PRODUCT HOLD{holdReason ? ` - ${holdReason}` : ""}
+          </span>
+        );
+      }
       return (
         <span className="px-2 py-1 rounded-md text-xs font-medium bg-yellow-100 text-yellow-600">
-          Hold
+          Hold FEFO
         </span>
       );
     }
@@ -213,7 +226,7 @@ export default function WarehouseLayoutClient({
             const stock = locationMap.get(key);
 
             if (stock) {
-              let color: "green" | "yellow" | "blue" | "red" = "green";
+              let color: "green" | "yellow" | "blue" | "red" | "pink" = "green";
               
               // Get ALL product homes for this product (can have multiple homes)
               const homeRules = productHomes.filter((h: any) => h.product_id === stock.products?.id);
@@ -242,8 +255,10 @@ export default function WarehouseLayoutClient({
                 isWrongLocation = true;
               }
 
-              // PRIORITY LOGIC: in-transit > salah-cluster > receh > expired > release/hold
-              if (isTransitLorong) {
+              // PRIORITY LOGIC: product-hold > in-transit > salah-cluster > receh > expired > release/hold-fefo
+              if (stock.is_hold) {
+                color = "pink"; // Product Hold sengaja (highest priority)
+              } else if (isTransitLorong) {
                 color = "red"; // In Transit always red
               } else if (isWrongLocation) {
                 color = "red"; // Wrong location based on product_homes or default_cluster
@@ -254,7 +269,7 @@ export default function WarehouseLayoutClient({
               } else if (stock.fefo_status === "release") {
                 color = "green"; // Release
               } else if (stock.fefo_status === "hold") {
-                color = "yellow"; // Hold
+                color = "yellow"; // Hold FEFO
               }
 
               cells.push({
@@ -271,6 +286,8 @@ export default function WarehouseLayoutClient({
                 status: isWrongLocation ? "wrong_cluster" : stock.status,
                 fefoStatus: stock.fefo_status,
                 isReceh: stock.is_receh,
+                isHold: stock.is_hold, // Product Hold sengaja
+                holdReason: stock.hold_reason, // Alasan hold
                 colorCode: color,
                 isInTransit: isTransitLorong,
               });
@@ -807,7 +824,11 @@ export default function WarehouseLayoutClient({
                             </div>
                             <div className="flex items-center gap-1">
                               <div className="w-2.5 h-2.5 rounded bg-yellow-400" />
-                              <span>Hold</span>
+                              <span>Hold FEFO</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <div className="w-2.5 h-2.5 rounded bg-pink-500" />
+                              <span>Product Hold</span>
                             </div>
                             {/* Check if this cluster has any in-transit overrides */}
                             {clusterCellOverrides.some((o: any) => 
@@ -939,10 +960,12 @@ export default function WarehouseLayoutClient({
                   <div className="bg-slate-50 rounded-lg p-3 sm:p-4">
                     <p className="text-xs font-medium text-slate-500 mb-2">Status FEFO</p>
                     <div className="flex flex-wrap gap-2">
-                      {getFefoBadge(selectedCell.fefoStatus)}
+                      {getFefoBadge(selectedCell.fefoStatus, selectedCell.isHold, selectedCell.holdReason)}
                     </div>
                     <p className="text-xs text-slate-500 mt-2">
                       {(() => {
+                        if (selectedCell.isHold) 
+                          return `Produk ditahan secara sengaja${selectedCell.holdReason ? ` - ${selectedCell.holdReason}` : ""}`;
                         if (selectedCell.fefoStatus === "release") 
                           return "Prioritas untuk dikeluarkan (BB Produk terdekat)";
                         if (selectedCell.fefoStatus === "hold") 
@@ -950,6 +973,31 @@ export default function WarehouseLayoutClient({
                         return "";
                       })()}
                     </p>
+                  </div>
+                )}
+
+                {/* Product Hold Indicator - Highlighted when product is intentionally held */}
+                {selectedCell.isHold && (
+                  <div className="bg-pink-50 rounded-lg p-3 sm:p-4 border-2 border-pink-300">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-pink-500 flex items-center justify-center text-white font-bold text-xs">
+                        !
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-pink-700 mb-1">
+                          🔒 PRODUCT HOLD
+                        </p>
+                        <p className="text-xs text-pink-600 mb-2">
+                          Produk ini sengaja ditahan dan tidak boleh dikeluarkan
+                        </p>
+                        {selectedCell.holdReason && (
+                          <div className="bg-white rounded px-2 py-1.5 border border-pink-200">
+                            <p className="text-xs font-medium text-slate-600 mb-0.5">Alasan:</p>
+                            <p className="text-xs text-slate-700 font-semibold">{selectedCell.holdReason}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

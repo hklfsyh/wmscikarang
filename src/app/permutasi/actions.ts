@@ -48,6 +48,13 @@ export async function moveStockAction(
 
     if (errFetch || !oldStock) throw new Error("Data stok tidak ditemukan.");
 
+    // VALIDASI: Cek apakah stock di-hold
+    if (oldStock.is_hold) {
+      throw new Error(
+        `Stock tidak dapat dipermutasi karena sedang di-hold. Alasan: ${oldStock.hold_reason || "Unknown"}`
+      );
+    }
+
     // 2. Fetch ALL product_homes untuk validasi lokasi (product can have multiple homes)
     const { data: productHomes, error: errProductHome } = await supabase
       .from("product_homes")

@@ -15,7 +15,8 @@ interface UserProfile {
 export function Navigation({ userProfile }: { userProfile: UserProfile }) {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [prosesDropdownOpen, setProsesDropdownOpen] = useState(false); // State dropdown "Proses"
+  const [historyDropdownOpen, setHistoryDropdownOpen] = useState(false); // Renamed from prosesDropdownOpen
+  const [managementDropdownOpen, setManagementDropdownOpen] = useState(false); // New dropdown for Management
   const [currentTime, setCurrentTime] = useState(new Date());
   const [mounted, setMounted] = useState(false);
 
@@ -35,31 +36,37 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
 
   // Tutup dropdown setiap kali pathname berubah (halaman sudah tampil)
   useEffect(() => {
-    setProsesDropdownOpen(false);
+    setHistoryDropdownOpen(false);
+    setManagementDropdownOpen(false);
   }, [pathname]);
 
   const menuItems = [
     { label: "Management Warehouse", path: "/warehouse-management", roles: ["developer"] },
-    { label: "Management User", path: "/admin-management", roles: ["developer", "admin_cabang"] },
     { label: "Warehouse Layout", path: "/warehouse-layout", roles: ["admin_cabang", "admin_warehouse"] },
     { label: "Stock List", path: "/stock-list", roles: ["admin_cabang"] }, // Hanya admin cabang
     { label: "Pre-Stock Opname", path: "/stock-opname", roles: ["admin_warehouse"] },
-    { label: "Pre-Stock Opname History", path: "/prestock-opname-history", roles: ["admin_cabang"] },
-    { label: "Master Data Stock", path: "/stock-list-master", roles: ["admin_cabang"] },
   ];
 
-  // Submenu "Proses" untuk admin_warehouse
-  const prosesSubmenuWarehouse = [
+  // Submenu "Management" untuk admin_cabang
+  const managementSubmenu = [
+    { label: "Stock Hold Management", path: "/stock-hold", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg> },
+    { label: "Management User", path: "/admin-management", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg> },
+    { label: "Master Data Stock", path: "/stock-list-master", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" /></svg> },
+  ];
+
+  // Submenu "History" untuk admin_warehouse
+  const historySubmenuWarehouse = [
     { label: "Inbound", path: "/inbound", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4" /></svg> },
     { label: "Outbound", path: "/outbound", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg> },
     { label: "NPL (Return)", path: "/npl", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> },
     { label: "Permutasi", path: "/permutasi", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg> },
   ];
 
-  // Submenu "Proses" untuk admin_cabang (History only)
-  const prosesSubmenuCabang = [
+  // Submenu "History" untuk admin_cabang
+  const historySubmenuCabang = [
     { label: "Inbound History", path: "/inbound", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4" /></svg> },
     { label: "Outbound History", path: "/outbound", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg> },
+    { label: "Pre-Stock Opname History", path: "/prestock-opname-history", icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg> },
   ];
 
   const filteredMenuItems = useMemo(() => 
@@ -83,6 +90,8 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
       case '/stock-list':
       case '/prestock-opname-history':
         return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>;
+      case '/stock-hold':
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>;
       case '/inbound':
       case '/outbound':
         return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>;
@@ -143,27 +152,27 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
           </Link>
         ))}
 
-        {/* Dropdown "Proses" untuk admin_warehouse */}
-        {userProfile.role === "admin_warehouse" && (
+        {/* Dropdown "Management" untuk admin_cabang */}
+        {userProfile.role === "admin_cabang" && (
           <div className="mx-2 mb-1">
-            {/* Tombol Dropdown "Proses" */}
+            {/* Tombol Dropdown "Management" */}
             <button
-              onClick={() => setProsesDropdownOpen(!prosesDropdownOpen)}
+              onClick={() => setManagementDropdownOpen(!managementDropdownOpen)}
               className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all ${
-                ['/inbound', '/outbound', '/npl', '/permutasi'].includes(pathname)
+                ['/stock-hold', '/admin-management', '/stock-list-master'].includes(pathname)
                   ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20"
                   : "text-slate-300 hover:bg-slate-800 hover:text-white"
               }`}
             >
               <div className="flex items-center gap-3">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 7h6m-6 4h6" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                <span>Proses</span>
+                <span>Management</span>
               </div>
               {/* Arrow Icon */}
               <svg
-                className={`w-4 h-4 transition-transform ${prosesDropdownOpen ? "rotate-180" : ""}`}
+                className={`w-4 h-4 transition-transform ${managementDropdownOpen ? "rotate-180" : ""}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -173,9 +182,9 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
             </button>
 
             {/* Submenu Items */}
-            {prosesDropdownOpen && (
+            {managementDropdownOpen && (
               <div className="mt-1 ml-4 space-y-1">
-                {prosesSubmenuWarehouse.map((subItem) => (
+                {managementSubmenu.map((subItem) => (
                   <Link
                     key={subItem.path}
                     href={subItem.path}
@@ -198,14 +207,14 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
           </div>
         )}
 
-        {/* Dropdown "Proses" untuk admin_cabang */}
-        {userProfile.role === "admin_cabang" && (
+        {/* Dropdown "History" untuk admin_warehouse */}
+        {userProfile.role === "admin_warehouse" && (
           <div className="mx-2 mb-1">
-            {/* Tombol Dropdown "Proses" */}
+            {/* Tombol Dropdown "History" */}
             <button
-              onClick={() => setProsesDropdownOpen(!prosesDropdownOpen)}
+              onClick={() => setHistoryDropdownOpen(!historyDropdownOpen)}
               className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all ${
-                ['/inbound', '/outbound'].includes(pathname)
+                ['/inbound', '/outbound', '/npl', '/permutasi'].includes(pathname)
                   ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20"
                   : "text-slate-300 hover:bg-slate-800 hover:text-white"
               }`}
@@ -214,11 +223,11 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span>Proses</span>
+                <span>History</span>
               </div>
               {/* Arrow Icon */}
               <svg
-                className={`w-4 h-4 transition-transform ${prosesDropdownOpen ? "rotate-180" : ""}`}
+                className={`w-4 h-4 transition-transform ${historyDropdownOpen ? "rotate-180" : ""}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -228,9 +237,64 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
             </button>
 
             {/* Submenu Items */}
-            {prosesDropdownOpen && (
+            {historyDropdownOpen && (
               <div className="mt-1 ml-4 space-y-1">
-                {prosesSubmenuCabang.map((subItem) => (
+                {historySubmenuWarehouse.map((subItem) => (
+                  <Link
+                    key={subItem.path}
+                    href={subItem.path}
+                    prefetch={false}
+                    onClick={() => {
+                      handleMobileMenuClose();
+                    }}
+                    className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                      pathname === subItem.path
+                        ? "bg-blue-500 text-white shadow-md"
+                        : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                    }`}
+                  >
+                    {subItem.icon}
+                    {subItem.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Dropdown "History" untuk admin_cabang */}
+        {userProfile.role === "admin_cabang" && (
+          <div className="mx-2 mb-1">
+            {/* Tombol Dropdown "History" */}
+            <button
+              onClick={() => setHistoryDropdownOpen(!historyDropdownOpen)}
+              className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all ${
+                ['/inbound', '/outbound', '/prestock-opname-history'].includes(pathname)
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20"
+                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>History</span>
+              </div>
+              {/* Arrow Icon */}
+              <svg
+                className={`w-4 h-4 transition-transform ${historyDropdownOpen ? "rotate-180" : ""}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {/* Submenu Items */}
+            {historyDropdownOpen && (
+              <div className="mt-1 ml-4 space-y-1">
+                {historySubmenuCabang.map((subItem) => (
                   <Link
                     key={subItem.path}
                     href={subItem.path}

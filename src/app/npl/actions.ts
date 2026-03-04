@@ -49,6 +49,23 @@ export async function submitNplAction(formData: any, placements: any[]) {
     const microseconds = String(Date.now() % 1000000).padStart(6, "0"); // Add microseconds
     const transactionCode = `NPL-${todayStr}-${sequence}-${microseconds}`;
 
+    // VALIDASI: Cek apakah ada stock yang di-hold dalam placements
+    for (const placement of placements) {
+      if (placement.stockId) {
+        const { data: stockCheck } = await supabase
+          .from("stock_list")
+          .select("is_hold, hold_reason")
+          .eq("id", placement.stockId)
+          .single();
+
+        if (stockCheck?.is_hold) {
+          throw new Error(
+            `Stock ${placement.bbProduk} tidak dapat di-NPL karena sedang di-hold. Alasan: ${stockCheck.hold_reason || "Unknown"}`
+          );
+        }
+      }
+    }
+
     // 2. Simpan ke npl_history dengan enhanced locations (include stock_id nanti)
     const enhancedPlacements = placements.map(loc => ({
       ...loc,

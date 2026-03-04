@@ -24,6 +24,8 @@ interface StockItem {
   status: string;
   fefoStatus: string; // TAMBAHAN: 'release' atau 'hold' dari trigger database
   isReceh: boolean;
+  isHold: boolean; // TAMBAHAN: Stock di-hold sengaja via Stock Hold Management
+  holdReason: string | null; // Alasan hold (kontaminasi, quality issue, dll)
   parentStockId?: string | null;
   productInfo?: {
     qtyPerCarton: number;
@@ -247,8 +249,17 @@ export default function StockListClient({
     return { totalItems, totalExpired, totalHold, totalRelease, totalReceh, totalSalahCluster, totalQtyCarton, expiringSoon };
   }, [filteredAndSortedData]);
 
-  // Status Badge - PRIORITAS: salah-cluster > receh > expired > release/hold
+  // Status Badge - PRIORITAS: product-hold > salah-cluster > receh > expired > release/hold-fefo
   const getStatusBadge = (item: StockItem) => {
+    // Priority 0: Product Hold (Hold sengaja via Stock Hold Management) - PINK/PURPLE
+    if (item.isHold) {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap bg-pink-100 text-pink-700">
+          PRODUCT HOLD
+        </span>
+      );
+    }
+    
     // Priority 1: Salah Cluster (status database OR product_homes range OR default_cluster)
     if (isStockInWrongLocation(item)) {
       return (
@@ -288,7 +299,7 @@ export default function StockListClient({
     if (item.fefoStatus === 'hold') {
       return (
         <span className="px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold whitespace-nowrap bg-yellow-100 text-yellow-600">
-          HOLD
+          HOLD FEFO
         </span>
       );
     }
@@ -304,6 +315,15 @@ export default function StockListClient({
   // Badge untuk Modal Detail - Status Kondisi (Fisik)
   const getConditionBadges = (item: StockItem) => {
     const badges = [];
+    
+    // Product Hold - PRIORITY TERTINGGI
+    if (item.isHold) {
+      badges.push(
+        <span key="product-hold" className="px-2 py-1 rounded text-xs font-semibold whitespace-nowrap bg-pink-100 text-pink-700">
+          PRODUCT HOLD: {item.holdReason}
+        </span>
+      );
+    }
     
     // Cek salah cluster dari status database ATAU product_homes range ATAU default_cluster
     if (isStockInWrongLocation(item)) {
