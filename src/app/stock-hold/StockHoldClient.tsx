@@ -412,6 +412,72 @@ export default function StockHoldClient({
     window.location.reload();
   };
 
+  // New: Export held stocks to Excel
+  const exportToExcel = async () => {
+    if (filteredHeldStocks.length === 0) {
+      showToast("Tidak ada data untuk di-export", "warning");
+      return;
+    }
+
+    try {
+      // Dynamic import XLSX only on client side
+      const XLSX = await import("xlsx");
+
+      // Prepare data for Excel
+      const excelData = filteredHeldStocks.map((stock, index) => ({
+        "No": index + 1,
+        "BB Produk": stock.bbProduk,
+        "Kode Produk": stock.productCode,
+        "Nama Produk": stock.productName,
+        "Lokasi": `${stock.cluster}-${stock.lorong}-${stock.baris}-${stock.level}`,
+        "Qty Pallet": stock.qtyPallet,
+        "Qty Carton": stock.qtyCarton,
+        "Expired Date": formatDate(stock.expiredDate),
+        "Inbound Date": formatDate(stock.inboundDate),
+        "Alasan Hold": stock.holdReason || "-",
+        "Catatan Hold": stock.holdNote || "-",
+        "Di-hold Oleh": stock.holdByUser?.fullName || "Unknown",
+        "Tanggal Hold": stock.holdAt ? formatDateTime(stock.holdAt) : "-",
+      }));
+
+      // Create worksheet
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      
+      // Set column widths
+      ws['!cols'] = [
+        { wch: 5 },  // No
+        { wch: 15 }, // BB Produk
+        { wch: 15 }, // Kode Produk
+        { wch: 30 }, // Nama Produk
+        { wch: 15 }, // Lokasi
+        { wch: 10 }, // Qty Pallet
+        { wch: 10 }, // Qty Carton
+        { wch: 15 }, // Expired Date
+        { wch: 15 }, // Inbound Date
+        { wch: 20 }, // Alasan Hold
+        { wch: 30 }, // Catatan Hold
+        { wch: 20 }, // Di-hold Oleh
+        { wch: 20 }, // Tanggal Hold
+      ];
+
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Held Stocks");
+
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().split("T")[0];
+      const filename = `Held_Stocks_Report_${timestamp}.xlsx`;
+
+      // Download file
+      XLSX.writeFile(wb, filename);
+
+      showToast(`Berhasil download ${filteredHeldStocks.length} data held stocks`, "success");
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      showToast("Gagal export to Excel", "error");
+    }
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("id-ID", {
       day: "2-digit",
@@ -864,10 +930,26 @@ export default function StockHoldClient({
                       )}
                     </div>
                     
-                    <p className="text-sm text-gray-500">
-                      <span className="font-semibold text-gray-700">{filteredHeldStocks.length}</span> stock di-hold
-                      {(heldSearchQuery.trim() || heldProductFilter !== "all") && ` (dari ${heldStocks.length} total)`}
-                    </p>
+                    <div className="flex items-center gap-3">
+                      <p className="text-sm text-gray-500">
+                        <span className="font-semibold text-gray-700">{filteredHeldStocks.length}</span> stock di-hold
+                        {(heldSearchQuery.trim() || heldProductFilter !== "all") && ` (dari ${heldStocks.length} total)`}
+                      </p>
+                      
+                      {/* Download Excel Button */}
+                      <button
+                        onClick={exportToExcel}
+                        disabled={filteredHeldStocks.length === 0}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm"
+                        title="Download Excel Report"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span className="hidden sm:inline">Download Excel</span>
+                        <span className="sm:hidden">Excel</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Mass Release Button */}
