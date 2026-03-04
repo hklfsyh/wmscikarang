@@ -462,9 +462,9 @@ export default function StockHoldClient({
                               ⚠️ Hasil pencarian tidak lengkap
                             </p>
                             <p className="text-xs text-yellow-700 mt-1">
-                              Gunakan "Hold BB Ini" untuk hold BB spesifik,
+                              Gunakan &ldquo;Hold BB Ini&rdquo; untuk hold BB spesifik,
                               <br />
-                              atau search "{product.productCode}" untuk hold
+                              atau search &ldquo;{product.productCode}&rdquo; untuk hold
                               semua produk
                             </p>
                           </div>
