@@ -64,6 +64,9 @@ export default function StockHoldClient({
   // Held stocks state
   const [heldStocks, setHeldStocks] = useState<StockItem[]>([]);
   const [isLoadingHeld, setIsLoadingHeld] = useState(true);
+  const [heldSearchQuery, setHeldSearchQuery] = useState(""); // New: Search for held stocks
+  const [heldProductFilter, setHeldProductFilter] = useState<string>("all"); // New: Product filter for held
+  const [selectedHeldStocks, setSelectedHeldStocks] = useState<Set<string>>(new Set()); // New: Selected stocks for mass release
 
   // Modal state
   const [showHoldModal, setShowHoldModal] = useState(false);
@@ -295,19 +298,118 @@ export default function StockHoldClient({
   };
 
   const handleUnholdStock = async (stockId: string) => {
-    if (!confirm("Apakah Anda yakin ingin unhold stock ini?")) {
+    if (!confirm("Apakah Anda yakin ingin release hold stock ini?")) {
       return;
     }
 
     const result = await unholdStock(stockId);
     if (result.success) {
-      showToast(result.message || "Stock berhasil di-unhold", "success");
+      showToast(result.message || "Stock berhasil di-release", "success");
 
       // Reload page untuk refresh data dari server
       window.location.reload();
     } else {
-      showToast(result.error || "Gagal unhold stock", "error");
+      showToast(result.error || "Gagal release stock", "error");
     }
+  };
+
+  // New: Filter held stocks
+  const filteredHeldStocks = useMemo(() => {
+    let filtered = heldStocks;
+
+    // Filter by product
+    if (heldProductFilter !== "all") {
+      filtered = filtered.filter((item) => item.productId === heldProductFilter);
+    }
+
+    // Filter by search query
+    if (heldSearchQuery.trim()) {
+      const query = heldSearchQuery.toLowerCase().trim();
+      filtered = filtered.filter((item) => {
+        return (
+          item.bbProduk.toLowerCase().includes(query) ||
+          item.productCode.toLowerCase().includes(query) ||
+          item.productName.toLowerCase().includes(query) ||
+          `${item.cluster}-${item.lorong}-${item.baris}-${item.level}`.toLowerCase().includes(query)
+        );
+      });
+    }
+
+    return filtered;
+  }, [heldStocks, heldProductFilter, heldSearchQuery]);
+
+  // New: Get unique products from held stocks
+  const heldUniqueProducts = useMemo(() => {
+    const productSet = new Map<string, { id: string; code: string; name: string }>();
+    heldStocks.forEach((item) => {
+      if (!productSet.has(item.productId)) {
+        productSet.set(item.productId, {
+          id: item.productId,
+          code: item.productCode,
+          name: item.productName,
+        });
+      }
+    });
+    return Array.from(productSet.values()).sort((a, b) => 
+      a.code.localeCompare(b.code)
+    );
+  }, [heldStocks]);
+
+  // New: Toggle select stock for mass release
+  const toggleSelectStock = (stockId: string) => {
+    setSelectedHeldStocks((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(stockId)) {
+        newSet.delete(stockId);
+      } else {
+        newSet.add(stockId);
+      }
+      return newSet;
+    });
+  };
+
+  // New: Select all filtered stocks
+  const toggleSelectAll = () => {
+    if (selectedHeldStocks.size === filteredHeldStocks.length) {
+      setSelectedHeldStocks(new Set());
+    } else {
+      setSelectedHeldStocks(new Set(filteredHeldStocks.map((s) => s.id)));
+    }
+  };
+
+  // New: Mass release selected stocks
+  const handleMassRelease = async () => {
+    if (selectedHeldStocks.size === 0) {
+      showToast("Pilih minimal 1 stock untuk di-release", "warning");
+      return;
+    }
+
+    if (!confirm(`Apakah Anda yakin ingin release ${selectedHeldStocks.size} stock yang dipilih?`)) {
+      return;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const stockId of Array.from(selectedHeldStocks)) {
+      const result = await unholdStock(stockId);
+      if (result.success) {
+        successCount++;
+      } else {
+        failCount++;
+      }
+    }
+
+    if (successCount > 0) {
+      showToast(`Berhasil release ${successCount} stock`, "success");
+    }
+    if (failCount > 0) {
+      showToast(`Gagal release ${failCount} stock`, "error");
+    }
+
+    // Clear selection and reload
+    setSelectedHeldStocks(new Set());
+    window.location.reload();
   };
 
   const formatDate = (dateString: string) => {
@@ -688,34 +790,147 @@ export default function StockHoldClient({
                 <p className="text-sm sm:text-base">Tidak ada stock yang di-hold</p>
               </div>
             ) : (
-              <div className="bg-white rounded-lg shadow overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          BB Produk
-                        </th>
-                        <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          Product
-                        </th>
-                        <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">
-                          Lokasi
-                        </th>
-                        <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">
-                          Qty
-                        </th>
-                        <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          Hold Info
-                        </th>
-                        <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          Action
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {heldStocks.map((stock) => (
-                        <tr key={stock.id} className="bg-red-50">
+              <>
+                {/* Filter & Search Section */}
+                <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-6">
+                  <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 mb-3">
+                    {/* Search Input - 3/4 width on desktop */}
+                    <div className="flex-1 lg:w-3/4">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={heldSearchQuery}
+                          onChange={(e) => setHeldSearchQuery(e.target.value)}
+                          placeholder="Cari berdasarkan BB Produk, Product Code, atau Lokasi..."
+                          className="w-full px-4 py-2.5 sm:py-3 pl-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <svg
+                          className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+
+                    {/* Product Filter Dropdown - 1/4 width on desktop */}
+                    <div className="lg:w-1/4">
+                      <select
+                        value={heldProductFilter}
+                        onChange={(e) => setHeldProductFilter(e.target.value)}
+                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-sm"
+                      >
+                        <option value="all">🔍 Semua Produk</option>
+                        {heldUniqueProducts.map((product) => (
+                          <option key={product.id} value={product.id}>
+                            {product.code} - {product.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Active Filter Badge & Result Count */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {heldProductFilter !== "all" && (
+                        <button
+                          onClick={() => setHeldProductFilter("all")}
+                          className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          Reset Filter Produk
+                        </button>
+                      )}
+                      {heldSearchQuery.trim() && (
+                        <button
+                          onClick={() => setHeldSearchQuery("")}
+                          className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          Clear Search
+                        </button>
+                      )}
+                    </div>
+                    
+                    <p className="text-sm text-gray-500">
+                      <span className="font-semibold text-gray-700">{filteredHeldStocks.length}</span> stock di-hold
+                      {(heldSearchQuery.trim() || heldProductFilter !== "all") && ` (dari ${heldStocks.length} total)`}
+                    </p>
+                  </div>
+
+                  {/* Mass Release Button */}
+                  {selectedHeldStocks.size > 0 && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <button
+                        onClick={handleMassRelease}
+                        className="w-full sm:w-auto px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                        </svg>
+                        Release {selectedHeldStocks.size} Stock Terpilih
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Held Stocks Table */}
+                <div className="bg-white rounded-lg shadow overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-2 sm:px-4 py-3 text-left">
+                            <input
+                              type="checkbox"
+                              checked={selectedHeldStocks.size === filteredHeldStocks.length && filteredHeldStocks.length > 0}
+                              onChange={toggleSelectAll}
+                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                          </th>
+                          <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            BB Produk
+                          </th>
+                          <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Product
+                          </th>
+                          <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">
+                            Lokasi
+                          </th>
+                          <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">
+                            Qty
+                          </th>
+                          <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Hold Info
+                          </th>
+                          <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Action
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {filteredHeldStocks.map((stock) => (
+                          <tr key={stock.id} className="bg-red-50">
+                            <td className="px-2 sm:px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={selectedHeldStocks.has(stock.id)}
+                                onChange={() => toggleSelectStock(stock.id)}
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              />
+                            </td>
                           <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm font-mono">
                             {stock.bbProduk}
                           </td>
@@ -757,7 +972,7 @@ export default function StockHoldClient({
                               onClick={() => handleUnholdStock(stock.id)}
                               className="w-full sm:w-auto px-3 py-1.5 text-xs sm:text-sm bg-green-600 hover:bg-green-700 text-white rounded font-medium transition-colors"
                             >
-                              Release
+                              Release Hold
                             </button>
                           </td>
                         </tr>
@@ -766,6 +981,7 @@ export default function StockHoldClient({
                   </table>
                 </div>
               </div>
+            </>
             )}
           </div>
         )}
