@@ -1,10 +1,11 @@
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { createClient, createServiceClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 
 export async function submitStockOpname(auditorName: string, auditItems: any[]) {
   const supabase = await createClient();
+  const supabaseAdmin = createServiceClient();
 
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -13,32 +14,35 @@ export async function submitStockOpname(auditorName: string, auditItems: any[]) 
     // 1. Ambil Profile untuk dapat warehouse_id
     const { data: profile } = await supabase
       .from("users")
-      .select("warehouse_id")
+      .select("warehouse_id, role")
       .eq("id", user.id)
       .single();
 
     if (!profile?.warehouse_id) throw new Error("Warehouse tidak ditemukan.");
+    if (!["developer", "admin_warehouse"].includes(profile.role)) {
+      throw new Error("Akses ditolak. Hanya admin_warehouse yang dapat submit opname.");
+    }
 
     // 2. Generate Opname Code
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const { count } = await supabase
+    const { count } = await supabaseAdmin
       .from("prestock_opname")
       .select("*", { count: "exact", head: true })
       .gte("created_at", new Date().toISOString().slice(0, 10));
     
     const opnameCode = `OPN-${todayStr}-${String((count || 0) + 1).padStart(4, "0")}`;
 
-    // 3. Simpan Header (prestock_opname)
-    const { data: header, error: headError } = await supabase
+    // 3. Simpan Header (prestock_opname) - pakai service role untuk bypass RLS
+    const { data: header, error: headError } = await supabaseAdmin
       .from("prestock_opname")
       .insert({
         warehouse_id: profile.warehouse_id,
         opname_code: opnameCode,
-        auditor_id: user.id, // ID User yang login
+        auditor_id: user.id,
         audit_date: new Date().toISOString().slice(0, 10),
         audit_time: new Date().toLocaleTimeString("en-GB"),
         reconciliation_status: "pending",
-        reconciliation_notes: auditorName // Kita simpan nama auditor input manual di sini sementara
+        reconciliation_notes: auditorName
       })
       .select()
       .single();
@@ -46,8 +50,7 @@ export async function submitStockOpname(auditorName: string, auditItems: any[]) 
     if (headError) throw headError;
 
     // 4. Ambil Snapshot System Qty saat ini dari stock_list
-    // Kita hitung total karton per produk di gudang tersebut
-    const { data: currentStocks } = await supabase
+    const { data: currentStocks } = await supabaseAdmin
       .from("stock_list")
       .select("product_id, qty_carton")
       .eq("warehouse_id", profile.warehouse_id);
@@ -58,7 +61,7 @@ export async function submitStockOpname(auditorName: string, auditItems: any[]) 
       return acc;
     }, {});
 
-    // 5. Simpan Items (prestock_opname_items)
+    // 5. Simpan Items (prestock_opname_items) - pakai service role
     const itemsToInsert = auditItems.map((item) => {
       const sysQty = systemQtyMap[item.productId] || 0;
       return {
@@ -71,7 +74,7 @@ export async function submitStockOpname(auditorName: string, auditItems: any[]) 
       };
     });
 
-    const { error: itemError } = await supabase
+    const { error: itemError } = await supabaseAdmin
       .from("prestock_opname_items")
       .insert(itemsToInsert);
 

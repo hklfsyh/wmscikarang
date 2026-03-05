@@ -30,13 +30,26 @@ export default async function StockOpnamePage() {
 
   if (!profile || !profile.warehouse_id) redirect("/warehouse-layout");
 
-  // Ambil data produk aktif untuk di-audit (filter by warehouse_id)
-  const { data: products } = await supabase
-    .from("products")
-    .select("id, product_code, product_name")
-    .eq("warehouse_id", profile.warehouse_id)
-    .eq("is_active", true)
-    .order("product_name");
+  // Ambil data produk aktif dan cluster configs secara paralel
+  const [productsRes, clustersRes] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, product_code, product_name")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("is_active", true)
+      .order("product_name"),
+    supabase
+      .from("cluster_configs")
+      .select("id, cluster_name, cluster_char")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("is_active", true)
+      .order("cluster_name"),
+  ]);
 
-  return <StockOpnameClient products={products || []} />;
+  return (
+    <StockOpnameClient
+      products={productsRes.data || []}
+      clusterConfigs={clustersRes.data || []}
+    />
+  );
 }
