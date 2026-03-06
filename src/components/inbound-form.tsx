@@ -181,7 +181,13 @@ interface FinalSubmission {
 }
 // --- AKHIR INTERFACE ---
 
-const today = new Date().toISOString().slice(0, 10);
+// Today dalam WIB (UTC+7) — bukan UTC, agar tidak geser hari saat jam 00:00-06:59 WIB
+const getTodayWIB = (): string => {
+  const now = new Date();
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  return wib.toISOString().slice(0, 10);
+};
+const today = getTodayWIB();
 
 // --- CONSTANTS FOR RECEH LOGIC ---
 const RECEH_THRESHOLD = 5; // If remaining cartons <= 5, attach to last full pallet instead of creating new pallet
@@ -1535,8 +1541,7 @@ export function InboundForm({
   };
 
   const validateTanggal = (tanggal: string): boolean => {
-    const today = new Date().toISOString().slice(0, 10);
-    return tanggal === today;
+    return tanggal === today; // `today` sudah WIB dari getTodayWIB()
   };
 
   const handleQRScanSuccess = (data: QRData) => {
@@ -2806,11 +2811,10 @@ export function InboundForm({
                   type="date"
                   value={form.tanggal}
                   onChange={(e) => handleChange("tanggal", e.target.value)}
-                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all ${
+                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-not-allowed bg-gray-50 ${
                     errors.tanggal ? "border-red-500" : "border-gray-200"
                   }`}
-                  max={today}
-                  min={today}
+                  readOnly
                 />
                 {errors.tanggal && (
                   <p className="text-red-500 text-xs mt-1">{errors.tanggal}</p>

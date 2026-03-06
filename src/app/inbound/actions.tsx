@@ -327,6 +327,43 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
           console.log(`✅ Stock updated (RECEH sharing): ${existingStock.qty_carton} + ${sub.qtyCarton} = ${newQty}`);
         } else {
           // Location empty - INSERT new stock
+          // FEFO per-BB: semua pallet dalam satu BB terlama = "release", BB lainnya = "hold"
+          // Cari seluruh stok produk ini yang aktif (tidak hold, tidak expired/damaged/salah-cluster)
+          const { data: existingProductStocks } = await supabaseService
+            .from("stock_list")
+            .select("id, bb_produk, fefo_status")
+            .eq("warehouse_id", formData.warehouse_id)
+            .eq("product_id", formData.product_id)
+            .eq("is_hold", false)
+            .not("status", "eq", "expired")
+            .not("status", "eq", "damaged");
+
+          // Cari BB terlama (terkecil) yang saat ini memegang "release"
+          const releaseStocks = existingProductStocks?.filter(s => s.fefo_status === "release") || [];
+          const currentReleaseBB = releaseStocks.length > 0 ? releaseStocks[0].bb_produk : null;
+
+          let initialFEFOStatus: "release" | "hold";
+          if (!currentReleaseBB) {
+            // Belum ada yang "release" sama sekali → stok baru ini jadi "release"
+            initialFEFOStatus = "release";
+          } else if (formData.bb_produk < currentReleaseBB) {
+            // BB baru lebih tua dari yang saat ini "release"
+            // → stok baru jadi "release", turunkan SEMUA pallet BB lama ke "hold" sekaligus
+            initialFEFOStatus = "release";
+            await supabaseService
+              .from("stock_list")
+              .update({ fefo_status: "hold" })
+              .eq("warehouse_id", formData.warehouse_id)
+              .eq("product_id", formData.product_id)
+              .eq("bb_produk", currentReleaseBB);
+          } else if (formData.bb_produk === currentReleaseBB) {
+            // BB sama dengan yang saat ini "release" → ikut rombongan jadi "release"
+            initialFEFOStatus = "release";
+          } else {
+            // BB baru lebih muda → tetap "hold"
+            initialFEFOStatus = "hold";
+          }
+
           const { data: insertedStock, error: errStock } = await supabaseService
             .from("stock_list")
             .insert({
@@ -342,8 +379,9 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
               expired_date: formData.expired_date,
               inbound_date: getIndonesianDate(),
               created_by: user.id,
-              status: sub.isReceh ? "receh" : "release",
-              fefo_status: "hold",
+              status: sub.isReceh ? "receh" : "normal",
+              is_receh: sub.isReceh ? true : false,
+              fefo_status: initialFEFOStatus,
             })
             .select()
             .single();
@@ -801,7 +839,6 @@ export async function getSmartRecommendationAction(
       lorong: number;
       baris: number;
       level: number;
-      fefoScore: number; // Lower = better (closer to oldest stock)
     }> = [];
 
     for (const home of sortedHomes) {
@@ -809,34 +846,19 @@ export async function getSmartRecommendationAction(
         const validBarisCount = getValidBarisCount(home.cluster_char, l);
         const effectiveBarisEnd = Math.min(home.baris_end, validBarisCount);
 
-        for (let b = home.baris_start; b <= effectiveBarisEnd; b++) {
+        // Iterasi baris dari belakang (baris terbesar dulu) sesuai logika fisik gudang
+        for (let b = effectiveBarisEnd; b >= home.baris_start; b--) {
           const validPalletLevel = getValidPalletLevel(home.cluster_char, l, b);
           const effectiveMaxLevel = Math.min(home.max_pallet_per_location || 3, validPalletLevel);
 
           for (let p = 1; p <= effectiveMaxLevel; p++) {
             const key = `${home.cluster_char}-${l}-${b}-${p}`;
             if (!occupiedSet.has(key)) {
-              // Calculate FEFO score: prioritize locations near oldest stock
-              // Find nearest occupied location with same product
-              let minDistance = 9999;
-              const sameProductStocks = occupied.filter(s => 
-                s.product_id?.toLowerCase() === product.id?.toLowerCase() &&
-                s.cluster === home.cluster_char
-              );
-
-              for (const stock of sameProductStocks) {
-                const distance = Math.abs(stock.lorong - l) + Math.abs(stock.baris - b) + Math.abs(stock.level - p);
-                if (distance < minDistance) {
-                  minDistance = distance;
-                }
-              }
-
               emptyLocationsInHomes.push({
                 cluster: home.cluster_char,
                 lorong: l,
                 baris: b,
                 level: p,
-                fefoScore: minDistance, // Lower = closer to existing stock (FEFO priority)
               });
             }
           }
@@ -844,13 +866,10 @@ export async function getSmartRecommendationAction(
       }
     }
 
-    // Sort by FEFO score (lower = better, prioritize locations near oldest stock)
+    // Sort: lorong ascending → baris descending (baris terbesar/terjauh dulu) → level ascending
     emptyLocationsInHomes.sort((a, b) => {
-      // Primary: FEFO score (prioritas dekat stock lama)
-      if (a.fefoScore !== b.fefoScore) return a.fefoScore - b.fefoScore;
-      // Secondary: lorong, baris, level (sequential)
       if (a.lorong !== b.lorong) return a.lorong - b.lorong;
-      if (a.baris !== b.baris) return a.baris - b.baris;
+      if (a.baris !== b.baris) return b.baris - a.baris; // descending: baris terbesar dulu
       return a.level - b.level;
     });
 
@@ -876,7 +895,8 @@ export async function getSmartRecommendationAction(
         // Gunakan validBarisCount untuk transit area
         const validBarisCount = getValidBarisCount("C", l);
         
-        for (let b = 1; b <= validBarisCount; b++) {
+        // Iterasi baris dari belakang (baris terbesar dulu) sesuai logika fisik gudang
+        for (let b = validBarisCount; b >= 1; b--) {
           // Gunakan validPalletLevel untuk transit area
           const validPalletLevel = getValidPalletLevel("C", l, b);
           
@@ -914,7 +934,8 @@ export async function getSmartRecommendationAction(
           
           const validBarisCount = getValidBarisCount(product.default_cluster, l);
           
-          for (let b = 1; b <= validBarisCount; b++) {
+          // Iterasi baris dari belakang (baris terbesar dulu) sesuai logika fisik gudang
+          for (let b = validBarisCount; b >= 1; b--) {
             if (remaining === 0) break;
             
             const validPalletLevel = getValidPalletLevel(product.default_cluster, l, b);

@@ -20,8 +20,10 @@ export async function getFEFOAllocationAction(
     const supabase = await createClient();
 
     // 1. Ambil stok yang TIDAK expired/damaged dan TIDAK di-hold
-    // 2. Urutkan berdasarkan fefo_status (release > hold), lalu bb_produk (terlama), lalu created_at (FIFO)
-    // CATATAN: Status fisik (receh, salah-cluster, normal) TIDAK memblokir pengambilan
+    // 2. Urutkan berdasarkan fefo_status (release > hold), lalu is_receh (receh duluan),
+    //    lalu bb_produk (terlama), lalu created_at (FIFO)
+    // CATATAN: Stok receh diprioritaskan lebih dulu dalam satu fefo_status yang sama
+    //          agar sisa pallet yang sudah dipecah tidak ditinggal membusuk
     const { data: stocks, error } = await supabase
       .from("stock_list")
       .select("*")
@@ -31,9 +33,10 @@ export async function getFEFOAllocationAction(
       // PERBAIKAN: Cara yang lebih aman untuk filter NOT IN di Supabase SDK
       .not("status", "eq", "expired")
       .not("status", "eq", "damaged")
-      .order("fefo_status", { ascending: false }) // release (true) > hold (false) secara alfabetis DESC
-      .order("bb_produk", { ascending: true }) // Batch terlama duluan (26010100 < 26020100)
-      .order("created_at", { ascending: true }); // Jika bb_produk sama, FIFO
+      .order("fefo_status", { ascending: false }) // release (r) > hold (h) secara alfabetis DESC
+      .order("is_receh", { ascending: false })    // PRIORITAS: receh (true=1) duluan dalam BB yang sama
+      .order("bb_produk", { ascending: true })    // Batch terlama duluan (26010100 < 26020100)
+      .order("created_at", { ascending: true });  // Jika bb_produk sama, FIFO
 
     if (error) throw error;
     if (!stocks || stocks.length === 0)
@@ -167,6 +170,7 @@ export async function submitOutboundAction(formData: any, allocation: any[]) {
     if (errOut) throw errOut;
 
     // 3. Proses Update Stok & Movements
+    const deletedStockIds: string[] = [];
     for (const item of allocation) {
       // LOGIKA KRUSIAL: Pastikan tipe data qtyAfter adalah angka
       const qtySisa = Number(item.qtyAfter);
@@ -178,14 +182,21 @@ export async function submitOutboundAction(formData: any, allocation: any[]) {
           .delete()
           .eq("id", item.stockId);
         if (delErr) console.error("Gagal hapus stok:", delErr);
+        else deletedStockIds.push(item.stockId);
       } else {
         // Update jika masih ada sisa
-        // PENTING: Jangan ubah status fisik (salah-cluster, dll) yang sudah ada
-        // Hanya ubah ke 'receh' jika status sebelumnya 'normal' atau 'hold' atau 'release'
+        // PENTING: fefo_status EKSPLISIT dipertahankan dari nilai aslinya ("release" atau "hold")
+        // Tidak boleh berubah menjadi "receh" — kemungkinan ada trigger DB yang menyamakan
+        // fefo_status dengan status, sehingga kita harus eksplisit kirim fefo_status lama
+        const preservedFEFOStatus = (item.fefo_status === "release" || item.fefo_status === "hold")
+          ? item.fefo_status
+          : "hold"; // fallback aman jika nilainya tidak valid
+
         const updateData: any = {
           qty_carton: qtySisa,
+          fefo_status: preservedFEFOStatus, // Eksplisit pertahankan, override apapun yang trigger lakukan
         };
-        
+
         // Ubah status fisik hanya jika sebelumnya bukan kondisi khusus
         if (!['salah-cluster', 'expired', 'damaged'].includes(item.status)) {
           updateData.status = "receh";
@@ -214,6 +225,37 @@ export async function submitOutboundAction(formData: any, allocation: any[]) {
         performed_by: user.id,
         notes: "Outbound FEFO",
       });
+    }
+
+    // 4. Recalculate FEFO setelah semua stok diupdate/dihapus
+    // Jika ada stok yang dihapus, cek apakah masih ada "release" yang valid
+    // Jika tidak ada lagi, promote SEMUA pallet dengan BB terlama ke "release"
+    if (deletedStockIds.length > 0) {
+      const { data: remainingStocks } = await supabase
+        .from("stock_list")
+        .select("id, bb_produk, fefo_status, is_hold")
+        .eq("warehouse_id", formData.warehouse_id)
+        .eq("product_id", formData.product_id)
+        .eq("is_hold", false)
+        .not("status", "eq", "expired")
+        .not("status", "eq", "damaged")
+        .order("bb_produk", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      if (remainingStocks && remainingStocks.length > 0) {
+        const hasRelease = remainingStocks.some(s => s.fefo_status === "release");
+        if (!hasRelease) {
+          // Tidak ada lagi yang "release" → promote SEMUA pallet dengan BB terlama sekaligus
+          const oldestBB = remainingStocks[0].bb_produk;
+          await supabase
+            .from("stock_list")
+            .update({ fefo_status: "release" })
+            .eq("warehouse_id", formData.warehouse_id)
+            .eq("product_id", formData.product_id)
+            .eq("bb_produk", oldestBB)
+            .eq("is_hold", false);
+        }
+      }
     }
 
     revalidatePath("/stock-list");

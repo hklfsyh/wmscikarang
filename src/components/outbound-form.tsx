@@ -65,7 +65,13 @@ type OutboundFormState = {
   qtyCartonInput: string;
 };
 
-const today = new Date().toISOString().slice(0, 10);
+// Today dalam WIB (UTC+7) — bukan UTC, agar tidak geser hari saat jam 00:00-06:59 WIB
+const getTodayWIB = (): string => {
+  const now = new Date();
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  return wib.toISOString().slice(0, 10);
+};
+const today = getTodayWIB();
 
 const initialState: OutboundFormState = {
   tanggal: today,
@@ -594,9 +600,8 @@ export function OutboundForm({
                   type="date"
                   value={form.tanggal}
                   onChange={(e) => handleChange("tanggal", e.target.value)}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all"
-                  max={today}
-                  min={today}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all cursor-not-allowed bg-gray-50"
+                  readOnly
                 />
               </div>
 
@@ -818,19 +823,10 @@ export function OutboundForm({
                   </thead>
                   <tbody>
                     {(() => {
-                      // Variabel pembantu untuk menghitung sisa karton di UI
-                      let tempRemainingCartons = totalCartons;
-                      const qtyPerPalletStd =
-                        selectedProduct?.qty_carton_per_pallet || 0;
-
                       return fefoLocations.map((loc, index) => {
-                        // Hitung karton spesifik untuk baris ini
-                        // Mengambil yang terkecil antara sisa kebutuhan total vs standar 1 pallet
-                        const displayCartons = Math.min(
-                          tempRemainingCartons,
-                          qtyPerPalletStd
-                        );
-                        tempRemainingCartons -= displayCartons;
+                        // Gunakan qtyTaken langsung dari hasil FEFO server
+                        // qtyTaken sudah dihitung dengan benar: Math.min(stock.qty_carton, remainingNeeded)
+                        const displayCartons = loc.qtyTaken;
 
                         return (
                           <tr

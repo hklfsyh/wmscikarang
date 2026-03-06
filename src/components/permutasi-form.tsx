@@ -858,7 +858,9 @@ return null;
 
   // Today's history from database
   const todayHistory = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    const todayStr = wib.toISOString().slice(0, 10);
     return initialHistory.filter((h: any) => h.moved_at.startsWith(todayStr));
   }, [initialHistory]);
 

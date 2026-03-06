@@ -207,10 +207,10 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
           </div>
         )}
 
-        {/* Dropdown "History" untuk admin_warehouse */}
+        {/* Dropdown "Proses" untuk admin_warehouse */}
         {userProfile.role === "admin_warehouse" && (
           <div className="mx-2 mb-1">
-            {/* Tombol Dropdown "History" */}
+            {/* Tombol Dropdown "Proses" */}
             <button
               onClick={() => setHistoryDropdownOpen(!historyDropdownOpen)}
               className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all ${
@@ -223,7 +223,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span>History</span>
+                <span>Proses</span>
               </div>
               {/* Arrow Icon */}
               <svg
