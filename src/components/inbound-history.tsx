@@ -28,6 +28,16 @@ interface User {
   username: string;
 }
 
+const PROCESS_TYPE_OPTIONS = [
+  "Penerimaan Primary",
+  "Penerimaan Secondary",
+  "Penerimaan Retur",
+  "Mutasi Produk",
+  "Pemusnahan",
+  "Pengeluaran Primary",
+  "Pengeluaran WXH",
+] as const;
+
 interface InboundHistory {
   id: string;
   transactionCode: string;
@@ -40,6 +50,7 @@ interface InboundHistory {
   bbProduk: string;
   expiredDate: string;
   qtyCarton: number;
+  processType: string;
   receivedBy: string;
   notes: string;
   locations: Array<{
@@ -71,7 +82,7 @@ export function InboundHistoryPage({
   const [searchQuery, setSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [selectedStatus, setSelectedStatus] = useState<"all" | "completed" | "partial">("all");
+  const [selectedProcessType, setSelectedProcessType] = useState<string>("all");
   const [selectedItem, setSelectedItem] = useState<InboundHistory | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   
@@ -82,15 +93,28 @@ export function InboundHistoryPage({
 
   // --- LOGIKA FILTER (MENGGUNAKAN DATA DARI PROPS) ---
   const filteredData = useMemo(() => {
+    const parseFilterDate = (value: string, isEndOfDay: boolean) => {
+      const [year, month, day] = value.split("-").map(Number);
+      if (!year || !month || !day) return null;
+      return isEndOfDay
+        ? new Date(year, month - 1, day, 23, 59, 59, 999)
+        : new Date(year, month - 1, day, 0, 0, 0, 0);
+    };
+
+    const startBoundary = startDate ? parseFilterDate(startDate, false) : null;
+    const endBoundary = endDate ? parseFilterDate(endDate, true) : null;
+
     return historyData.filter((item) => {
       const product = products.find(p => p.id === item.productId);
       const expedition = expeditions.find(e => e.id === item.expeditionId);
       const user = users.find(u => u.id === item.receivedBy);
       const searchLower = searchQuery.toLowerCase();
+      const processTypeLabel = item.processType || "-";
 
       const matchesSearch =
         searchQuery === "" ||
         item.transactionCode.toLowerCase().includes(searchLower) ||
+        processTypeLabel.toLowerCase().includes(searchLower) ||
         (product?.product_name.toLowerCase().includes(searchLower) || false) ||
         (product?.product_code.toLowerCase().includes(searchLower) || false) ||
         item.driverName.toLowerCase().includes(searchLower) ||
@@ -100,15 +124,15 @@ export function InboundHistoryPage({
         (user?.full_name.toLowerCase().includes(searchLower) || false);
 
       const itemDate = new Date(item.arrivalTime);
-      const matchesStartDate = !startDate || itemDate >= new Date(startDate);
-      const matchesEndDate = !endDate || itemDate <= new Date(endDate);
+      const matchesStartDate = !startBoundary || itemDate >= startBoundary;
+      const matchesEndDate = !endBoundary || itemDate <= endBoundary;
 
-      // Status filter (all transactions are completed in new schema)
-      const matchesStatus = selectedStatus === "all" || selectedStatus === "completed";
+      const matchesProcessType =
+        selectedProcessType === "all" || processTypeLabel === selectedProcessType;
 
-      return matchesSearch && matchesStartDate && matchesEndDate && matchesStatus;
+      return matchesSearch && matchesStartDate && matchesEndDate && matchesProcessType;
     });
-  }, [searchQuery, startDate, endDate, selectedStatus, historyData, products, expeditions, users]);
+  }, [searchQuery, startDate, endDate, selectedProcessType, historyData, products, expeditions, users]);
 
   // --- FORMAT HELPERS ---
   const formatDate = (dateStr: string) => {
@@ -135,7 +159,7 @@ export function InboundHistoryPage({
     setSearchQuery("");
     setStartDate("");
     setEndDate("");
-    setSelectedStatus("all");
+    setSelectedProcessType("all");
   };
 
   const handleViewDetail = (item: InboundHistory) => {
@@ -188,6 +212,27 @@ export function InboundHistoryPage({
 
   // --- EXPORT TO EXCEL ---
   const exportToExcel = () => {
+    const headers = [
+      'No',
+      'Kode Transaksi',
+      'Tanggal',
+      'Tipe Proses',
+      'Ekspedisi',
+      'Pengemudi',
+      'No. Polisi',
+      'No. DN',
+      'Kode Produk',
+      'Nama Produk',
+      'Qty Lokasi',
+      'Qty Carton',
+      'Total Pcs',
+      'BB Produk',
+      'Expired Date',
+      'Lokasi',
+      'Diterima Oleh',
+      'Waktu Kedatangan',
+    ];
+
     const exportData = filteredData.map((item, index) => {
       const product = products.find(p => p.id === item.productId);
       const expedition = expeditions.find(e => e.id === item.expeditionId);
@@ -197,6 +242,7 @@ export function InboundHistoryPage({
         'No': index + 1,
         'Kode Transaksi': item.transactionCode,
         'Tanggal': formatDate(item.arrivalTime),
+        'Tipe Proses': item.processType || '-',
         'Ekspedisi': expedition?.expedition_name || item.expeditionId || '-',
         'Pengemudi': item.driverName,
         'No. Polisi': item.vehicleNumber,
@@ -214,7 +260,7 @@ export function InboundHistoryPage({
       };
     });
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
+    const ws = XLSX.utils.json_to_sheet(exportData, { header: headers });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Riwayat Inbound');
 
@@ -232,7 +278,7 @@ export function InboundHistoryPage({
         <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2 sm:gap-3">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-linear-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-linear-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center shrink-0">
                 <TruckIcon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
               <div>
@@ -295,31 +341,19 @@ export function InboundHistoryPage({
           </div>
 
           <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-            <span className="text-[10px] sm:text-xs font-semibold text-gray-700">Status:</span>
-            <button
-              onClick={() => setSelectedStatus("all")}
-              className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs rounded-lg font-semibold transition-all ${
-                selectedStatus === "all" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
+            <span className="text-[10px] sm:text-xs font-semibold text-gray-700">Tipe Proses:</span>
+            <select
+              value={selectedProcessType}
+              onChange={(e) => setSelectedProcessType(e.target.value)}
+              className="px-2 sm:px-3 py-1 text-[10px] sm:text-xs rounded-lg border border-gray-300 bg-white text-gray-700 font-semibold focus:outline-none focus:border-blue-500"
             >
-              Semua
-            </button>
-            <button
-              onClick={() => setSelectedStatus("completed")}
-              className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs rounded-lg font-semibold transition-all ${
-                selectedStatus === "completed" ? "bg-green-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
-            >
-              Selesai
-            </button>
-            <button
-              onClick={() => setSelectedStatus("partial")}
-              className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs rounded-lg font-semibold transition-all ${
-                selectedStatus === "partial" ? "bg-yellow-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
-            >
-              Partial
-            </button>
+              <option value="all">Semua</option>
+              {PROCESS_TYPE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
 
             <button
               onClick={handleReset}
@@ -355,7 +389,7 @@ export function InboundHistoryPage({
               <tbody className="divide-y divide-gray-200">
                 {filteredData.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center">
+                    <td colSpan={9} className="px-4 py-8 text-center">
                       <div className="text-4xl mb-2">📦</div>
                       <p className="text-gray-600 text-xs font-semibold">Tidak ada data</p>
                     </td>
@@ -450,6 +484,7 @@ export function InboundHistoryPage({
                   <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl text-sm">
                     <div><p className="text-xs text-gray-600">Kode Transaksi</p><p className="font-mono font-semibold">{selectedItem.transactionCode}</p></div>
                     <div><p className="text-xs text-gray-600">Tanggal</p><p className="font-semibold">{formatDate(selectedItem.arrivalTime)}</p></div>
+                    <div><p className="text-xs text-gray-600">Tipe Proses</p><p className="font-semibold">{selectedItem.processType || 'Penerimaan Primary'}</p></div>
                     <div><p className="text-xs text-gray-600">Ekspedisi</p><p className="font-semibold">{expeditions.find(e => e.id === selectedItem.expeditionId)?.expedition_name || selectedItem.expeditionId || '-'}</p></div>
                     <div><p className="text-xs text-gray-600">Pengemudi</p><p className="font-semibold">{selectedItem.driverName}</p></div>
                     <div><p className="text-xs text-gray-600">Diterima Oleh</p><p className="font-semibold">{(() => {
@@ -534,7 +569,7 @@ export function InboundHistoryPage({
 
         {/* Batal Confirmation Modal */}
         {showBatalModal && itemToBatal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/70 p-4">
             <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
               <div className="bg-red-500 p-4 text-white rounded-t-2xl">
                 <h3 className="text-xl font-bold flex items-center gap-2">

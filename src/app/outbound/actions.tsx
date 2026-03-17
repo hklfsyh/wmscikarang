@@ -20,10 +20,10 @@ export async function getFEFOAllocationAction(
     const supabase = await createClient();
 
     // 1. Ambil stok yang TIDAK expired/damaged dan TIDAK di-hold
-    // 2. Urutkan berdasarkan fefo_status (release > hold), lalu is_receh (receh duluan),
-    //    lalu bb_produk (terlama), lalu created_at (FIFO)
-    // CATATAN: Stok receh diprioritaskan lebih dulu dalam satu fefo_status yang sama
-    //          agar sisa pallet yang sudah dipecah tidak ditinggal membusuk
+    // 2. Urutkan custom agar tetap FEFO, namun lebih rapi operasional gudang:
+    //    fefo_status (release > hold) -> is_receh (receh duluan) -> bb_produk terlama
+    //    -> lorong terkecil -> baris terkecil -> level terkecil -> created_at
+    // CATATAN: Dengan urutan ini pengambilan tidak loncat acak di lorong yang sama.
     const { data: stocks, error } = await supabase
       .from("stock_list")
       .select("*")
@@ -33,14 +33,60 @@ export async function getFEFOAllocationAction(
       // PERBAIKAN: Cara yang lebih aman untuk filter NOT IN di Supabase SDK
       .not("status", "eq", "expired")
       .not("status", "eq", "damaged")
-      .order("fefo_status", { ascending: false }) // release (r) > hold (h) secara alfabetis DESC
-      .order("is_receh", { ascending: false })    // PRIORITAS: receh (true=1) duluan dalam BB yang sama
-      .order("bb_produk", { ascending: true })    // Batch terlama duluan (26010100 < 26020100)
-      .order("created_at", { ascending: true });  // Jika bb_produk sama, FIFO
+      .order("fefo_status", { ascending: false })
+      .order("is_receh", { ascending: false })
+      .order("bb_produk", { ascending: true })
+      .order("created_at", { ascending: true });
 
     if (error) throw error;
     if (!stocks || stocks.length === 0)
       throw new Error("Stok produk tidak ditemukan atau semua expired/damaged.");
+
+    const lorongAggregate = new Map<string, { totalQty: number; totalPallets: number }>();
+    const barisAggregate = new Map<string, { totalQty: number; totalPallets: number }>();
+    for (const stock of stocks) {
+      const key = `${stock.fefo_status}|${stock.is_receh ? "1" : "0"}|${stock.bb_produk}|${stock.cluster}|${stock.lorong}`;
+      const current = lorongAggregate.get(key) || { totalQty: 0, totalPallets: 0 };
+      current.totalQty += Number(stock.qty_carton || 0);
+      current.totalPallets += 1;
+      lorongAggregate.set(key, current);
+
+      const barisKey = `${stock.fefo_status}|${stock.is_receh ? "1" : "0"}|${stock.bb_produk}|${stock.cluster}|${stock.lorong}|${stock.baris}`;
+      const currentBaris = barisAggregate.get(barisKey) || { totalQty: 0, totalPallets: 0 };
+      currentBaris.totalQty += Number(stock.qty_carton || 0);
+      currentBaris.totalPallets += 1;
+      barisAggregate.set(barisKey, currentBaris);
+    }
+
+    const sortedStocks = [...stocks].sort((a, b) => {
+      if (a.fefo_status !== b.fefo_status) return a.fefo_status === "release" ? -1 : 1;
+      if (a.is_receh !== b.is_receh) return a.is_receh ? -1 : 1;
+      if (a.bb_produk !== b.bb_produk) return String(a.bb_produk).localeCompare(String(b.bb_produk));
+
+      const keyA = `${a.fefo_status}|${a.is_receh ? "1" : "0"}|${a.bb_produk}|${a.cluster}|${a.lorong}`;
+      const keyB = `${b.fefo_status}|${b.is_receh ? "1" : "0"}|${b.bb_produk}|${b.cluster}|${b.lorong}`;
+      const aggA = lorongAggregate.get(keyA) || { totalQty: 0, totalPallets: 0 };
+      const aggB = lorongAggregate.get(keyB) || { totalQty: 0, totalPallets: 0 };
+
+      // Anti-somplak: dalam FEFO+BB yang sama, habiskan lorong yang total stoknya lebih sedikit dulu
+      if (aggA.totalQty !== aggB.totalQty) return aggA.totalQty - aggB.totalQty;
+      if (aggA.totalPallets !== aggB.totalPallets) return aggA.totalPallets - aggB.totalPallets;
+
+      const barisKeyA = `${a.fefo_status}|${a.is_receh ? "1" : "0"}|${a.bb_produk}|${a.cluster}|${a.lorong}|${a.baris}`;
+      const barisKeyB = `${b.fefo_status}|${b.is_receh ? "1" : "0"}|${b.bb_produk}|${b.cluster}|${b.lorong}|${b.baris}`;
+      const barisAggA = barisAggregate.get(barisKeyA) || { totalQty: 0, totalPallets: 0 };
+      const barisAggB = barisAggregate.get(barisKeyB) || { totalQty: 0, totalPallets: 0 };
+
+      // Setelah pilih lorong, habiskan per-baris dulu agar tidak bolong antar baris
+      if (barisAggA.totalQty !== barisAggB.totalQty) return barisAggA.totalQty - barisAggB.totalQty;
+      if (barisAggA.totalPallets !== barisAggB.totalPallets) return barisAggA.totalPallets - barisAggB.totalPallets;
+
+      if (a.cluster !== b.cluster) return String(a.cluster).localeCompare(String(b.cluster));
+      if (a.lorong !== b.lorong) return Number(a.lorong) - Number(b.lorong);
+      if (a.baris !== b.baris) return Number(a.baris) - Number(b.baris);
+      if (a.level !== b.level) return Number(a.level) - Number(b.level);
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
 
     let remainingNeeded = totalCartonsNeeded;
     const allocation = [];
@@ -48,7 +94,7 @@ export async function getFEFOAllocationAction(
     // Deteksi FEFO Violation: Cek apakah ada pallet RELEASE yang tersedia
     const hasReleasePallet = stocks.some(s => s.fefo_status === 'release');
 
-    for (const stock of stocks) {
+    for (const stock of sortedStocks) {
       if (remainingNeeded <= 0) break;
 
       const takeQty = Math.min(stock.qty_carton, remainingNeeded);
@@ -163,6 +209,7 @@ export async function submitOutboundAction(formData: any, allocation: any[]) {
         vehicle_number: formData.nomorPolisi,
         processed_by: user.id,
         departure_time: departureTime, // Gunakan waktu lokal
+        created_at: departureTime,
       })
       .select()
       .single();

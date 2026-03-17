@@ -14,11 +14,13 @@ interface User {
   fullName: string;
   email: string;
   phone?: string;
-  role: "developer" | "admin_cabang" | "admin_warehouse";
+  role: "developer" | "admin_cabang" | "admin_warehouse" | "other_user";
   isActive: boolean;
   warehouseId?: string | null;
   warehouseName?: string;
 }
+
+type ManagedRole = "developer" | "admin_cabang" | "admin_warehouse" | "other_user";
 
 interface UserProfile {
   id: string;
@@ -66,7 +68,7 @@ export default function AdminManagementClient({
     email: "",
     phone: "",
     password: "",
-    role: "admin_warehouse" as "developer" | "admin_cabang" | "admin_warehouse",
+    role: "admin_warehouse" as ManagedRole,
     warehouseId: userProfile.warehouse_id || "",
   });
 
@@ -129,7 +131,7 @@ export default function AdminManagementClient({
         isOpen: true,
         type: "error",
         title: "Validasi Gagal",
-        message: "Warehouse harus dipilih untuk role Admin Cabang dan Admin Warehouse!",
+        message: "Warehouse harus dipilih untuk role non-developer!",
         onConfirm: () => {},
       });
       return;
@@ -241,6 +243,8 @@ export default function AdminManagementClient({
         return "Admin Cabang";
       case "admin_warehouse":
         return "Admin Warehouse";
+      case "other_user":
+        return "Other User";
       default:
         return role;
     }
@@ -250,21 +254,34 @@ export default function AdminManagementClient({
   const canModify = (targetUser: User) => {
     if (userProfile.role === "developer") return true;
     if (userProfile.role === "admin_cabang") {
-      return targetUser.role === "admin_warehouse";
+      return targetUser.role === "admin_warehouse" || targetUser.role === "other_user";
     }
     return false;
   };
 
+  const availableRoleOptions: Array<{ value: ManagedRole; label: string }> =
+    userProfile.role === "developer"
+      ? [
+          { value: "admin_warehouse", label: "Admin Warehouse" },
+          { value: "other_user", label: "Other User" },
+          { value: "admin_cabang", label: "Admin Cabang" },
+          { value: "developer", label: "Developer" },
+        ]
+      : [
+          { value: "admin_warehouse", label: "Admin Warehouse" },
+          { value: "other_user", label: "Other User" },
+        ];
+
   return (
     <>
       <Navigation userProfile={userProfile} />
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 lg:pl-8 p-4 sm:p-6">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-100 lg:pl-8 p-4 sm:p-6">
         <div className="w-full max-w-full space-y-3 sm:space-y-4">
           {/* Header */}
           <div className="bg-white rounded-2xl shadow-xl p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white text-xl">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-linear-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white text-xl">
                   👥
                 </div>
                 <div>
@@ -283,7 +300,7 @@ export default function AdminManagementClient({
                   resetForm();
                   setShowAddModal(true);
                 }}
-                className="w-full sm:w-auto px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold shadow-lg"
+                className="w-full sm:w-auto px-4 sm:px-6 py-2.5 sm:py-3 bg-linear-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold shadow-lg"
               >
                 + Tambah {userProfile.role === "developer" ? "User" : "Admin"}
               </button>
@@ -294,7 +311,7 @@ export default function AdminManagementClient({
           <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white">
+                <thead className="bg-linear-to-r from-blue-500 to-indigo-600 text-white">
                   <tr>
                     <th className="px-4 py-3 text-left text-sm font-bold">
                       Username
@@ -403,7 +420,7 @@ export default function AdminManagementClient({
               className="bg-white rounded-2xl shadow-2xl max-w-md w-full my-8 max-h-[90vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-4 sm:p-6 text-white rounded-t-2xl flex-shrink-0">
+              <div className="bg-linear-to-r from-blue-500 to-indigo-600 p-4 sm:p-6 text-white rounded-t-2xl shrink-0">
                 <div className="flex items-center justify-between">
                   <h2 className="text-xl sm:text-2xl font-bold">
                     {showEditModal ? "Edit" : "Tambah"} User
@@ -508,7 +525,7 @@ export default function AdminManagementClient({
                     </button>
                   </div>
                 </div>
-                {userProfile.role === "developer" && (
+                {(userProfile.role === "developer" || userProfile.role === "admin_cabang") && (
                   <div>
                     <label className="text-xs font-bold text-gray-500 mb-1 block">
                       ROLE
@@ -519,14 +536,16 @@ export default function AdminManagementClient({
                       onChange={(e) =>
                         setFormData({
                           ...formData,
-                          role: e.target.value as any,
+                          role: e.target.value as ManagedRole,
                         })
                       }
                       className="w-full px-4 py-2 border rounded-xl text-sm bg-white"
                     >
-                      <option value="admin_warehouse">Admin Warehouse</option>
-                      <option value="admin_cabang">Admin Cabang</option>
-                      <option value="developer">Developer</option>
+                      {availableRoleOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}

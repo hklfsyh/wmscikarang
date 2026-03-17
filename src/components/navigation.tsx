@@ -42,8 +42,8 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
 
   const menuItems = [
     { label: "Management Warehouse", path: "/warehouse-management", roles: ["developer"] },
-    { label: "Warehouse Layout", path: "/warehouse-layout", roles: ["admin_cabang", "admin_warehouse"] },
-    { label: "Stock List", path: "/stock-list", roles: ["admin_cabang"] }, // Hanya admin cabang
+    { label: "Warehouse Layout", path: "/warehouse-layout", roles: ["admin_cabang", "admin_warehouse", "other_user"] },
+    { label: "Stock List", path: "/stock-list", roles: ["admin_cabang", "other_user"] },
     { label: "Pre-Stock Opname", path: "/stock-opname", roles: ["admin_warehouse"] },
   ];
 
@@ -114,7 +114,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
   const NavContent = useMemo(() => (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Logo & Jam */}
-      <div className="flex-shrink-0 p-4 border-b border-slate-700">
+      <div className="shrink-0 p-4 border-b border-slate-700">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-white text-xl">📦</div>
           <div>
@@ -319,7 +319,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
       </div>
 
       {/* Profile & Logout */}
-      <div className="flex-shrink-0 p-4 border-t border-slate-700 bg-slate-900/50">
+      <div className="shrink-0 p-4 border-t border-slate-700 bg-slate-900/50">
         <div className="mb-4 px-2">
           <p className="text-sm font-bold text-white truncate">{userProfile.full_name}</p>
           <p className="text-xs text-slate-400">@{userProfile.username}</p>
@@ -346,7 +346,7 @@ export function Navigation({ userProfile }: { userProfile: UserProfile }) {
       {/* Mobile Toggle Button */}
       <button
         onClick={handleMobileMenuToggle}
-        className="fixed top-4 left-4 z-[60] lg:hidden p-2.5 bg-blue-600 text-white rounded-xl shadow-lg hover:bg-blue-700 transition-all active:scale-90"
+        className="fixed top-4 left-4 z-60 lg:hidden p-2.5 bg-blue-600 text-white rounded-xl shadow-lg hover:bg-blue-700 transition-all active:scale-90"
       >
         {mobileMenuOpen ? <span className="text-xl">✕</span> : <span className="text-xl">☰</span>}
       </button>

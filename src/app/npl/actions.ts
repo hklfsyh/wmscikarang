@@ -30,6 +30,7 @@ export async function getCurrentStockAction(warehouseId: string) {
 
 export async function submitNplAction(formData: any, placements: any[]) {
   const supabase = await createClient();
+  const resolvedProcessType = formData.processType || "Penerimaan Primary";
 
   try {
     const {
@@ -86,6 +87,7 @@ export async function submitNplAction(formData: any, placements: any[]) {
         vehicle_number: formData.vehicleNumber,
         returned_by: user.id,
         return_time: getIndonesianDateTime(),
+        process_type: resolvedProcessType,
         notes: formData.notes,
       })
       .select()
@@ -131,6 +133,7 @@ export async function submitNplAction(formData: any, placements: any[]) {
           .update({
             qty_carton: newQty,
             updated_at: getIndonesianDateTime(),
+            process_type: existingStock.process_type || resolvedProcessType,
             // Update status jika qty sudah tidak receh lagi
             status: newQty >= RECEH_THRESHOLD ? "normal" : "receh",
             is_receh: newQty < RECEH_THRESHOLD,
@@ -160,6 +163,7 @@ export async function submitNplAction(formData: any, placements: any[]) {
           status: physicalStatus,
           fefo_status: "hold",  // Selalu 'hold' awal, biarkan trigger database menentukan
           is_receh: loc.isReceh,
+          process_type: resolvedProcessType,
           created_by: user.id,
         };
 

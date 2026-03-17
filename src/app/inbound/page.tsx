@@ -104,6 +104,7 @@ export default async function InboundPage() {
     expiredDate: item.expired_date,
     qtyCarton: item.qty_carton,
     receivedBy: item.received_by,
+    processType: item.process_type || "Penerimaan Primary",
     notes: item.notes,
     locations: item.locations, // JSONB sudah otomatis jadi array of objects
     source: "inbound" // Tag untuk membedakan sumber
@@ -123,6 +124,7 @@ export default async function InboundPage() {
     expiredDate: item.expired_date,
     qtyCarton: item.qty_carton,
     receivedBy: item.returned_by, // returned_by = received_by
+    processType: item.process_type || "Penerimaan Primary",
     notes: item.notes || "NPL (Nota Pengembalian Lapangan)",
     locations: item.locations,
     source: "npl" // Tag untuk membedakan sumber

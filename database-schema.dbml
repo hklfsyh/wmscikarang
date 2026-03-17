@@ -142,14 +142,14 @@ Table expeditions {
 //                           2. USER MANAGEMENT
 // ================================================================================
 
-// Tabel Users dengan 3 Role
+// Tabel Users dengan 4 Role
 Table users {
   id uuid [primary key, default: `gen_random_uuid()`]
   warehouse_id uuid [note: 'NULL hanya untuk role developer']
   username varchar(50) [unique, not null]
   password_hash varchar(255) [not null]
   full_name varchar(100) [not null]
-  role varchar(20) [not null, note: 'developer, admin_cabang, admin_warehouse']
+  role varchar(20) [not null, note: 'developer, admin_cabang, admin_warehouse, other_user']
   email varchar(100)
   phone varchar(20)
   is_active boolean [default: true]
@@ -160,13 +160,15 @@ Table users {
   Note: '''
   ROLE HIERARCHY:
   - developer: warehouse_id = NULL, akses semua gudang, CRUD semua user, maintenance
-  - admin_cabang: warehouse_id = X, kelola master data gudang X, rekonsel, CRUD admin_warehouse di X
+  - admin_cabang: warehouse_id = X, kelola master data gudang X, rekonsel, CRUD admin_warehouse + other_user di X
   - admin_warehouse: warehouse_id = X, operasional (inbound, outbound, input stock opname)
+  - other_user: warehouse_id = X, read-only warehouse layout & stock list (monitor display)
   
   CRUD:
-  - developer → Bisa CRUD semua user (developer, admin_cabang, admin_warehouse)
-  - admin_cabang → Hanya bisa CRUD admin_warehouse di warehouse sendiri
+  - developer → Bisa CRUD semua user (developer, admin_cabang, admin_warehouse, other_user)
+  - admin_cabang → Hanya bisa CRUD admin_warehouse & other_user di warehouse sendiri
   - admin_warehouse → Tidak bisa CRUD user
+  - other_user → Tidak bisa CRUD user
   
   Tampil di: Manajemen Admin (untuk admin_cabang & developer)
   '''
@@ -293,6 +295,7 @@ Table stock_list {
   expired_date date [not null]
   inbound_date date [default: `now()`]
   status varchar(20) [default: 'release', note: 'release, hold, receh, salah-cluster']
+  process_type varchar(40) [note: 'Jenis proses stok: fallback baca NULL => Penerimaan Primary']
   
   // Receh tracking
   is_receh boolean [default: false]
@@ -346,6 +349,7 @@ Table inbound_history {
   // Metadata
   received_by uuid [not null]
   arrival_time timestamp [default: `now()`]
+  process_type varchar(40) [note: 'Jenis proses inbound, inbound form default: Penerimaan Primary']
   notes text
   
   created_at timestamp [default: `now()`]
@@ -463,6 +467,7 @@ Table npl_history {
   // Metadata
   returned_by uuid [not null, note: 'admin_warehouse yang input NPL']
   return_time timestamp [default: `now()`]
+  process_type varchar(40) [note: 'Jenis proses NPL dari dropdown form']
   notes text
   
   created_at timestamp [default: `now()`]

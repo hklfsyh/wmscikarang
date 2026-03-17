@@ -29,6 +29,17 @@ export function OutboundHistoryPage({
 
   // Filter data
   const filteredData = useMemo(() => {
+    const parseFilterDate = (value: string, isEndOfDay: boolean) => {
+      const [year, month, day] = value.split("-").map(Number);
+      if (!year || !month || !day) return null;
+      return isEndOfDay
+        ? new Date(year, month - 1, day, 23, 59, 59, 999)
+        : new Date(year, month - 1, day, 0, 0, 0, 0);
+    };
+
+    const startBoundary = startDate ? parseFilterDate(startDate, false) : null;
+    const endBoundary = endDate ? parseFilterDate(endDate, true) : null;
+
     return history.filter((item) => {
       // Get product data for search
       const product = products.find((p) => p.id === item.product_id);
@@ -52,10 +63,10 @@ export function OutboundHistoryPage({
               .includes(searchLower)
           ));
 
-      // Date filter
-      const itemDate = new Date(item.created_at);
-      const matchesStartDate = !startDate || itemDate >= new Date(startDate);
-      const matchesEndDate = !endDate || itemDate <= new Date(endDate);
+      // Date filter - gunakan waktu kejadian outbound (departure_time), bukan created_at
+      const itemDate = new Date(item.departure_time || item.created_at);
+      const matchesStartDate = !startBoundary || itemDate >= startBoundary;
+      const matchesEndDate = !endBoundary || itemDate <= endBoundary;
 
       // Status filter - all items are completed in new schema
       const matchesStatus =
@@ -147,7 +158,7 @@ export function OutboundHistoryPage({
         exportData.push({
           No: rowNum++,
           "Kode Transaksi": item.transaction_code,
-          Tanggal: formatDate(item.created_at),
+          Tanggal: formatDate(item.departure_time || item.created_at),
           Pengemudi: item.driver_name,
           "Dikeluarkan Oleh": processedByUser?.full_name || item.processed_by || "-",
           "No. Polisi": item.vehicle_number,

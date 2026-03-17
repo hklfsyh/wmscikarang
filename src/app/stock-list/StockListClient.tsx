@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback, useDeferredValue } from "react";
 import { Navigation } from "@/components/navigation";
 import { deleteStockItems } from "./actions";
 import { fixStockStatus } from "./fix-status-action";
 import { useToast, ToastContainer } from "@/components/toast";
+import * as XLSX from "xlsx";
 
 // Interface sesuai data dari database
 interface StockItem {
@@ -81,7 +82,7 @@ export default function StockListClient({
   const { toasts, showToast, removeToast } = useToast();
   
   // Helper function: Check if stock is in wrong cluster/location based on product_homes
-  const isStockInWrongLocation = (item: StockItem): boolean => {
+  const isStockInWrongLocation = useCallback((item: StockItem): boolean => {
     // Priority 1: Check if there's a product_homes rule for this product
     // IMPORTANT: Product can have MULTIPLE homes, check if location matches ANY of them
     const productHomesForProduct = productHomes.filter((h) => h.product_id === item.productId);
@@ -116,9 +117,10 @@ export default function StockListClient({
     }
     
     return false; // Location is correct
-  };
+  }, [productHomes]);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [filterCluster, setFilterCluster] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterFefoStatus, setFilterFefoStatus] = useState("all");
@@ -145,8 +147,8 @@ export default function StockListClient({
     let filtered = [...initialStock];
 
     // Search
-    if (searchTerm) {
-      const search = searchTerm.toLowerCase();
+    if (deferredSearchTerm) {
+      const search = deferredSearchTerm.toLowerCase();
       filtered = filtered.filter((item) => {
           const productName = item.productName || '';
         const productCode = item.productCode || '';
@@ -208,7 +210,17 @@ export default function StockListClient({
     });
 
     return filtered;
-  }, [initialStock, searchTerm, filterCluster, filterStatus, filterFefoStatus, filterProduct, sortBy, sortOrder]);
+  }, [initialStock, deferredSearchTerm, filterCluster, filterStatus, filterFefoStatus, filterProduct, sortBy, sortOrder]);
+
+  const isAnyFilterActive = useMemo(() => {
+    return (
+      searchTerm.trim() !== "" ||
+      filterProduct !== "all" ||
+      filterCluster !== "all" ||
+      filterStatus !== "all" ||
+      filterFefoStatus !== "all"
+    );
+  }, [searchTerm, filterProduct, filterCluster, filterStatus, filterFefoStatus]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -247,7 +259,7 @@ export default function StockListClient({
     }).length;
 
     return { totalItems, totalExpired, totalHold, totalRelease, totalReceh, totalSalahCluster, totalQtyCarton, expiringSoon };
-  }, [filteredAndSortedData]);
+  }, [filteredAndSortedData, isStockInWrongLocation]);
 
   // Status Badge - PRIORITAS: product-hold > salah-cluster > receh > expired > release/hold-fefo
   const getStatusBadge = (item: StockItem) => {
@@ -403,6 +415,7 @@ export default function StockListClient({
 
   // Checkbox selection handlers - only for admin_cabang
   const isAdminCabang = userProfile?.role === "admin_cabang";
+  const canExportStockList = userProfile?.role === "admin_cabang" || userProfile?.role === "other_user";
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -450,6 +463,70 @@ export default function StockListClient({
     } finally {
       setIsDeleting(false);
     }
+  };
+
+  const getExportStatus = (item: StockItem) => {
+    if (item.isHold) return "PRODUCT HOLD";
+    if (isStockInWrongLocation(item)) return "SALAH CLUSTER";
+    if (item.status === "receh" || item.isReceh) return "RECEH";
+    if (item.status === "expired") return "EXPIRED";
+    if (item.fefoStatus === "release") return "RELEASE";
+    if (item.fefoStatus === "hold") return "HOLD FEFO";
+    return "NORMAL";
+  };
+
+  const handleExportExcel = () => {
+    const exportRows = filteredAndSortedData.map((item, index) => ({
+      No: index + 1,
+      "Nama Produk": item.productName || "-",
+      "Kode Produk": item.productCode || "-",
+      "BB Produk": item.bbProduk,
+      Lokasi: `${item.cluster}-L${item.lorong}-B${item.baris}-${item.level}`,
+      Cluster: item.cluster,
+      Lorong: item.lorong,
+      Baris: item.baris,
+      Level: item.level,
+      "Qty Pallet": item.qtyPallet,
+      "Qty Carton": item.qtyCarton,
+      "Inbound Date": formatDate(item.inboundDate),
+      "Expired Date": formatDate(item.expiredDate),
+      "Status Kondisi": getExportStatus(item),
+      "Status FEFO": item.fefoStatus === "release" ? "RELEASE" : "HOLD",
+      "Product Hold": item.isHold ? "YA" : "TIDAK",
+      "Alasan Hold": item.holdReason || "-",
+      "Receh": item.isReceh ? "YA" : "TIDAK",
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 30 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 18 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 20 },
+      { wch: 10 },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Stock List");
+
+    const timestamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
+    const filename = `Stock_List_${timestamp}.xlsx`;
+    XLSX.writeFile(wb, filename);
+
+    showToast(`✓ Export berhasil: ${filteredAndSortedData.length} data`, "success");
   };
 
   // Reset selection when page changes
@@ -511,26 +588,31 @@ export default function StockListClient({
           </div>
 
           {/* Filters & Search */}
-          <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 mb-3">
-            <div className="grid grid-cols-2 lg:grid-cols-6 gap-2 sm:gap-3">
-              {/* Search */}
-              <div className="col-span-2">
+          <section
+            aria-labelledby="stock-filter-heading"
+            className="bg-white rounded-xl shadow-lg p-3 sm:p-4 mb-3"
+          >
+            <h2 id="stock-filter-heading" className="sr-only">Filter dan aksi stock list</h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 sm:gap-3">
+              <div className="sm:col-span-2 lg:col-span-4">
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">Search</label>
                 <input
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Cari produk, batch, lokasi..."
+                  aria-label="Cari produk, batch, lokasi"
                   className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
                 />
               </div>
 
-              {/* Filter Product */}
-              <div>
+              <div className="lg:col-span-2">
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">Produk</label>
                 <select
                   value={filterProduct}
                   onChange={(e) => setFilterProduct(e.target.value)}
+                  aria-label="Filter produk"
                   className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
                 >
                   <option value="all">Semua Produk</option>
@@ -540,12 +622,12 @@ export default function StockListClient({
                 </select>
               </div>
 
-              {/* Filter Cluster */}
-              <div>
+              <div className="lg:col-span-2">
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">Cluster</label>
                 <select
                   value={filterCluster}
                   onChange={(e) => setFilterCluster(e.target.value)}
+                  aria-label="Filter cluster"
                   className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
                 >
                   <option value="all">Semua</option>
@@ -557,12 +639,12 @@ export default function StockListClient({
                 </select>
               </div>
 
-              {/* Filter Status Kondisi */}
-              <div>
+              <div className="lg:col-span-2">
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">Status Kondisi</label>
                 <select
                   value={filterStatus}
                   onChange={(e) => setFilterStatus(e.target.value)}
+                  aria-label="Filter status kondisi"
                   className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
                 >
                   <option value="all">Semua</option>
@@ -573,12 +655,12 @@ export default function StockListClient({
                 </select>
               </div>
 
-              {/* Filter FEFO Status */}
-              <div>
+              <div className="lg:col-span-2">
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">Status FEFO</label>
                 <select
                   value={filterFefoStatus}
                   onChange={(e) => setFilterFefoStatus(e.target.value)}
+                  aria-label="Filter status FEFO"
                   className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
                 >
                   <option value="all">Semua</option>
@@ -587,13 +669,13 @@ export default function StockListClient({
                 </select>
               </div>
 
-              {/* Sort */}
-              <div>
+              <div className="sm:col-span-2 lg:col-span-4">
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1">Sort By</label>
                 <div className="flex gap-1">
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value as "expiredDate" | "inboundDate" | "productName")}
+                    aria-label="Urutkan data stock"
                     className="flex-1 min-w-0 px-2 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
                   >
                     <option value="expiredDate">Expired</option>
@@ -602,6 +684,7 @@ export default function StockListClient({
                   </select>
                   <button
                     onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+                    aria-label="Ubah arah urutan"
                     className="px-2 py-1.5 sm:py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 shrink-0"
                   >
                     {sortOrder === "asc" ? "↑" : "↓"}
@@ -610,18 +693,45 @@ export default function StockListClient({
               </div>
             </div>
 
-            {/* Result Count */}
-            <div className="mt-2 text-[10px] sm:text-xs text-gray-600">
-              Menampilkan <span className="font-bold text-gray-800">{startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)}</span> dari{" "}
-              <span className="font-bold text-gray-800">{filteredAndSortedData.length}</span> item
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] sm:text-xs text-gray-600">
+              <p>
+                Menampilkan <span className="font-bold text-gray-800">{startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)}</span> dari{" "}
+                <span className="font-bold text-gray-800">{filteredAndSortedData.length}</span> item
+              </p>
+              {searchTerm !== deferredSearchTerm && (
+                <span className="text-blue-600 font-medium">Memproses pencarian...</span>
+              )}
             </div>
 
-            {/* Action Buttons Row */}
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              {/* Delete Button - Only for admin-cabang */}
+              {canExportStockList && (
+                <button
+                  onClick={handleExportExcel}
+                  disabled={filteredAndSortedData.length === 0}
+                  className="px-3 py-1.5 bg-green-600 text-white text-xs sm:text-sm font-semibold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  📥 Export Excel
+                </button>
+              )}
+
+              {isAnyFilterActive && (
+                <button
+                  onClick={() => {
+                    setSearchTerm("");
+                    setFilterProduct("all");
+                    setFilterCluster("all");
+                    setFilterStatus("all");
+                    setFilterFefoStatus("all");
+                  }}
+                  className="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs sm:text-sm font-semibold rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  Reset Filter
+                </button>
+              )}
+
               {isAdminCabang && selectedStockIds.length > 0 && (
                 <>
-                  <div className="flex-1 px-2 py-1.5 bg-red-50 border border-red-200 rounded-lg">
+                  <div className="flex-1 min-w-[180px] px-2 py-1.5 bg-red-50 border border-red-200 rounded-lg">
                     <span className="text-xs sm:text-sm text-red-700 font-semibold">
                       {selectedStockIds.length} item terpilih
                     </span>
@@ -636,7 +746,7 @@ export default function StockListClient({
                 </>
               )}
             </div>
-          </div>
+          </section>
 
           {/* Stock Table */}
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">

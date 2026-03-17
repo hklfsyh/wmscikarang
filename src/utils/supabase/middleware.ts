@@ -52,5 +52,41 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  if (user) {
+    const pathname = request.nextUrl.pathname
+
+    if (!pathname.startsWith('/auth')) {
+      let role: string | null = null
+
+      const { data: profiles } = await supabase.rpc('get_current_user_profile')
+      if (profiles && profiles.length > 0) {
+        role = profiles[0]?.role || null
+      }
+
+      if (!role) {
+        const { data: fallbackProfile } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', user.id)
+          .single()
+        role = fallbackProfile?.role || null
+      }
+
+      if (role === 'other_user') {
+        const isAllowedPath =
+          pathname === '/' ||
+          pathname.startsWith('/warehouse-layout') ||
+          pathname.startsWith('/stock-list') ||
+          pathname.startsWith('/api')
+
+        if (!isAllowedPath) {
+          const url = request.nextUrl.clone()
+          url.pathname = '/warehouse-layout'
+          return NextResponse.redirect(url)
+        }
+      }
+    }
+  }
+
   return supabaseResponse
 }

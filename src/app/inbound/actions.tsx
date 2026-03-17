@@ -100,6 +100,7 @@ export async function getCurrentStockAction(warehouseId: string) {
 export async function submitInboundAction(formData: any, submissions: any[]) {
   const supabase = await createClient(); // For auth
   const supabaseService = await createServiceClient(); // For insert operations
+  const inboundProcessType = "Penerimaan Primary";
 
   try {
     // 1. Ambil User untuk audit log
@@ -199,6 +200,7 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
     const sequence = String((count || 0) + 1).padStart(4, "0");
     const microseconds = String(Date.now() % 1000000).padStart(6, "0"); // Add microseconds
     const transactionCode = `INB-${todayStr}-${sequence}-${microseconds}`;
+    const eventTime = getIndonesianDateTime();
 
     // 4. INSERT KE INBOUND_HISTORY - Using Service Role
     const { data: inboundEntry, error: errHistory } = await supabaseService
@@ -226,7 +228,9 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
         vehicle_number: formData.nomorPolisi,
         dn_number: formData.noDN,
         received_by: user.id,
-        arrival_time: getIndonesianDateTime(),
+        arrival_time: eventTime,
+        process_type: inboundProcessType,
+        created_at: eventTime,
       })
       .select()
       .single();
@@ -311,6 +315,7 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
             .update({
               qty_carton: newQty,
               updated_at: getIndonesianDateTime(),
+              process_type: existingStock.process_type || inboundProcessType,
             })
             .eq("id", existingStock.id)
             .select()
@@ -382,6 +387,7 @@ export async function submitInboundAction(formData: any, submissions: any[]) {
               status: sub.isReceh ? "receh" : "normal",
               is_receh: sub.isReceh ? true : false,
               fefo_status: initialFEFOStatus,
+              process_type: inboundProcessType,
             })
             .select()
             .single();
@@ -766,6 +772,10 @@ export async function getSmartRecommendationAction(
       }
       
       return isSameProduct && isReceh && isSameBB && hasCapacity;
+    }).sort((a, b) => {
+      if (a.lorong !== b.lorong) return a.lorong - b.lorong;
+      if (a.baris !== b.baris) return b.baris - a.baris;
+      return a.level - b.level;
     });
 
     console.log(`✅ Found ${recehLocationsForProduct.length} RECEH locations for product ${product.id} (BB: ${bbProduk || 'any'}, capacity check: ${totalQtyCarton ? 'yes' : 'no'})`);

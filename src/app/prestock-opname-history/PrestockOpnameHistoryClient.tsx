@@ -187,7 +187,8 @@ export default function PrestockOpnameHistoryClient({ initialHistory, userProfil
   
   // State
   const [searchQuery, setSearchQuery] = useState("");
-  const [dateFilter, setDateFilter] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "pending" | "reconciled">("ALL");
   
   // Modal state
@@ -207,8 +208,12 @@ export default function PrestockOpnameHistoryClient({ initialHistory, userProfil
         return false;
       }
 
-      // Date filter
-      if (dateFilter && audit.audit_date !== dateFilter) {
+      // Date range filter
+      if (startDate && audit.audit_date < startDate) {
+        return false;
+      }
+
+      if (endDate && audit.audit_date > endDate) {
         return false;
       }
 
@@ -223,7 +228,7 @@ export default function PrestockOpnameHistoryClient({ initialHistory, userProfil
 
       return true;
     });
-  }, [initialHistory, statusFilter, dateFilter, searchQuery]);
+  }, [initialHistory, statusFilter, startDate, endDate, searchQuery]);
 
   // Format tanggal Indonesia
   const formatDate = (dateStr: string) => {
@@ -478,7 +483,7 @@ export default function PrestockOpnameHistoryClient({ initialHistory, userProfil
 
       {/* Filters */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-6">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           {/* Search */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -494,16 +499,30 @@ export default function PrestockOpnameHistoryClient({ initialHistory, userProfil
             />
           </div>
 
-          {/* Date Filter */}
+          {/* Start Date Filter */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
               <Calendar className="inline w-4 h-4 mr-1" />
-              Filter Tanggal
+              Dari
             </label>
             <input
               type="date"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+            />
+          </div>
+
+          {/* End Date Filter */}
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              <Calendar className="inline w-4 h-4 mr-1" />
+              Sampai
+            </label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
               className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
             />
           </div>
@@ -526,12 +545,13 @@ export default function PrestockOpnameHistoryClient({ initialHistory, userProfil
         </div>
 
         {/* Reset Filter */}
-        {(searchQuery || dateFilter || statusFilter !== "ALL") && (
+        {(searchQuery || startDate || endDate || statusFilter !== "ALL") && (
           <div className="mt-4">
             <button
               onClick={() => {
                 setSearchQuery("");
-                setDateFilter("");
+                setStartDate("");
+                setEndDate("");
                 setStatusFilter("ALL");
               }}
               className="rounded-lg border-2 border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all"

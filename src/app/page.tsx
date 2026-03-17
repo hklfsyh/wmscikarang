@@ -33,6 +33,8 @@ export default async function Page() {
     redirect("/stock-list");
   } else if (profile?.role === "admin_warehouse") {
     redirect("/warehouse-layout");
+  } else if (profile?.role === "other_user") {
+    redirect("/warehouse-layout");
   } else {
     // Unknown role - redirect to login
     redirect("/login");

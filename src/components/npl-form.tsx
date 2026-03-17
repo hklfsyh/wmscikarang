@@ -6,10 +6,20 @@
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { submitNplAction, getCurrentStockAction } from "@/app/npl/actions";
+import { getSmartRecommendationAction } from "@/app/inbound/actions";
 import { CheckCircle, XCircle, RotateCcw, Package, Truck } from "lucide-react";
 
 // --- CONSTANTS ---
 const RECEH_THRESHOLD = 5;
+const PROCESS_TYPE_OPTIONS = [
+  "Penerimaan Primary",
+  "Penerimaan Secondary",
+  "Penerimaan Retur",
+  "Mutasi Produk",
+  "Pemusnahan",
+  "Pengeluaran Primary",
+  "Pengeluaran WXH",
+] as const;
 
 // --- INTERFACES ---
 interface RecommendedLocation {
@@ -124,6 +134,7 @@ export function NplForm({
   const [expiredDate, setExpiredDate] = useState("");
   const [qtyPalletInput, setQtyPalletInput] = useState("");
   const [qtyCartonInput, setQtyCartonInput] = useState("");
+  const [processType, setProcessType] = useState<(typeof PROCESS_TYPE_OPTIONS)[number]>("Penerimaan Secondary");
   const [notes, setNotes] = useState("");
 
   // Location state
@@ -175,6 +186,7 @@ export function NplForm({
 
   const success = (message: string) => showNotification("✅ Berhasil", message, "success");
   const error = (message: string) => showNotification("❌ Error", message, "error");
+  const warning = (message: string) => showNotification("⚠️ Perhatian", message, "warning");
 
   // Helper functions untuk dinamis baris dan pallet capacity (HARUS SEBELUM useMemo!)
   const getBarisCountForLorong = (clusterChar: string, lorongNum: number): number => {
@@ -263,7 +275,6 @@ export function NplForm({
     };
   }, [qtyPalletInput, qtyCartonInput, qtyPerPalletStd]);
 
-  const isReceh = remainingCartons > 0;
   const totalPalletsNeeded = shouldAttachReceh ? totalPallets : totalPallets + (remainingCartons > 0 ? 1 : 0);
 
   // Cluster & Location Options
@@ -339,178 +350,6 @@ export function NplForm({
       setKdPlant("");
     }
   }, [bbProduk]);
-
-  // Wrapper function that calls FEFO with real-time stock data
-  const findMultipleRecommendedLocationsRealtime = (clusterChar: string, palletsNeeded: number, realtimeStock: any[]): MultiLocationRecommendation => {
-    return findMultipleRecommendedLocationsWithStock(clusterChar, palletsNeeded, realtimeStock);
-  };
-
-  // Find multiple recommended locations (same logic as inbound)
-  const findMultipleRecommendedLocationsWithStock = (clusterChar: string, palletsNeeded: number, stockData: any[]): MultiLocationRecommendation => {
-    const locations: RecommendedLocation[] = [];
-    let remainingPallets = palletsNeeded;
-
-    const clusterConfig = clusterConfigs.find((c: any) => c.cluster_char === clusterChar);
-    if (!clusterConfig) {
-      return { locations: [], totalPalletsPlaced: 0, needsMultipleLocations: false };
-    }
-
-    // Get ALL product homes for this product in this cluster (can have multiple)
-    const productHomesInCluster = selectedProduct 
-      ? productHomes.filter((h: any) => h.product_id === selectedProduct.id && h.cluster_char === clusterChar)
-      : [];
-
-    // PHASE 1: Iterate through ALL product homes in this cluster
-    if (productHomesInCluster.length > 0) {
-      for (const productHome of productHomesInCluster) {
-        if (remainingPallets === 0) break;
-
-        const lorongStart = productHome.lorong_start;
-        const lorongEnd = productHome.lorong_end;
-
-        for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
-          if (remainingPallets === 0) break;
-          // Skip In Transit area (Cluster C, Lorong 8-11)
-          if (clusterChar === "C" && lorongNum >= 8 && lorongNum <= 11) continue;
-
-          // Get baris count DINAMIS dari override
-          const maxBaris = getBarisCountForLorong(clusterChar, lorongNum);
-          const barisStart = productHome.baris_start;
-          const barisEnd = Math.min(productHome.baris_end, maxBaris);
-
-          for (let barisNum = barisStart; barisNum <= barisEnd; barisNum++) {
-            if (remainingPallets === 0) break;
-
-            // Get pallet capacity DINAMIS dari override
-            const maxPallet = getPalletCapacityForCell(clusterChar, lorongNum, barisNum);
-            const productMaxPallet = productHome.max_pallet_per_location || 999;
-            const effectiveMaxPallet = Math.min(maxPallet, productMaxPallet);
-
-            for (let palletNum = 1; palletNum <= effectiveMaxPallet; palletNum++) {
-              if (remainingPallets === 0) break;
-
-              const lorong = `L${lorongNum}`;
-              const baris = `B${barisNum}`;
-              const level = `P${palletNum}`;
-
-              const locationExists = stockData.some(
-                (item: any) =>
-              item.warehouse_id === warehouseId &&
-              item.cluster === clusterChar &&
-              item.lorong === lorongNum &&
-              item.baris === barisNum &&
-              item.level === palletNum
-          );
-
-          if (!locationExists) {
-            const isLastPallet = remainingPallets === 1;
-            const qtyForThisLocation =
-              isLastPallet && shouldAttachReceh
-                ? qtyPerPalletStd + remainingCartons
-                : isLastPallet && remainingCartons > 0 && !shouldAttachReceh
-                ? remainingCartons
-                : qtyPerPalletStd;
-
-            locations.push({
-              clusterChar,
-              lorong,
-              baris,
-              level,
-              qtyCarton: qtyForThisLocation,
-              isReceh: isLastPallet && remainingCartons > 0,
-            });
-            remainingPallets--;
-          }
-        } // close for palletNum
-        } // close for barisNum
-      } // close for lorongNum
-    } // close for productHome
-  }
-  // CRITICAL FIX: REMOVED DANGEROUS FALLBACK!
-  // Jika produk tidak punya home, jangan coba-coba alokasi lokasi fiktif!
-  // Validasi di validateForm() akan mencegah submit jika no product home.    // PHASE 2: Overflow ke In Transit (dinamis dari cluster_cell_overrides)
-    if (remainingPallets > 0) {
-      // Cari area transit dari clusterCellOverrides dengan is_transit_area = true
-      const transitOverrides = clusterCellOverrides.filter((o: any) => o.is_transit_area === true);
-      
-      for (const transitOverride of transitOverrides) {
-        if (remainingPallets === 0) break;
-
-        // Cari cluster config untuk transit ini
-        const transitConfig = clusterConfigs.find((c: any) => c.id === transitOverride.cluster_config_id);
-        if (!transitConfig) continue;
-
-        const transitCluster = transitConfig.cluster_char;
-        const lorongStart = transitOverride.lorong_start;
-        const lorongEnd = transitOverride.lorong_end;
-
-        for (let lorongNum = lorongStart; lorongNum <= lorongEnd; lorongNum++) {
-          if (remainingPallets === 0) break;
-
-          // Cari baris count untuk lorong ini (bisa custom atau default 9)
-          const barisOverride = clusterCellOverrides.find(
-            (o: any) =>
-              o.cluster_config_id === transitConfig.id &&
-              lorongNum >= o.lorong_start &&
-              lorongNum <= o.lorong_end &&
-              o.custom_baris_count !== null
-          );
-          const maxBaris = barisOverride?.custom_baris_count || 9;
-
-          for (let barisNum = 1; barisNum <= maxBaris; barisNum++) {
-            if (remainingPallets === 0) break;
-
-            // Cari pallet level untuk cell ini (bisa custom atau default 3)
-            const palletOverride = clusterCellOverrides.find(
-              (o: any) =>
-                o.cluster_config_id === transitConfig.id &&
-                lorongNum >= o.lorong_start &&
-                lorongNum <= o.lorong_end &&
-                (o.baris_start === null || (barisNum >= o.baris_start && barisNum <= (o.baris_end || barisNum))) &&
-                o.custom_pallet_level !== null
-            );
-            const maxPallet = palletOverride?.custom_pallet_level || 3;
-
-            for (let palletNum = 1; palletNum <= maxPallet; palletNum++) {
-              if (remainingPallets === 0) break;
-
-              const lorong = `L${lorongNum}`;
-              const baris = `B${barisNum}`;
-              const level = `P${palletNum}`;
-
-              const locationExists = stockData.some(
-                (item: any) =>
-                  item.warehouse_id === warehouseId &&
-                  item.cluster === transitCluster &&
-                  item.lorong === lorongNum &&
-                  item.baris === barisNum &&
-                  item.level === palletNum
-              );
-
-              if (!locationExists) {
-                const isLastPallet = remainingPallets === 1;
-                locations.push({
-                  clusterChar: transitCluster,
-                  lorong,
-                  baris,
-                  level,
-                  qtyCarton: isLastPallet && remainingCartons > 0 ? remainingCartons : qtyPerPalletStd,
-                  isReceh: isLastPallet && remainingCartons > 0,
-                });
-                remainingPallets--;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return {
-      locations,
-      totalPalletsPlaced: palletsNeeded - remainingPallets,
-      needsMultipleLocations: locations.length > 1,
-    };
-  };
 
   // Expand range to individual locations (with real-time stock check)
   const expandRangeToLocations = async () => {
@@ -630,79 +469,52 @@ export function NplForm({
       return;
     }
 
-    // Fetch real-time stock data from database
-    const stockResult = await getCurrentStockAction(warehouseId);
-    if (!stockResult.success || !stockResult.stock) {
-      error("Gagal mengambil data stok terkini: " + (stockResult.error || "Unknown error"));
+    const result = await getSmartRecommendationAction(
+      warehouseId,
+      productCode,
+      totalPalletsNeeded,
+      bbProduk,
+      totalCartons
+    );
+
+    if (!result.success) {
+      error(result.error || "Gagal mendapatkan rekomendasi lokasi.");
+      setMultiLocationRec(null);
       return;
     }
 
-    const realtimeStock: any[] = stockResult.stock;
-    const homeCluster = selectedProduct?.default_cluster || "A";
+    const rawRecommendations = result.locations || [];
+    const recommendations: RecommendedLocation[] = rawRecommendations.map((loc: any, idx: number) => {
+      const isLastLoc = idx === rawRecommendations.length - 1;
+      const qtyForThisLocation =
+        isLastLoc && shouldAttachReceh
+          ? qtyPerPalletStd + remainingCartons
+          : isLastLoc && remainingCartons > 0 && !shouldAttachReceh
+          ? remainingCartons
+          : qtyPerPalletStd;
 
-    // CRITICAL: Only prioritize RECEH if current input HAS remaining cartons (isReceh)
-    let recommendations: RecommendedLocation[] = [];
-    
-    if (isReceh) {
-      // Input is RECEH - prioritize existing RECEH locations for sharing
-      if (selectedProduct) {
-        // Filter RECEH locations: same product, same BB, and has capacity for more
-        const recehLocations = realtimeStock.filter(
-          (s) => 
-            s.product_id === selectedProduct.id && 
-            s.bb_produk === bbProduk &&  // IMPORTANT: Same BB only
-            s.status === "receh" &&
-            (s.qty_carton + totalCartons) <= qtyPerPalletStd  // IMPORTANT: Check capacity
-        );
-        
-        // Add existing RECEH locations first (for sharing)
-        recehLocations.slice(0, totalPalletsNeeded).forEach(receh => {
-          recommendations.push({
-            clusterChar: receh.cluster,
-            lorong: `L${receh.lorong}`,
-            baris: `B${receh.baris}`,
-            level: `P${receh.level}`,
-            qtyCarton: totalCartons, // Qty yang akan ditambahkan
-            isReceh: true,
-          });
-        });
-        
-        // If still need more locations, use FEFO for empty spots
-        const remainingNeeded = totalPalletsNeeded - recommendations.length;
-        if (remainingNeeded > 0) {
-          const multiRec = findMultipleRecommendedLocationsRealtime(
-            homeCluster, 
-            remainingNeeded, 
-            realtimeStock
-          );
-          recommendations = [...recommendations, ...multiRec.locations];
-        }
-        
-        // Show special message for RECEH sharing
-        if (recehLocations.length > 0 && recommendations.length > 0) {
-          const firstReceh = recehLocations[0];
-          const totalAfterMerge = firstReceh.qty_carton + totalCartons;
-          success(
-            `✅ Merekomendasikan RECEH sharing!\n\n` +
-            `Lokasi: ${recommendations[0].clusterChar}-${recommendations[0].lorong}-${recommendations[0].baris}-${recommendations[0].level}\n` +
-            `Qty saat ini: ${firstReceh.qty_carton} carton\n` +
-            `Qty akan ditambah: ${totalCartons} carton\n` +
-            `Total setelah gabung: ${totalAfterMerge} carton (maks: ${qtyPerPalletStd})\n\n` +
-            `Produk dan BB cocok, kapasitas aman!`
-          );
-        } else if (recommendations.length > 0) {
-          success(`✅ Ditemukan ${recommendations.length} lokasi kosong yang sesuai!`);
-        }
-      }
-    } else {
-      // Input is FULL PALLET - skip RECEH, go directly to empty locations
-      const multiRec = findMultipleRecommendedLocationsRealtime(
-        homeCluster, 
-        totalPalletsNeeded, 
-        realtimeStock
-      );
-      recommendations = multiRec.locations;
-      success(`✅ Ditemukan ${recommendations.length} lokasi kosong yang sesuai!`);
+      return {
+        clusterChar: loc.clusterChar,
+        lorong: loc.lorong,
+        baris: loc.baris,
+        level: loc.level,
+        qtyCarton: qtyForThisLocation,
+        isReceh: isLastLoc && remainingCartons > 0,
+      };
+    });
+
+    const phases = rawRecommendations
+      .map((loc: any) => loc.phase)
+      .filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
+
+    if (phases.includes("receh_sharing")) {
+      success(`✅ Merekomendasikan RECEH sharing (${recommendations.length} lokasi).`);
+    } else if (phases.includes("primary_home")) {
+      success(`✅ Ditemukan ${recommendations.length} lokasi kosong di rumah produk!`);
+    } else if (phases.includes("in_transit")) {
+      warning(`⚠️ Ditemukan ${recommendations.length} lokasi di area transit (rumah penuh).`);
+    } else if (phases.includes("default_cluster_fallback")) {
+      warning(`🔴 Ditemukan ${recommendations.length} lokasi di cluster default (emergency fallback).`);
     }
 
     if (recommendations.length === 0) {
@@ -735,6 +547,7 @@ export function NplForm({
     setExpiredDate("");
     setQtyPalletInput("");
     setQtyCartonInput("");
+    setProcessType("Penerimaan Secondary");
     setNotes("");
     setAutoRecommend(true);
     setMultiLocationRec(null);
@@ -781,6 +594,10 @@ export function NplForm({
     }
     if (totalCartons <= 0) {
       error("Qty karton harus lebih dari 0.");
+      return false;
+    }
+    if (!processType) {
+      error("Tipe proses NPL wajib dipilih.");
       return false;
     }
     if (Number(qtyCartonInput) >= qtyPerPalletStd && qtyPerPalletStd > 0) {
@@ -965,6 +782,7 @@ export function NplForm({
       expiredDate,
       driverName: namaPengemudi,
       vehicleNumber: nomorPolisi,
+      processType,
       notes
     };
 
@@ -1020,6 +838,7 @@ export function NplForm({
         setBbProduk(npl.bb_produk);
         setNamaPengemudi(npl.driver_name);
         setNomorPolisi(npl.vehicle_number);
+        setProcessType(npl.process_type || "Penerimaan Primary");
         setNotes(npl.notes || "");
         
         // Set qty dari total carton
@@ -1283,6 +1102,24 @@ export function NplForm({
                         </div>
                       </div>
                     )}
+
+                    {/* Notes */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">
+                        Tipe Proses NPL <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={processType}
+                        onChange={(e) => setProcessType(e.target.value as (typeof PROCESS_TYPE_OPTIONS)[number])}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-teal-500 focus:ring-2 focus:ring-teal-200 transition-all"
+                      >
+                        {PROCESS_TYPE_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
                     {/* Notes */}
                     <div>

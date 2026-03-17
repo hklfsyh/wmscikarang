@@ -93,6 +93,7 @@ export interface StockListDB {
   created_at: string;
   updated_at: string;
   fefo_status: string;
+  process_type?: string | null;
   // Hold fields
   is_hold: boolean;
   hold_reason: string | null;

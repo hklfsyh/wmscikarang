@@ -52,7 +52,7 @@ export default async function OutboundPage() {
       .from("outbound_history")
       .select("*")
       .eq("warehouse_id", profile.warehouse_id)
-      .order("created_at", { ascending: false });
+      .order("departure_time", { ascending: false });
 
     // Fetch users for "Dikeluarkan Oleh" column in export
     const { data: users } = await supabase
@@ -93,8 +93,8 @@ export default async function OutboundPage() {
     .from("outbound_history")
     .select("*")
     .eq("warehouse_id", profile.warehouse_id)
-    .gte("created_at", todayStart)
-    .order("created_at", { ascending: false });
+    .gte("departure_time", todayStart)
+    .order("departure_time", { ascending: false });
 
   // Map for consistency
   const formattedTodayHistory = (historyToday || []).map((item: any) => ({
